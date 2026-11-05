@@ -1,0 +1,6 @@
+3D blaster meshes by Kenney. Blaster Kit version 2.1, CC0 1.0 Universal.
+https://kenney.nl/assets/blaster-kit
+https://creativecommons.org/publicdomain/zero/1.0/
+Rifle D, shotgun J, sniper E, pistol C and original gradient atlas.
+Dockline modifications: centered, meter-scaled, optimized, recolored, fitted
+and animated for first-person use. See the art-source folder in the source bundle.

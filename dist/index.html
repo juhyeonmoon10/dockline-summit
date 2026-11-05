@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10212c"><title>DOCKLINE · 도크라인</title>
+  <meta name="description" content="서밋 아레나에서 펼치는 2v2·3v3 팀 FPS. 무기를 선택하고 봇 또는 친구와 대전하세요.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23f4cf52'/%3E%3Cpath d='m5 24 7-16h12l2 5-4 9-5 2zm8-5h4l3-6h-4z' fill='%2313222a'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./arena-ui.css">
+</head>
+<body data-scene="lobby">
+  <canvas id="arena" aria-label="도크라인 서밋 아레나" tabindex="-1"></canvas>
+  <div class="veil" aria-hidden="true"></div>
+  <header id="mast">
+    <div class="brand" aria-label="도크라인"><svg viewBox="0 0 48 32" aria-hidden="true"><path d="M0 29 12 3h20l-3 7H17L8 29zm13 0 7-15h10l2-4 4-7h6l4 7-6 12-11 7zm11-7h5l5-4 2-4h-8z"/></svg><span>DOCKLINE</span></div>
+    <div class="top-actions"><button id="soundBtn" class="icon-btn" aria-label="소리 끄기" title="소리 끄기"></button><button id="settingsBtn" class="icon-btn" aria-label="게임 설정" title="게임 설정"></button></div>
+  </header>
+  <main id="home">
+    <div class="home-title">
+      <h1>SUMMIT<span></span></h1>
+      <p>서밋 아레나 <i></i> 팀 섬멸전</p>
+    </div>
+    <div class="game-config"><span class="control-label">팀 규모</span><div class="team-pick" aria-label="팀 규모"><button data-size="2" aria-pressed="true">2 <span>VS</span> 2</button><button data-size="3" aria-pressed="false">3 <span>VS</span> 3</button></div></div>
+    <div class="start-actions"><button class="primary" id="quickMatch" disabled>봇 대전 시작 <span data-icon="play"></span></button><button class="secondary" id="teamBtn" disabled><span data-icon="users"></span> 친구와 대전</button></div>
+    <p id="boot" role="status">경기장 준비 중…</p>
+  </main>
+  <section id="arsenal" aria-labelledby="loadoutTitle">
+    <div class="armory-head"><h2 id="loadoutTitle">주무기 선택</h2><button id="practiceBtn" disabled>사격 연습 <span data-icon="play"></span></button></div>
+    <div class="gun-options" aria-label="주무기">
+      <button data-weapon="rifle" aria-pressed="true"><img src="./assets/loadout-rifle.png" alt=""><span>돌격소총</span></button>
+      <button data-weapon="shotgun" aria-pressed="false"><img src="./assets/loadout-shotgun.png" alt=""><span>산탄총</span></button>
+      <button data-weapon="sniper" aria-pressed="false"><img src="./assets/loadout-sniper.png" alt=""><span>저격소총</span></button>
+    </div>
+    <p id="gunDesc"></p>
+  </section>
+  <footer id="dock"><button id="helpBtn"><span data-icon="keyboard"></span>조작 안내</button><span class="footer-rule"></span><span>3선승 <b>·</b> 라운드당 40초</span></footer>
+  <div id="hud" hidden>
+    <div id="scoreboard"><strong id="blueScore">0</strong><div><small id="roundLabel"></small><b id="clock">0:40</b></div><strong id="redScore">0</strong></div>
+    <div id="living"><span id="blueLive"></span><span id="orangeLive"></span></div>
+    <div id="feed"></div><div id="banner" role="status"></div>
+    <div id="combatDamage" aria-hidden="true"></div><div id="fragConfirm" aria-live="polite"></div>
+    <div id="sight"><i></i><i></i><i></i><i></i></div><div id="hitMark"></div><div id="damage"></div>
+    <div id="health"><small id="hpLabel">체력</small><b id="hp">100</b><div class="hp-line"><i id="hpBar"></i></div></div>
+    <div id="weaponHud"><small id="gun"></small><strong id="ammo">24</strong><span id="rounds"></span></div>
+    <div id="contextHint"></div><div id="spectator" hidden></div><button id="pauseBtn" class="icon-btn" aria-label="경기 메뉴" title="경기 메뉴"></button>
+  </div>
+  <dialog id="panel"><div class="panel-head"><h2 id="panelTitle"></h2><button class="icon-btn" id="closePanel" aria-label="닫기"></button></div><div id="panelBody"></div></dialog>
+  <div id="toast" role="status"></div>
+  <noscript>플레이하려면 Chrome에서 자바스크립트를 켜 주세요.</noscript>
+  <img id="blaster-atlas" src="./assets/blaster-views.webp" alt="" hidden>
+  <script type="module" src="./app.js"></script>
+</body></html>
