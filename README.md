@@ -4,7 +4,9 @@
 
 ## 바로 플레이
 
-저장소 오른쪽 **Deployments → github-pages → View deployment**에서 게임을 엽니다. 돌격소총·산탄총·저격소총 중 하나를 선택한 뒤 **봇 대전 시작**을 누르세요. **사격 연습**에서는 표적에 먼저 쏴 볼 수 있습니다.
+[브라우저에서 도크라인 플레이](https://juhyeonmoon10.github.io/dockline-summit/) · [축제용 LAN 서버 ZIP 다운로드](https://juhyeonmoon10.github.io/dockline-summit/dockline-lan.zip)
+
+돌격소총·산탄총·저격소총 중 하나를 선택한 뒤 **봇 대전 시작**을 누르세요. **사격 연습**에서는 표적에 먼저 쏴 볼 수 있습니다.
 
 | 조작 | 키 |
 | --- | --- |
