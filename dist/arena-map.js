@@ -9,6 +9,11 @@ export const MAP = {
   zone:{x:0,y:2.58,z:0,r:2.24},
   spawns:[start,start.map(p=>({x:-p.x,z:-p.z,yaw:p.yaw+Math.PI}))],
   plates:[{x:1.8,y:1.65,z:13.5},{x:-1.8,y:1.65,z:-13.5}],
+  // Feet of the standing targets, from the near lane to the far terrace.
+  rangeTargets:[
+    {x:1.8,y:0,z:12.25}, {x:-4.3,y:0,z:7},
+    {x:-2.3,y:2.58,z:2}, {x:10.85,y:1.64,z:-.7}
+  ],
   boxes:[
     {x:0,z:0,w:8.1,d:7.2,base:2.25,h:2.58,kind:'summit'},
     ...[-1,1].flatMap(sx=>[-1,1].map(sz=>({x:3.46*sx,z:2.85*sz,w:.8,d:1,h:2.25,kind:'pier'}))),

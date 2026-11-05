@@ -2,6 +2,7 @@ import * as T from './assets/three.module.min.js';
 import { blasterMesh, gunFit } from './blaster.js';
 import { WEAPONS } from './sim.js';
 import { makeYard, sky, Parts, glowMaterial } from './yard-art.js';
+import { dummyBody, dummyStand } from './range-dummy.js';
 
 const PI=Math.PI;
 const clamp=(n,min,max)=>Math.min(max,Math.max(min,n));
@@ -216,6 +217,21 @@ function practicePlate(team) {
   group.add(body.mesh());return group;
 }
 
+function dummyMesh(faces) {
+  const positions=[],colors=[],indices=[],tint=new T.Color();
+  for(const {points,color} of faces){
+    const first=positions.length/3;
+    tint.setHex(color);
+    for(const point of points){positions.push(...point);colors.push(tint.r,tint.g,tint.b);}
+    for(let i=2;i<points.length;i++)indices.push(first,first+i-1,first+i);
+  }
+  const geometry=new T.BufferGeometry();
+  geometry.setAttribute('position',new T.Float32BufferAttribute(positions,3));
+  geometry.setAttribute('color',new T.Float32BufferAttribute(colors,3));
+  geometry.setIndex(indices);geometry.computeVertexNormals();
+  return new T.Mesh(geometry,new T.MeshLambertMaterial({vertexColors:true}));
+}
+
 function lightScene(scene,world=false) {
   scene.add(new T.HemisphereLight(0xe0f0ff,world?0xa0b4bd:0xa0b2c6,world?1.38:1.54));
   const key=new T.DirectionalLight(0xffedca,world?2.05:2.65);key.position.set(-23,31,18);scene.add(key);
@@ -294,6 +310,19 @@ export class ArenaRenderer {
     this.models.set(player.id,a);this.scene.add(group,shadow);
     return a;
   }
+  targetModel(target) {
+    let model=this.plates.get(target.id);
+    if(model)return model;
+    if(target.kind==='dummy'){
+      if(!this.dummyTemplate)this.dummyTemplate=[dummyMesh(dummyStand),dummyMesh(dummyBody)];
+      const [stand,body]=this.dummyTemplate;
+      const face=body.clone();
+      face.material=body.material.clone();
+      model=new T.Group();model.add(stand.clone(),face);model.userData.face=face;
+    }else model=practicePlate(target.team);
+    this.plates.set(target.id,model);this.scene.add(model);
+    return model;
+  }
   burst(x,y,z,color,life,size,vx=0,vy=0,vz=0) {
     const p=this.spark[this.sparkIndex++%this.spark.length];
     p.mesh.position.set(x,y,z);p.mesh.material.color.setHex(color);p.mesh.rotation.set(0,this.sparkIndex*.85,.42);
@@ -311,10 +340,10 @@ export class ArenaRenderer {
       if(e.type==='round')this.marks.clear();
       if(e.type==='hit'&&this.plates.has(e.target))this.plates.get(e.target).userData.hit=.18;
       if(e.type==='kill'&&e.target!==focus?.id){
-        const fallen=game.players.find(p=>p.id===e.target);
+        const fallen=game.players.find(p=>p.id===e.target) || game.targets?.find(v=>v.kind==='dummy'&&v.id===e.target);
         if(fallen)for(let k=0;k<7;k++){
           const angle=(k/7)*PI*2+e.seq*.25,dx=Math.cos(angle),dz=Math.sin(angle);
-          this.burst(fallen.x+dx*.13,fallen.y+(fallen.slide>0?.73:1.08),fallen.z+dz*.13,teamLights[fallen.team],.25+(k%3)*.052,.085+(k%2)*.022,dx*1.8,.65+(k%4)*.50,dz*1.8);
+          this.burst(fallen.x+dx*.13,fallen.y+(fallen.slide>0?.73:1.08),fallen.z+dz*.13,teamLights[fallen.team]??0xffbb47,.25+(k%3)*.052,.085+(k%2)*.022,dx*1.8,.65+(k%4)*.50,dz*1.8);
         }
       }
       if(e.type!=='shot'||!Number.isFinite(e.ex))continue;
@@ -415,14 +444,19 @@ export class ArenaRenderer {
     if(!focus)focus=game.players[0];
     if(!focus){this.lobby(t);return;}
     const first=this.lastFocus!==focus.id;
+    for(const plate of this.plates.values())plate.visible=false;
     for(const target of game.targets||[]) {
-      let plate=this.plates.get(target.id);
-      if(!plate){plate=practicePlate(target.team);this.plates.set(target.id,plate);this.scene.add(plate);}
-      plate.visible=game.phase==='warmup';plate.position.set(target.x,target.y,target.z);
+      const plate=this.targetModel(target);
+      plate.visible=true;plate.position.set(target.x,target.y,target.z);
       plate.userData.hit=Math.max(0,(plate.userData.hit||0)-dt);
-      plate.rotation.set(plate.userData.hit*.56,target.z<0?PI:0,0);
+      if(target.kind==='dummy'){
+        const face=plate.userData.face;
+        face.visible=target.alive;
+        plate.rotation.y=-target.yaw;
+        face.rotation.x=plate.userData.hit*.45;
+        face.material.emissive.setRGB(plate.userData.hit*1.9,plate.userData.hit*.91,plate.userData.hit*.21);
+      }else plate.rotation.set(plate.userData.hit*.56,target.z<0?PI:0,0);
     }
-    if(game.phase!=='warmup')for(const plate of this.plates.values())plate.visible=false;
     const playerView=focus.id===selfId;
     const yaw=playerView && Number.isFinite(view.yaw)?view.yaw:focus.yaw;
     const pitch=playerView && Number.isFinite(view.pitch)?view.pitch:focus.pitch;

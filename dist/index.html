@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#10212c"><title>DOCKLINE · 도크라인</title>
-  <meta name="description" content="서밋 아레나에서 펼치는 2v2·3v3 팀 FPS. 무기를 선택하고 봇 또는 친구와 대전하세요.">
+  <meta name="description" content="서밋 아레나의 더미 사격장에서 조준을 연습하고, 친구와 2v2·3v3 팀전에 참가하세요.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23f4cf52'/%3E%3Cpath d='m5 24 7-16h12l2 5-4 9-5 2zm8-5h4l3-6h-4z' fill='%2313222a'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="./arena-ui.css">
@@ -18,14 +18,14 @@
   <main id="home">
     <div class="home-title">
       <h1>SUMMIT<span></span></h1>
-      <p>서밋 아레나 <i></i> 팀 섬멸전</p>
+      <p>서밋 아레나 <i></i> 사격장 · 팀 섬멸전</p>
     </div>
-    <div class="game-config"><span class="control-label">팀 규모</span><div class="team-pick" aria-label="팀 규모"><button data-size="2" aria-pressed="true">2 <span>VS</span> 2</button><button data-size="3" aria-pressed="false">3 <span>VS</span> 3</button></div></div>
-    <div class="start-actions"><button class="primary" id="quickMatch" disabled>봇 대전 시작 <span data-icon="play"></span></button><button class="secondary" id="teamBtn" disabled><span data-icon="users"></span> 친구와 대전</button></div>
+    <div class="game-config"><span class="control-label">친구 대전 인원</span><div class="team-pick" aria-label="친구 대전 인원"><button data-size="2" aria-pressed="true">2 <span>VS</span> 2</button><button data-size="3" aria-pressed="false">3 <span>VS</span> 3</button></div></div>
+    <div class="start-actions"><button class="primary" id="rangeBtn" disabled>더미 사격장 <span data-icon="play"></span></button><button class="secondary" id="teamBtn" disabled><span data-icon="users"></span> 친구와 대전</button></div>
     <p id="boot" role="status">경기장 준비 중…</p>
   </main>
   <section id="arsenal" aria-labelledby="loadoutTitle">
-    <div class="armory-head"><h2 id="loadoutTitle">주무기 선택</h2><button id="practiceBtn" disabled>사격 연습 <span data-icon="play"></span></button></div>
+    <h2 id="loadoutTitle">주무기 선택</h2>
     <div class="gun-options" aria-label="주무기">
       <button data-weapon="rifle" aria-pressed="true"><img src="./assets/loadout-rifle.png" alt=""><span>돌격소총</span></button>
       <button data-weapon="shotgun" aria-pressed="false"><img src="./assets/loadout-shotgun.png" alt=""><span>산탄총</span></button>
@@ -33,10 +33,14 @@
     </div>
     <p id="gunDesc"></p>
   </section>
-  <footer id="dock"><button id="helpBtn"><span data-icon="keyboard"></span>조작 안내</button><span class="footer-rule"></span><span>3선승 <b>·</b> 라운드당 40초</span></footer>
+  <footer id="dock"><button id="helpBtn"><span data-icon="keyboard"></span>조작 안내</button><span class="footer-rule"></span><span>팀전 3선승 <b>·</b> 라운드당 40초</span></footer>
   <div id="hud" hidden>
     <div id="scoreboard"><strong id="blueScore">0</strong><div><small id="roundLabel"></small><b id="clock">0:40</b></div><strong id="redScore">0</strong></div>
     <div id="living"><span id="blueLive"></span><span id="orangeLive"></span></div>
+    <div id="rangeStats" role="group" aria-label="사격 기록" hidden>
+      <strong>더미 사격장</strong>
+      <span>명중 <b id="rangeHits">0</b></span><span>처치 <b id="rangeKills">0</b></span><span>명중률 <b id="rangeAccuracy">–</b></span>
+    </div>
     <div id="feed"></div><div id="banner" role="status"></div>
     <div id="combatDamage" aria-hidden="true"></div><div id="fragConfirm" aria-live="polite"></div>
     <div id="sight"><i></i><i></i><i></i><i></i></div><div id="hitMark"></div><div id="damage"></div>

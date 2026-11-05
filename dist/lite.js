@@ -1,6 +1,7 @@
 // Canvas software renderer for managed devices where Chrome cannot create a WebGL context.
 // Reciprocal-depth tests keep players, short cover and the aim point correctly aligned.
 import { eyeHeight, WEAPONS } from './sim.js';
+import { dummyBody, dummyStand } from './range-dummy.js';
 
 // 640×360 snapshots of the exact Kenney Blaster Kit rigs used by the WebGL view.
 // Each pair of muzzle positions is the projected world-space flash on the hip/ADS rig.
@@ -162,6 +163,14 @@ function operator(dst,p,clock) {
   part(.1,1.45,-.232,.13,.024,.02,0xbfedef);part(.24,.93,-.39,.13,.13,.54,0x253641);
 }
 
+function dummyFaces(target,faces) {
+  const sy=Math.sin(target.yaw),cy=Math.cos(target.yaw);
+  return faces.map(({points,color,shade})=>({
+    material:color,shade,
+    vertices:points.map(([x,y,z])=>[target.x+x*cy-z*sy,target.y+y,target.z+x*sy+z*cy,0,0])
+  }));
+}
+
 function cameraVertex(cam,v) {
   const dx=v[0]-cam.x,dy=v[1]-cam.y,dz=v[2]-cam.z;
   const forward=dx*cam.sy-dz*cam.cy;
@@ -184,6 +193,7 @@ export class LiteRenderer {
     this.blasterAtlas=document.getElementById('blaster-atlas') || new Image();
     if (!this.blasterAtlas.src) this.blasterAtlas.src='./assets/blaster-views.webp';
     this.trails=[];this.quality='auto';this.lastFrame=-1;this.lastGame=null;this.scale=1;
+    this.dummyMeshes=new WeakMap();this.dummyHits=new Map();
   }
   setQuality(q){this.quality=q;this.lastFrame=-1;}
   resize() { this.lastFrame=-1; }
@@ -279,7 +289,22 @@ export class LiteRenderer {
     if(playing){
       const dynamic=[];
       for(const actor of game.players)if(actor.alive&&actor.id!==p?.id)operator(dynamic,actor,now);
-      for(const {x,y,z,r} of game.targets||[])quad(dynamic,[[x-r,y-r,z],[x+r,y-r,z],[x+r,y+r,z],[x-r,y+r,z]],this.materials.target);
+      for(const target of game.targets||[]){
+        if(target.kind==='dummy'){
+          let model=this.dummyMeshes.get(target);
+          if(!model){
+            const body=dummyFaces(target,dummyBody);
+            const flash=body.map(face=>({...face,material:0xffe59d}));
+            model={stand:dummyFaces(target,dummyStand),body,flash};
+            this.dummyMeshes.set(target,model);
+          }
+          this.faces(model.stand,cam);
+          if(target.alive)this.faces(this.dummyHits.get(target.id)>now?model.flash:model.body,cam);
+        }else{
+          const {x,y,z,r}=target;
+          quad(dynamic,[[x-r,y-r,z],[x+r,y-r,z],[x+r,y+r,z],[x-r,y+r,z]],this.materials.target);
+        }
+      }
       if(game.phase==='overtime'){
         const {x,y,z,r}=this.map.zone;
         const color=game.capture?.team===0?0x71c5f5:game.capture?.team===1?0xff9476:0xf7d45c;
@@ -293,9 +318,13 @@ export class LiteRenderer {
     }
     this.ctx.putImageData(this.image,0,0);
     if(performance.now()-began>40 && this.scale>.69 && this.quality==='auto')this.scale=Math.max(.69,this.scale-.08);
-    if(!mode){this.lastSeq=0;this.trails=[];return;}
+    if(!mode){this.lastSeq=0;this.trails=[];this.dummyHits.clear();return;}
     if(game.seq<this.lastSeq)this.lastSeq=0;
-    for(const e of game.events??[]){if(e.seq<=this.lastSeq)continue;this.lastSeq=e.seq;if(e.type==='shot'){if(e.actor===p.id)this.recoil=1;this.trails.push({e,until:now+.07});}}
+    for(const e of game.events??[]){
+      if(e.seq<=this.lastSeq)continue;this.lastSeq=e.seq;
+      if(e.type==='shot'){if(e.actor===p.id)this.recoil=1;this.trails.push({e,until:now+.07});}
+      if(game.phase==='range'&&e.type==='hit')this.dummyHits.set(e.target,now+.14);
+    }
     this.trails=this.trails.filter(tr=>tr.until>now);
     for(const {e} of this.trails){const a=cameraVertex(cam,[e.x,e.y,e.z,0,0]),b=cameraVertex(cam,[e.ex,e.ey,e.ez,0,0]);if(b[2]<.14)continue;const end=this.project(b);const start=e.actor===p.id?(this.shotPoint||[w*.57,h*.64]):a[2]>.13?this.project(a):null;if(!start)continue;this.ctx.strokeStyle='rgba(255,218,135,.65)';this.ctx.lineWidth=1;this.ctx.beginPath();this.ctx.moveTo(start[0],start[1]);this.ctx.lineTo(end[0],end[1]);this.ctx.stroke();}
     this.weapon(p,now,view);this.recoil=Math.max(0,this.recoil-dt*9);

@@ -6,7 +6,7 @@
 
 [브라우저에서 도크라인 플레이](https://juhyeonmoon10.github.io/dockline-summit/) · [축제용 LAN 서버 ZIP 다운로드](https://juhyeonmoon10.github.io/dockline-summit/dockline-lan.zip)
 
-돌격소총·산탄총·저격소총 중 하나를 선택한 뒤 **봇 대전 시작**을 누르세요. **사격 연습**에서는 표적에 먼저 쏴 볼 수 있습니다.
+무기를 선택하고 **더미 사격장**을 누르세요. 거리와 높이가 다른 더미 4개를 시간 제한 없이 쏠 수 있습니다. 더미는 쓰러지고 1.5초 뒤에 다시 서며, 화면 위에 명중 수·처치 수·명중률이 표시됩니다.
 
 | 조작 | 키 |
 | --- | --- |
@@ -14,6 +14,7 @@
 | 발사 · 조준 | 좌클릭 · 우클릭 |
 | 점프 · 슬라이딩 | Space · 이동 중 Shift |
 | 재장전 · 무기 교체 | R · 1(주무기) / 2(권총) |
+| 사격장에서 주무기 변경 | Q |
 
 ## 여러 크롬북에서 대전
 
@@ -28,6 +29,6 @@
 
 - [맵](dist/arena-map.js)에서 지형과 시작 위치, [경기 규칙](dist/sim.js)에서 무기 성능과 라운드, [봇 전술](dist/tactics.js)에서 봇의 행동을 조정할 수 있습니다.
 - `node server.mjs` 실행 후 [로컬 게임](http://localhost:8787/)에서 확인하세요. 게임에 필요한 라이브러리는 저장소에 포함되어 있습니다.
-- 저장소의 **Settings → Pages → Source**를 **GitHub Actions**로 설정하세요. [배포 워크플로](.github/workflows/pages.yml)가 `main`에 변경 사항을 푸시할 때 게임과 최신 LAN 서버 ZIP을 함께 배포합니다. GitHub Pages에서는 브라우저가 봇 경기를 실행하고, 여러 기기의 방과 점수는 진행자 PC의 Node 서버가 관리합니다.
+- 저장소의 **Settings → Pages → Source**를 **GitHub Actions**로 설정하세요. [배포 워크플로](.github/workflows/pages.yml)가 `main`에 변경 사항을 푸시할 때 게임과 최신 LAN 서버 ZIP을 함께 배포합니다. GitHub Pages에서는 사격장이 브라우저에서 실행되고, 여러 기기의 방과 점수는 진행자 PC의 Node 서버가 관리합니다.
 
 총기 원본 OBJ와 변환 방법은 [무기 원본](art-source/blasters/README.txt)에 있습니다. [외부 코드·모델·녹음 이용 조건](dist/assets/)과 [글꼴 라이선스](dist/fonts/OFL.txt)를 포함합니다.

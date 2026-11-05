@@ -1,4 +1,4 @@
-import { MAP, WEAPONS, createGame, stepGame, spawnYaw } from './sim.js';
+import { MAP, WEAPONS, createRange, stepGame, spawnYaw } from './sim.js';
 import { ArenaRenderer } from './render.js';
 import { LiteRenderer } from './lite.js';
 import { RoomClient, supportsLAN } from './net.js';
@@ -76,7 +76,10 @@ $('closePanel').onclick=returnFromPanel;
 panel.addEventListener('cancel',e=>{e.preventDefault();returnFromPanel();});
 $('helpBtn').onclick=help;$('settingsBtn').onclick=settings;$('pauseBtn').onclick=showPause;
 function help(){
-  showPanel('help','조작 안내','<div class="keyrow"><span>이동</span><kbd>W A S D</kbd></div><div class="keyrow"><span>시점 · 발사 · 조준</span><b>마우스 이동 · 좌클릭 · 우클릭</b></div><div class="keyrow"><span>점프 · 이동 중 슬라이딩</span><kbd>Space / Shift</kbd></div><div class="keyrow"><span>재장전 · 주무기 / 권총</span><kbd>R · 1 / 2</kbd></div><div class="keyrow"><span>준비 시간에 주무기 변경</span><kbd>Q</kbd></div><div class="keyrow"><span>관전 대상 변경 · 메뉴</span><kbd>Tab / Esc</kbd></div><p>상대를 모두 잡으면 라운드 승리. 40초가 지나면 중앙의 노란 거점을 상대 없이 3초간 지키세요. 먼저 3승을 거둔 팀이 이깁니다.</p><button class="primary" id="helpDone">확인</button>');
+  const teamRules='<div class="keyrow"><span>팀전 관전 대상 변경</span><kbd>Tab</kbd></div><p>팀전은 3선승입니다. 상대 팀을 전멸시키거나 연장전에 중앙 거점을 3초간 지키세요.</p>';
+  const rangeRules='<p>사격장에서는 더미가 쓰러진 자리에 다시 나타납니다. Q로 주무기를 바꿔 가며 연습하세요.</p>';
+  const rules=game?.phase==='range'?rangeRules:client?teamRules:rangeRules+teamRules;
+  showPanel('help','조작 안내','<div class="keyrow"><span>이동</span><kbd>W A S D</kbd></div><div class="keyrow"><span>시점 · 발사 · 조준</span><b>마우스 이동 · 좌클릭 · 우클릭</b></div><div class="keyrow"><span>점프 · 이동 중 슬라이딩</span><kbd>Space / Shift</kbd></div><div class="keyrow"><span>재장전 · 주무기 / 권총</span><kbd>R · 1 / 2</kbd></div><div class="keyrow"><span>주무기 변경 (사격장 · 팀전 준비 시간)</span><kbd>Q</kbd></div><div class="keyrow"><span>메뉴</span><kbd>Esc</kbd></div>'+rules+'<button class="primary" id="helpDone">확인</button>');
   $('helpDone').onclick=returnFromPanel;
 }
 function settings(){
@@ -93,25 +96,29 @@ function settings(){
 }
 function enterGame(state,id){
   closePanel();screen='game';document.body.dataset.scene='game';$('hud').hidden=false;
+  const inRange=state.phase==='range';
+  $('rangeStats').hidden=!inRange;
+  for(const id of ['scoreboard','living','health','feed'])$(id).hidden=inRange;
+  $('combatDamage').textContent=$('fragConfirm').textContent='';
+  damageUntil=fragUntil=0;
   game=state;selfId=id;paused=false;lastEvent=0;lastResult=roundKey='';eventFeed=[];hitTime=damageTime=0;slot=1;lastNotice='';spectatorIndex=0;clearInput();
   const me=state.players.find(p=>p.id===id);yaw=me?.yaw||0;pitch=me?.pitch||0;
   audio.unlock();firstFrame=true;roundFlash=0;frameTime=performance.now();hudStamp=0;canvas.focus();
 }
-function practice(warmup=15){
-  const state=createGame({size,players:[{id:'local',name:nickname||'나',team:0,bot:false,weapon:selected}],warmup:typeof warmup==='number'?warmup:15});
-  enterGame(state,'local');attemptLock();
+function openRange(){
+  enterGame(createRange({name:nickname||'나',weapon:selected}),'local');
+  attemptLock();
 }
-$('practiceBtn').onclick=()=>practice(15);
-$('quickMatch').onclick=()=>practice(0);
+$('rangeBtn').onclick=openRange;
 function showPause(){if(screen!=='game'||game?.phase==='end')return;paused=true;clearInput();
-  showPanel('pause',client?'경기 메뉴':'연습 일시정지',(client?'<p class="note">다른 참가자와 경기는 계속 진행 중입니다.</p>':'')+
+  showPanel('pause',client?'경기 메뉴':'사격장 일시정지',(client?'<p class="note">다른 참가자와 경기는 계속 진행 중입니다.</p>':'')+
     '<div class="row"><button class="primary" id="resume">계속 플레이</button></div><div class="row"><button class="secondary" id="gameControls">조작 안내</button><button class="secondary" id="gameSettings">설정</button></div><div class="row"><button class="minor" id="quit">로비로 나가기</button></div>');release();
   $('resume').onclick=()=>{closePanel();paused=false;attemptLock();};$('gameControls').onclick=help;$('gameSettings').onclick=settings;$('quit').onclick=client?leaveConfirm:goHome;
 }
 function leaveConfirm(){showPanel('leave','방을 나갈까요?','<p>친구들과 다시 플레이하려면 방 코드로 참가하세요.</p><div class="row"><button id="stay" class="secondary">돌아가기</button><button id="quitNow" class="primary">방 나가기</button></div>');$('stay').onclick=returnFromPanel;$('quitNow').onclick=goHome;}
 function goHome(){
   const old=client;client=null;old?.leave().catch(()=>{});room=null;game=null;prevNet=null;screen='home';paused=false;closePanel();release();
-  $('hud').hidden=true;document.body.dataset.scene='lobby';lastResult='';$('practiceBtn').focus({preventScroll:true});
+  $('hud').hidden=true;document.body.dataset.scene='lobby';lastResult='';$('rangeBtn').focus({preventScroll:true});
 }
 function roomError(error){const node=$('netError');if(node)node.textContent=error.message||error;else notify(error.message||error);}
 function spin(btn,job){const old=btn.disabled;btn.disabled=true;Promise.resolve().then(job).catch(roomError).finally(()=>{if(btn.isConnected)btn.disabled=old;});}
@@ -124,7 +131,7 @@ function newClient(){
 $('teamBtn').onclick=async()=>{
   await canLAN;
   if(!lan){
-    showPanel('network','친구와 대전','<p>진행자 PC에서 대전 서버를 켠 뒤, 크롬북 4대 또는 6대로 같은 Wi-Fi의 경기 주소에 접속하세요.</p><ol class="note"><li>진행자 PC에서 서버 묶음을 내려받고 압축을 풉니다.</li><li>진행자 PC에 Node.js 18 이상을 설치하고 Windows에서는 <b>start-windows.cmd</b>를 실행합니다.</li><li>창에 나온 LAN 주소를 크롬북의 Chrome에서 엽니다.</li></ol><p><a class="bundle" id="serverBundle" href="./dockline-lan.zip" download>대전 서버 묶음 다운로드</a></p><div class="row"><button id="offlinePlay" class="primary">혼자 봇 연습하기</button></div>');$('offlinePlay').onclick=practice;
+    showPanel('network','친구와 대전','<p>진행자 PC에서 대전 서버를 켠 뒤, 크롬북 4대 또는 6대로 같은 Wi-Fi의 경기 주소에 접속하세요.</p><ol class="note"><li>진행자 PC에서 서버 묶음을 내려받고 압축을 풉니다.</li><li>진행자 PC에 Node.js 18 이상을 설치하고 Windows에서는 <b>start-windows.cmd</b>를 실행합니다.</li><li>창에 나온 LAN 주소를 크롬북의 Chrome에서 엽니다.</li></ol><p><a class="bundle" id="serverBundle" href="./dockline-lan.zip" download>대전 서버 묶음 다운로드</a></p><div class="row"><button id="offlinePlay" class="primary">더미 사격장 열기</button></div>');$('offlinePlay').onclick=openRange;
     if(location.protocol==='file:')$('serverBundle').replaceWith('함께 제공된 dockline-lan.zip에 팀전 서버가 들어 있습니다.');
     return;
   }
@@ -156,8 +163,8 @@ function results(){
   const rows=[...game.players].sort((a,b)=>a.team-b.team||b.kills-a.kills).map(p=>
     '<tr><td>'+esc(p.name)+(p.id===selfId?' (나)':'')+'</td><td>'+teamName(p.team)+'</td><td>'+p.kills+'</td><td>'+p.deaths+'</td></tr>').join('');
   const host=room?.hostId===selfId;
-  showPanel('result',title,'<div class="result-score"><b>'+game.score[0]+'</b><span>–</span><b>'+game.score[1]+'</b></div><table class="results"><thead><tr><th>플레이어</th><th>팀</th><th>처치</th><th>탈락</th></tr></thead><tbody>'+rows+'</tbody></table><div class="row">'+(!client?'<button class="primary" id="again">다시 연습</button>':host?'<button id="again" class="primary">같은 방에서 다시 준비</button>':'')+'<button class="secondary" id="finish">나가기</button></div>'+((client&&!host)?'<p class="note">방장이 다시 준비하면 대기실로 이동합니다.</p>':''));
-  release();audio.chime(w===me?.team);if($('again'))$('again').onclick=client?e=>spin(e.currentTarget,()=>client.lobby()):practice;$('finish').onclick=goHome;
+  showPanel('result',title,'<div class="result-score"><b>'+game.score[0]+'</b><span>–</span><b>'+game.score[1]+'</b></div><table class="results"><thead><tr><th>플레이어</th><th>팀</th><th>처치</th><th>탈락</th></tr></thead><tbody>'+rows+'</tbody></table><div class="row">'+(host?'<button id="again" class="primary">같은 방에서 다시 준비</button>':'')+'<button class="secondary" id="finish">나가기</button></div>'+(!host?'<p class="note">방장이 다시 준비하면 대기실로 이동합니다.</p>':''));
+  release();audio.chime(w===me?.team);if(host)$('again').onclick=e=>spin(e.currentTarget,()=>client.lobby());$('finish').onclick=goHome;
 }
 function receiveEvents(now){
   for(const ev of game.events){if(ev.seq<=lastEvent)continue;lastEvent=ev.seq;const me=game.players.find(p=>p.id===selfId);audio.event(ev,game,watchPlayer());
@@ -166,27 +173,41 @@ function receiveEvents(now){
       if(ev.damage){$('combatDamage').textContent=String(ev.damage);$('combatDamage').classList.toggle('head',!!ev.headshot);damageUntil=now+.4;}
     }
     if(ev.type==='hit'&&ev.target===selfId)damageTime=now+.32;
-    if(ev.type==='kill'&&ev.actor===selfId){const victim=game.players.find(p=>p.id===ev.target);$('fragConfirm').textContent=(ev.headshot?'헤드샷 · ':'처치 · ')+(victim?.name||'');fragUntil=now+1.5;}
-    if(ev.type==='kill'){const a=game.players.find(p=>p.id===ev.actor),v=game.players.find(p=>p.id===ev.target);eventFeed.unshift({text:(a?.name||'')+'  ›  '+(v?.name||''),at:now});eventFeed=eventFeed.slice(0,3);}
+    if(ev.type==='kill'){
+      const inRange=game.phase==='range';
+      const victim=(inRange?game.targets:game.players).find(p=>p.id===ev.target);
+      if(ev.actor===selfId){$('fragConfirm').textContent=(ev.headshot?'헤드샷 · ':'처치 · ')+(victim?.name||'');fragUntil=now+1.5;}
+      if(!inRange){
+        const shooter=game.players.find(p=>p.id===ev.actor);
+        eventFeed.unshift({text:(shooter?.name||'')+'  ›  '+(victim?.name||''),at:now});eventFeed=eventFeed.slice(0,3);
+      }
+    }
     if(ev.type==='round'&&me){yaw=spawnYaw(me);pitch=0;slot=1;clearInput();roundFlash=now+1.0;}
     if(ev.type==='roundEnd')audio.chime(ev.team===me?.team);
   }
 }
 function showHUD(now){
   const me=game.players.find(p=>p.id===selfId),p=watchPlayer();if(!me||!p)return;
-  $('blueScore').textContent=game.score[0];$('redScore').textContent=game.score[1];
-  $('blueLive').textContent='블루 '+game.players.filter(m=>m.team===0&&m.alive).length+'/'+game.size;
-  $('orangeLive').textContent='오렌지 '+game.players.filter(m=>m.team===1&&m.alive).length+'/'+game.size;
+  if(game.phase==='range'){
+    const {hits,kills,shots}=game.range;
+    $('rangeHits').textContent=hits;$('rangeKills').textContent=kills;
+    $('rangeAccuracy').textContent=shots?Math.round(100*hits/shots)+'%':'–';
+  }else{
+    $('blueScore').textContent=game.score[0];$('redScore').textContent=game.score[1];
+    $('blueLive').textContent='블루 '+game.players.filter(m=>m.team===0&&m.alive).length+'/'+game.size;
+    $('orangeLive').textContent='오렌지 '+game.players.filter(m=>m.team===1&&m.alive).length+'/'+game.size;
+    $('clock').textContent='0:'+String(Math.ceil(game.time)).padStart(2,'0');
+    $('roundLabel').textContent=game.phase==='warmup'?'준비 시간':game.phase==='overtime'?'연장전':'ROUND '+game.round;
+    $('hp').textContent=Math.max(0,Math.ceil(p.hp));$('hpLabel').textContent=teamName(p.team)+' · 체력';$('hpBar').style.width=clamp(p.hp,0,100)+'%';
+    $('health').style.setProperty('--team-color',p.team===0?'var(--blue)':'var(--red)');
+  }
   if(now>damageUntil)$('combatDamage').textContent='';if(now>fragUntil)$('fragConfirm').textContent='';
-  $('hp').textContent=Math.max(0,Math.ceil(p.hp));$('hpLabel').textContent=teamName(p.team)+' · 체력';$('hpBar').style.width=clamp(p.hp,0,100)+'%';
-  $('health').style.setProperty('--team-color',p.team===0?'var(--blue)':'var(--red)');
   $('gun').textContent=WEAPONS[p.active]?.label||p.active;$('ammo').textContent=p.ammo;$('rounds').textContent=p.reload>0?'재장전':' / '+WEAPONS[p.active].mag;
-  $('clock').textContent='0:'+String(Math.ceil(game.time)).padStart(2,'0');
-  $('roundLabel').textContent=game.phase==='warmup'?'준비 시간':game.phase==='overtime'?'연장전':'ROUND '+game.round;
   const spectating=!me.alive&&game.phase!=='between'&&game.phase!=='end';$('spectator').hidden=!spectating;$('spectator').textContent=p.alive?'관전 · '+p.name+'   [Tab]':'다음 라운드 대기 중';
   $('sight').classList.toggle('scope',p.active==='sniper'&&(spectating?p.ads:ads));$('sight').hidden=!p.alive||game.phase==='between';
   let text='',sub='',hint='';
-  if(game.phase==='warmup'){text='준비 사격';sub=teamName(me.team)+' 팀 · '+sizeText(game.size);hint='Q  주무기 변경 · '+WEAPONS[selected].label+(client?'':'　 Enter  바로 시작');}
+  if(game.phase==='range'){hint='Q  주무기 변경 · R  재장전';}
+  else if(game.phase==='warmup'){text='준비 사격';sub=teamName(me.team)+' 팀 · '+sizeText(game.size);hint='Q  주무기 변경 · '+WEAPONS[selected].label;}
   else if(game.phase==='between'){text=game.roundWinner==null?'라운드 무승부':(game.roundWinner===me.team?'라운드 승리':'라운드 패배');sub=game.reason;hint='Q  다음 라운드 무기 · '+WEAPONS[selected].label;}
   else if(game.phase==='overtime'){text='중앙 거점 점령';sub=game.capture?.team==null?'거점에서 3초 버티기':teamName(game.capture.team)+' 점령 중 '+Math.round(game.capture.progress*100)+'%';}
   else if(roundFlash>now){text='라운드 '+game.round;sub=teamName(me.team)+' 팀';}
@@ -227,14 +248,13 @@ document.addEventListener('pointerlockchange',()=>{
 document.addEventListener('pointerlockerror',()=>{if(!modal&&screen==='game')hintLock();});
 document.addEventListener('keydown',e=>{
   if(screen!=='game'||modal||paused)return;
-  const used=['KeyW','KeyA','KeyS','KeyD','KeyR','KeyQ','Space','ShiftLeft','ShiftRight','Digit1','Digit2','Tab','Enter','Escape'];
+  const used=['KeyW','KeyA','KeyS','KeyD','KeyR','KeyQ','Space','ShiftLeft','ShiftRight','Digit1','Digit2','Tab','Escape'];
   if(!used.includes(e.code))return;e.preventDefault();keys.add(e.code);if(e.repeat)return;
   pressed.add(e.code);
   if(e.code==='Escape'){showPause();return;}
   if(e.code==='Digit1'||e.code==='Digit2')slot=e.code==='Digit2'?2:1;
   if(e.code==='Tab')spectatorIndex++;
-  if(e.code==='Enter'&&game.phase==='warmup'&&!client)game.time=0;
-  if(e.code==='KeyQ'&&(game.phase==='warmup'||game.phase==='between')){setLoadout(primary[(primary.indexOf(selected)+1)%3]);slot=1;}
+  if(e.code==='KeyQ'&&['range','warmup','between'].includes(game.phase)){setLoadout(primary[(primary.indexOf(selected)+1)%3]);slot=1;}
 });
 document.addEventListener('keyup',e=>keys.delete(e.code));
 window.addEventListener('blur',()=>{clearInput();if(screen==='game'&&!modal&&game?.phase!=='end')showPause();});
@@ -269,5 +289,5 @@ try{
   if(new URLSearchParams(location.search).has('lite'))throw Error('경량 모드');
   renderer=new ArenaRenderer(canvas,MAP);bindCanvas();
 }catch(error){console.info('도크라인 경량 렌더링',error.message);switchToLite();}
-$('practiceBtn').disabled=$('teamBtn').disabled=$('quickMatch').disabled=false;$('boot').textContent='';requestAnimationFrame(frame);
+$('rangeBtn').disabled=$('teamBtn').disabled=false;$('boot').textContent='';requestAnimationFrame(frame);
 
