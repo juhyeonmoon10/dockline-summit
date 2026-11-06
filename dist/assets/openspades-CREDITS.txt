@@ -1,18 +1,26 @@
-Audio samples from OpenSpades Free Pak
+Audio samples from OpenSpades Free Pak and The Free Firearm Sound Library
 https://github.com/DeathByDenim/openspades-free-pak/tree/1e6b28721a2e5e51f84a572d101079bf186c66d5
-Samples are bundled unmodified. Volume, pitch and stereo placement are adjusted during playback.
+The rifle recording is an edited close AR-15 shot from The Free Firearm Sound Library, described below. Other bundled recordings retain the OpenSpades Free Pak encoding. Volume, pitch, filtering, envelopes and stereo placement are adjusted during playback.
 
 | File | Source | License | Artist |
-| Sounds/Weapons/SMG/FireStereo.opus | <https://opengameart.org/content/the-free-firearm-sound-library> (AR-15/D_24P) | CC0 | Ben Jaszczak, et al. |
+| match-samples.js: rifle (PCM WAV) | <https://opengameart.org/content/the-free-firearm-sound-library> (AR-15/D_32P, near-distance shot; edited) | CC0 | Ben Jaszczak, et al. |
 | Sounds/Weapons/Rifle/FireLocal.opus | <https://opengameart.org/content/the-free-firearm-sound-library> (B_16P) | CC0 | Ben Jaszczak, et al. |
 | Sounds/Weapons/Shotgun/FireLocal.opus | <https://opengameart.org/content/shotgun-shoot-reload> (10 Guage Shotgun) | CC-BY 3.0 | Mike Koenig (Soundbible) |
-| Sounds/Weapons/Rifle/Fire.opus | <https://opengameart.org/content/the-free-firearm-sound-library> (A_42P) | CC0 | Ben Jaszczak, et al. |
+| Sounds/Weapons/Rifle/Fire.opus | <https://opengameart.org/content/the-free-firearm-sound-library> (A_42P, Colt 1911 .45 near-distance pistol shot; used for the pistol) | CC0 | Ben Jaszczak, et al. |
 | Sounds/Weapons/Rifle/FireFar.opus | <https://opengameart.org/content/the-free-firearm-sound-library> (A_34P) | CC0 | Ben Jaszczak, et al. |
 | Sounds/Weapons/Rifle/ReloadLocal.opus | <https://opengameart.org/content/handgun-reload-sound-effect> | CC0 | zer0_sol |
 | Sounds/Weapons/Impacts/Ricochet1.opus | <https://freesound.org/people/cedarstudios/sounds/148827/> | CC0 | cedarstudios |
 | Sounds/Player/Run1.opus | <https://freesound.org/people/Disagree/sounds/433725/> | CC-BY 4.0 | Disagree |
 | Sounds/Player/Run2.opus | <https://freesound.org/people/Disagree/sounds/433725/> | CC-BY 4.0 | Disagree |
 | Sounds/Player/Land.opus | <https://opengameart.org/content/jump-landing-sound> | CC0 | MentalSanityOff |
+
+Rifle source and edits:
+Source: https://github.com/buddingmonkey/FreeFirearmsSFXLibrary/blob/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Prepared%20SFX/AR-15/D_32P.wav
+License: https://github.com/buddingmonkey/FreeFirearmsSFXLibrary/blob/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/LICENSE (CC0 1.0 Universal)
+Recording identification: Prepared Master Sheet.csv in the same commit identifies D_32P as a near-distance AR-15/M4 gunshot and A_42P as a near-distance 1911 pistol gunshot.
+Edits: decode/resample to 44,100 Hz, average left/right to mono, select the first shot from 0.70170068 to 1.08170068 seconds, scale peak to 0.92, apply a 0.5 ms start fade and 55 ms end fade, encode 16-bit PCM WAV. Prepared duration: 0.380 seconds, 33,560 bytes. No synthetic sound is baked into this recording.
+Original WAV SHA-256: acee9d2106b68fe5956225a19d7aedf943d97793817f9bda9d486a2b74b0a812
+Prepared WAV SHA-256: 9e5426154fb3bb6846828eb0153b77a1fded8128c9edc7ffc5173a93eb3b2d7b
 
 CC0 1.0: https://creativecommons.org/publicdomain/zero/1.0/
 CC BY 3.0: https://creativecommons.org/licenses/by/3.0/

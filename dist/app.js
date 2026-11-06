@@ -109,10 +109,11 @@ function settings(){
   credits.onclick=()=>showPanel('credits','제작 자료',
     '<p>무기 모델은 <a href="https://kenney.nl/assets/blaster-kit" target="_blank" rel="noopener">Kenney · Blaster Kit</a>(CC0)를 수정했습니다.</p>'+
     '<p>봇의 표적 선택과 측면 회피는 <a href="https://github.com/Mugen87/dive/tree/7176136cf6c29eddfd620df2bf0d09a532680763" target="_blank" rel="noopener">Michael Herzog · Dive</a>(MIT)의 코드를 수정했습니다.</p>'+
-    '<p>효과음은 <a href="https://github.com/DeathByDenim/openspades-free-pak/blob/1e6b28721a2e5e51f84a572d101079bf186c66d5/License/Credits-pak001-Free.md" target="_blank" rel="noopener">OpenSpades Free Pak</a>의 녹음을 사용했습니다. 산탄총은 Mike Koenig (CC BY 3.0), 달리기는 Disagree (CC BY 4.0), 나머지 녹음은 CC0입니다. 재생 시 음량·피치·좌우 위치를 조절합니다.</p>'+
+    '<p>효과음은 <a href="https://github.com/DeathByDenim/openspades-free-pak/blob/1e6b28721a2e5e51f84a572d101079bf186c66d5/License/Credits-pak001-Free.md" target="_blank" rel="noopener">OpenSpades Free Pak</a>과 <a href="https://github.com/buddingmonkey/FreeFirearmsSFXLibrary/tree/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b" target="_blank" rel="noopener">The Free Firearm Sound Library</a>의 녹음을 편집했습니다. 산탄총은 Mike Koenig (CC BY 3.0), 달리기는 Disagree (CC BY 4.0), 나머지 녹음은 CC0입니다. 재생 시 음량·피치·필터·잔향·좌우 위치를 조절합니다.</p>'+
     '<p class="note">파일별 저자와 원본 링크는 소스 묶음의 dist/assets에 있습니다. 무기 원본은 art-source/blasters에서 편집할 수 있습니다.</p>');
 }
 function enterGame(state,id){
+  audio.clear();
   closePanel();screen='game';document.body.dataset.scene='game';$('hud').hidden=false;
   const inRange=state.phase==='range';
   $('rangeStats').hidden=!inRange;
@@ -129,12 +130,14 @@ function openRange(){
 }
 $('rangeBtn').onclick=openRange;
 function showPause(){if(screen!=='game'||game?.phase==='end')return;paused=true;clearInput();
+  audio.clear();
   showPanel('pause',client?'경기 메뉴':'사격장 일시정지',(client?'<p class="note">다른 참가자와 경기는 계속 진행 중입니다.</p>':'')+
     sensitivityControls()+'<div class="row"><button class="primary" id="resume">계속 플레이</button></div><div class="row"><button class="secondary" id="gameControls">조작 안내</button><button class="secondary" id="gameSettings">설정</button></div><div class="row"><button class="minor" id="quit">로비로 나가기</button></div>');release();bindSensitivity();
   $('resume').onclick=()=>{closePanel();paused=false;attemptLock();};$('gameControls').onclick=help;$('gameSettings').onclick=settings;$('quit').onclick=client?leaveConfirm:goHome;
 }
 function leaveConfirm(){showPanel('leave','방을 나갈까요?','<p>친구들과 다시 플레이하려면 방 코드로 참가하세요.</p><div class="row"><button id="stay" class="secondary">돌아가기</button><button id="quitNow" class="primary">방 나가기</button></div>');$('stay').onclick=returnFromPanel;$('quitNow').onclick=goHome;}
 function goHome(){
+  audio.clear();
   const old=client;client=null;old?.leave().catch(()=>{});room=null;game=null;prevNet=null;screen='home';paused=false;closePanel();release();
   $('hud').hidden=true;document.body.dataset.scene='lobby';lastResult='';$('rangeBtn').focus({preventScroll:true});
 }
@@ -296,7 +299,7 @@ function frame(ms){
   if(screen==='game'&&game){
     const input=currentInput();
     if(!client){if(!paused)stepGame(game,{[selfId]:input},dt);}else client.input(input);
-    pendingFire=false;pressed.clear();receiveEvents(t);const p=watchPlayer();if(!paused)audio.steps(game,p,t);
+    pendingFire=false;pressed.clear();receiveEvents(t);audio.reconcile(game);const p=watchPlayer();if(!paused)audio.steps(game,p,t);
     const visual=visualState(ms),watch=p?.id!==selfId;
     try{renderer.draw(visual,selfId,{lobby:false,ads:watch?!!p?.ads:ads,quality,yaw:watch?p?.yaw:yaw,pitch:watch?p?.pitch:pitch,spectatorId:watch?p?.id:undefined,t,dt});}
     catch(err){console.error(err);if(!(renderer instanceof LiteRenderer))switchToLite();else throw err;}
