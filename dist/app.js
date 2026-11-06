@@ -27,7 +27,7 @@ const clamp=(x,lo,hi)=>Math.max(lo,Math.min(hi,x));
 const teamName=t=>t===0?'블루':'오렌지';
 const primary=['rifle','shotgun','sniper'];
 let size=read('size',2)===3?3:2, selected=primary.includes(read('weapon','rifle'))?read('weapon','rifle'):'rifle';
-let sensitivity=clamp(Number(read('sensitivity',1))||1,.35,2.4),quality=read('quality','auto'),nickname=String(read('name','')).slice(0,16);
+let sensitivity=clamp(Number(read('sensitivity',1))||1,.1,3),quality=read('quality','auto'),nickname=String(read('name','')).slice(0,16);
 audio.enabled=read('sound',true);
 let canvas=$('arena'),renderer,game=null,client=null,selfId='local',room=null,screen='home',modal='',lan=false;
 let yaw=0,pitch=0,slot=1,firstFrame=true,lastEvent=0,pointerMode=false,dragX=null,dragY=null;
@@ -80,12 +80,29 @@ function help(){
   const teamRules='<div class="keyrow"><span>팀전 관전 대상 변경</span><kbd>Tab</kbd></div><p>팀전은 3선승입니다. 상대 팀을 전멸시키거나 연장전에 중앙 거점을 3초간 지키세요.</p>';
   const rangeRules='<p>사격장에서는 더미가 쓰러진 자리에 다시 나타납니다. Q로 주무기를 바꿔 가며 연습하세요.</p>';
   const rules=game?.phase==='range'?rangeRules:client?teamRules:rangeRules+teamRules;
-  showPanel('help','조작 안내','<div class="keyrow"><span>이동</span><kbd>W A S D</kbd></div><div class="keyrow"><span>시점 · 발사 · 조준</span><b>마우스 이동 · 좌클릭 · 우클릭</b></div><div class="keyrow"><span>점프 · 이동 중 슬라이딩</span><kbd>Space / Shift</kbd></div><div class="keyrow"><span>재장전 · 주무기 / 권총</span><kbd>R · 1 / 2</kbd></div><div class="keyrow"><span>주무기 변경 (사격장 · 팀전 준비 시간)</span><kbd>Q</kbd></div><div class="keyrow"><span>메뉴</span><kbd>Esc</kbd></div>'+rules+'<button class="primary" id="helpDone">확인</button>');
+  showPanel('help','조작 안내','<div class="keyrow"><span>이동</span><kbd>W A S D</kbd></div><div class="keyrow"><span>시점 · 발사 · 조준</span><b>마우스 이동 · 좌클릭 · 우클릭</b></div><div class="keyrow"><span>점프 · 이동 중 슬라이딩</span><kbd>Space / C</kbd></div><div class="keyrow"><span>재장전 · 주무기 / 권총</span><kbd>R · 1 / 2</kbd></div><div class="keyrow"><span>주무기 변경 (사격장 · 팀전 준비 시간)</span><kbd>Q</kbd></div><div class="keyrow"><span>메뉴 · 마우스 감도</span><kbd>Esc</kbd></div>'+rules+'<button class="primary" id="helpDone">확인</button>');
   $('helpDone').onclick=returnFromPanel;
 }
+function sensitivityControls(){
+  return '<div class="sense-control"><div class="sense-heading"><label for="sense">마우스 감도</label><button id="senseReset" class="minor" type="button">기본값</button></div><div class="sense-inputs"><input id="sense" type="range" min="0.10" max="3.00" step="0.01"><input id="senseNumber" type="number" min="0.10" max="3.00" step="0.01" inputmode="decimal" aria-label="마우스 감도 배율"><span aria-hidden="true">×</span></div></div>';
+}
+function bindSensitivity(){
+  const draw=()=>{$('sense').value=sensitivity;$('senseNumber').value=sensitivity.toFixed(2);};
+  const change=value=>{
+    if(Number.isFinite(value)){
+      sensitivity=Math.round(clamp(value,.1,3)*100)/100;
+      save('sensitivity',sensitivity);
+    }
+    draw();
+  };
+  $('sense').oninput=e=>change(e.target.valueAsNumber);
+  $('senseNumber').onchange=e=>change(e.target.valueAsNumber);
+  $('senseReset').onclick=()=>change(1);
+  draw();
+}
 function settings(){
-  showPanel('settings','게임 설정','<label class="setting">마우스 감도 <input id="sense" type="range" min="0.35" max="2.4" step="0.05"><output id="senseVal"></output></label><label class="setting">그래픽 <select id="graphics"><option value="auto">기본</option><option value="low">저사양</option></select></label><div class="setting"><span>효과음</span><button id="soundToggle" class="minor"></button></div><div class="row"><button id="settingsDone" class="primary">완료</button></div>');
-  $('sense').value=sensitivity;$('senseVal').textContent=sensitivity.toFixed(2);$('sense').oninput=e=>{sensitivity=Number(e.target.value);save('sensitivity',sensitivity);$('senseVal').textContent=sensitivity.toFixed(2);};
+  showPanel('settings','게임 설정',sensitivityControls()+'<label class="setting">그래픽 <select id="graphics"><option value="auto">기본</option><option value="low">저사양</option></select></label><div class="setting"><span>효과음</span><button id="soundToggle" class="minor"></button></div><div class="row"><button id="settingsDone" class="primary">완료</button></div>');
+  bindSensitivity();
   $('graphics').value=quality;$('graphics').onchange=e=>{quality=e.target.value;save('quality',quality);};
   const sound=$('soundToggle');sound.textContent=audio.enabled?'켜짐':'꺼짐';sound.onclick=()=>{setSound();sound.textContent=audio.enabled?'켜짐':'꺼짐';};$('settingsDone').onclick=returnFromPanel;
   const credits=document.createElement('button');credits.className='credits-link';credits.textContent='제작 자료 · 라이선스';body.append(credits);
@@ -113,7 +130,7 @@ function openRange(){
 $('rangeBtn').onclick=openRange;
 function showPause(){if(screen!=='game'||game?.phase==='end')return;paused=true;clearInput();
   showPanel('pause',client?'경기 메뉴':'사격장 일시정지',(client?'<p class="note">다른 참가자와 경기는 계속 진행 중입니다.</p>':'')+
-    '<div class="row"><button class="primary" id="resume">계속 플레이</button></div><div class="row"><button class="secondary" id="gameControls">조작 안내</button><button class="secondary" id="gameSettings">설정</button></div><div class="row"><button class="minor" id="quit">로비로 나가기</button></div>');release();
+    sensitivityControls()+'<div class="row"><button class="primary" id="resume">계속 플레이</button></div><div class="row"><button class="secondary" id="gameControls">조작 안내</button><button class="secondary" id="gameSettings">설정</button></div><div class="row"><button class="minor" id="quit">로비로 나가기</button></div>');release();bindSensitivity();
   $('resume').onclick=()=>{closePanel();paused=false;attemptLock();};$('gameControls').onclick=help;$('gameSettings').onclick=settings;$('quit').onclick=client?leaveConfirm:goHome;
 }
 function leaveConfirm(){showPanel('leave','방을 나갈까요?','<p>친구들과 다시 플레이하려면 방 코드로 참가하세요.</p><div class="row"><button id="stay" class="secondary">돌아가기</button><button id="quitNow" class="primary">방 나가기</button></div>');$('stay').onclick=returnFromPanel;$('quitNow').onclick=goHome;}
@@ -212,7 +229,7 @@ function showHUD(now){
   const spectating=!me.alive&&game.phase!=='between'&&game.phase!=='end';$('spectator').hidden=!spectating;$('spectator').textContent=p.alive?'관전 · '+p.name+'   [Tab]':'다음 라운드 대기 중';
   $('sight').classList.toggle('scope',p.active==='sniper'&&(spectating?p.ads:ads));$('sight').hidden=!p.alive||game.phase==='between';
   let text='',sub='',hint='';
-  if(game.phase==='range'){hint='Q  주무기 변경 · R  재장전';}
+  if(game.phase==='range'){hint='C  슬라이딩 · Q  주무기 변경 · R  재장전';}
   else if(game.phase==='warmup'){text='준비 사격';sub=teamName(me.team)+' 팀 · '+sizeText(game.size);hint='Q  주무기 변경 · '+WEAPONS[selected].label;}
   else if(game.phase==='between'){text=game.roundWinner==null?'라운드 무승부':(game.roundWinner===me.team?'라운드 승리':'라운드 패배');sub=game.reason;hint='Q  다음 라운드 무기 · '+WEAPONS[selected].label;}
   else if(game.phase==='overtime'){text='중앙 거점 점령';sub=game.capture?.team==null?'거점에서 3초 버티기':teamName(game.capture.team)+' 점령 중 '+Math.round(game.capture.progress*100)+'%';}
@@ -225,7 +242,7 @@ function sizeText(n){return n+' vs '+n;}
 function currentInput(){
   const blocked=paused||!!modal;
   return {yaw,pitch,forward:blocked?0:Number(keys.has('KeyW'))-Number(keys.has('KeyS')),strafe:blocked?0:Number(keys.has('KeyD'))-Number(keys.has('KeyA')),
-    fire:!blocked&&(heldFire||pendingFire),ads:!blocked&&ads,jump:!blocked&&(pressed.has('Space')||keys.has('Space')),slide:!blocked&&(pressed.has('ShiftLeft')||pressed.has('ShiftRight')||keys.has('ShiftLeft')||keys.has('ShiftRight')),
+    fire:!blocked&&(heldFire||pendingFire),ads:!blocked&&ads,jump:!blocked&&(pressed.has('Space')||keys.has('Space')),slide:!blocked&&(pressed.has('KeyC')||keys.has('KeyC')),
     reload:!blocked&&(pressed.has('KeyR')||keys.has('KeyR')),slot,weapon:selected};
 }
 function aim(dx,dy){
@@ -254,7 +271,7 @@ document.addEventListener('pointerlockchange',()=>{
 document.addEventListener('pointerlockerror',()=>{if(!modal&&screen==='game')hintLock();});
 document.addEventListener('keydown',e=>{
   if(screen!=='game'||modal||paused)return;
-  const used=['KeyW','KeyA','KeyS','KeyD','KeyR','KeyQ','Space','ShiftLeft','ShiftRight','Digit1','Digit2','Tab','Escape'];
+  const used=['KeyW','KeyA','KeyS','KeyD','KeyR','KeyQ','KeyC','Space','Digit1','Digit2','Tab','Escape'];
   if(!used.includes(e.code))return;e.preventDefault();keys.add(e.code);if(e.repeat)return;
   pressed.add(e.code);
   if(e.code==='Escape'){showPause();return;}
