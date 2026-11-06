@@ -34,6 +34,7 @@ let yaw=0,pitch=0,slot=1,firstFrame=true,lastEvent=0,pointerMode=false,dragX=nul
 let roundKey='',eventFeed=[],hitTime=0,damageTime=0,pendingFire=false,heldFire=false,ads=false,paused=false;
 let lastResult='',spectatorIndex=0,frameTime=performance.now(),hudStamp=0,roundFlash=0,clockStamp=0;
 let prevNet=null,netAt=0,lastNotice='',noticeTimer;
+let joining=false,joinAttempt=0;
 let damageUntil=0,fragUntil=0;
 const keys=new Set(), pressed=new Set();
 function notify(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>$('toast').classList.remove('show'),2800);}
@@ -66,6 +67,7 @@ function attemptLock(){
 }
 function hintLock(){if(lastNotice!=='lock'){notify('화면을 클릭해 마우스 시점을 활성화하세요. 제한된 창에서는 누른 채 끌어도 됩니다.');lastNotice='lock';}}
 function returnFromPanel(){
+  if(modal==='network'&&joining){joinAttempt++;joining=false;const old=client;client=null;old?.leave().catch(()=>{});}
   if(modal==='credits')return settings();
   if(modal==='result')return goHome();
   if(modal==='room')return leaveConfirm();
@@ -107,10 +109,11 @@ function settings(){
   const sound=$('soundToggle');sound.textContent=audio.enabled?'켜짐':'꺼짐';sound.onclick=()=>{setSound();sound.textContent=audio.enabled?'켜짐':'꺼짐';};$('settingsDone').onclick=returnFromPanel;
   const credits=document.createElement('button');credits.className='credits-link';credits.textContent='제작 자료 · 라이선스';body.append(credits);
   credits.onclick=()=>showPanel('credits','제작 자료',
-    '<p>무기 모델은 <a href="https://kenney.nl/assets/blaster-kit" target="_blank" rel="noopener">Kenney · Blaster Kit</a>(CC0)를 수정했습니다.</p>'+
+    '<p>총기와 플레이어 모델은 <a href="https://quaternius.com/packs/toonshootergamekit.html" target="_blank" rel="noopener">Quaternius · Toon Shooter Game Kit</a>(CC0)를 수정했습니다. 1인칭 칼과 사격장 더미는 게임용으로 제작했습니다.</p>'+
     '<p>봇의 표적 선택과 측면 회피는 <a href="https://github.com/Mugen87/dive/tree/7176136cf6c29eddfd620df2bf0d09a532680763" target="_blank" rel="noopener">Michael Herzog · Dive</a>(MIT)의 코드를 수정했습니다.</p>'+
+    '<p>온라인 연결은 <a href="https://peerjs.com/" target="_blank" rel="noopener">PeerJS</a> 1.5.5(MIT)를 사용합니다. 방장의 브라우저에서 경기를 진행하며, 공용 연결 서비스와 네트워크 상태에 영향을 받습니다.</p>'+
     '<p>효과음은 <a href="https://github.com/DeathByDenim/openspades-free-pak/blob/1e6b28721a2e5e51f84a572d101079bf186c66d5/License/Credits-pak001-Free.md" target="_blank" rel="noopener">OpenSpades Free Pak</a>과 <a href="https://github.com/buddingmonkey/FreeFirearmsSFXLibrary/tree/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b" target="_blank" rel="noopener">The Free Firearm Sound Library</a>의 녹음을 편집했습니다. 산탄총은 Mike Koenig (CC BY 3.0), 달리기는 Disagree (CC BY 4.0), 나머지 녹음은 CC0입니다. 재생 시 음량·피치·필터·잔향·좌우 위치를 조절합니다.</p>'+
-    '<p class="note">파일별 저자와 원본 링크는 소스 묶음의 dist/assets에 있습니다. 무기 원본은 art-source/blasters에서 편집할 수 있습니다.</p>');
+    '<p class="note">자료별 저자와 라이선스는 소스 묶음에 있습니다. 현재 모델은 art-source/toon-shooter에서 편집할 수 있고, 이전 Kenney 모델도 art-source/blasters에 보관했습니다.</p>');
 }
 function enterGame(state,id){
   audio.clear();
@@ -135,7 +138,7 @@ function showPause(){if(screen!=='game'||game?.phase==='end')return;paused=true;
     sensitivityControls()+'<div class="row"><button class="primary" id="resume">계속 플레이</button></div><div class="row"><button class="secondary" id="gameControls">조작 안내</button><button class="secondary" id="gameSettings">설정</button></div><div class="row"><button class="minor" id="quit">로비로 나가기</button></div>');release();bindSensitivity();
   $('resume').onclick=()=>{closePanel();paused=false;attemptLock();};$('gameControls').onclick=help;$('gameSettings').onclick=settings;$('quit').onclick=client?leaveConfirm:goHome;
 }
-function leaveConfirm(){showPanel('leave','방을 나갈까요?','<p>친구들과 다시 플레이하려면 방 코드로 참가하세요.</p><div class="row"><button id="stay" class="secondary">돌아가기</button><button id="quitNow" class="primary">방 나가기</button></div>');$('stay').onclick=returnFromPanel;$('quitNow').onclick=goHome;}
+function leaveConfirm(){const hosting=client?.online&&room?.hostId===client.id;showPanel('leave','방을 나갈까요?','<p>'+(hosting?'방장이 나가면 이 방의 경기가 종료됩니다.':'친구들과 다시 플레이하려면 방 코드로 참가하세요.')+'</p><div class="row"><button id="stay" class="secondary">돌아가기</button><button id="quitNow" class="primary">방 나가기</button></div>');$('stay').onclick=returnFromPanel;$('quitNow').onclick=goHome;}
 function goHome(){
   audio.clear();
   const old=client;client=null;old?.leave().catch(()=>{});room=null;game=null;prevNet=null;screen='home';paused=false;closePanel();release();
@@ -143,31 +146,58 @@ function goHome(){
 }
 function roomError(error){const node=$('netError');if(node)node.textContent=error.message||error;else notify(error.message||error);}
 function spin(btn,job){const old=btn.disabled;btn.disabled=true;Promise.resolve().then(job).catch(roomError).finally(()=>{if(btn.isConnected)btn.disabled=old;});}
-function newClient(){
-  const c=new RoomClient({onRoom(r){if(c!==client)return;room=r;if(r.phase==='lobby'){game=null;screen='home';release();$('hud').hidden=true;document.body.dataset.scene='lobby';if(modal!=='leave')showRoom(r);}},
+function newClient(Client=RoomClient){
+  const c=new Client({onRoom(r){if(c!==client)return;room=r;if(r.phase==='lobby'){game=null;screen='home';release();$('hud').hidden=true;document.body.dataset.scene='lobby';if(modal!=='leave')showRoom(r);}},
     onGame(next){if(c!==client)return;if(screen!=='game'||!game){prevNet=null;enterGame(next,c.id);}else{prevNet=game;game=next;}netAt=performance.now();},
     onError:m=>roomError(m),onClose:m=>{if(c!==client)return;goHome();notify(m);}});
   return c;
 }
-$('teamBtn').onclick=async()=>{
-  await canLAN;
-  if(!lan){
-    showPanel('network','친구와 대전','<p>진행자 PC에서 대전 서버를 켠 뒤, 크롬북 4대 또는 6대로 같은 Wi-Fi의 경기 주소에 접속하세요.</p><ol class="note"><li>진행자 PC에서 서버 묶음을 내려받고 압축을 풉니다.</li><li>진행자 PC에 Node.js 18 이상을 설치하고 Windows에서는 <b>start-windows.cmd</b>를 실행합니다.</li><li>창에 나온 LAN 주소를 크롬북의 Chrome에서 엽니다.</li></ol><p><a class="bundle" id="serverBundle" href="./dockline-lan.zip" download>대전 서버 묶음 다운로드</a></p><div class="row"><button id="offlinePlay" class="primary">더미 사격장 열기</button></div>');$('offlinePlay').onclick=openRange;
-    if(location.protocol==='file:')$('serverBundle').replaceWith('함께 제공된 dockline-lan.zip에 팀전 서버가 들어 있습니다.');
-    return;
+async function openNetwork(invite=''){
+  if(location.protocol==='file:'){
+    showPanel('network','친구와 대전','<p>온라인 대전은 게임 사이트에서 방 코드를 입력하면 참가할 수 있어요.</p><div class="row"><a class="primary" href="https://juhyeonmoon10.github.io/dockline-summit/" target="_blank" rel="noopener">온라인 게임 열기</a></div>');return;
   }
-  showPanel('network','친구와 대전','<form id="roomForm"><label class="field">플레이어 이름<input type="text" maxlength="16" id="nick" placeholder="닉네임" autocomplete="off"></label><div class="row"><button type="button" class="primary" id="createRoom">'+size+'v'+size+' 방 만들기</button></div><label class="field">친구의 방 코드<input type="text" id="joinCode" placeholder="영문·숫자 4자리" maxlength="4" autocomplete="off" spellcheck="false"></label><div class="row"><button class="secondary" id="joinRoom">코드로 참가</button></div><p class="bad" id="netError" role="alert"></p></form>');
-  $('nick').value=nickname;$('joinCode').oninput=e=>{e.target.value=e.target.value.toUpperCase();};
-  const enter=async create=>{const code=$('joinCode').value.trim();if(!create&&code.length!==4)throw Error('방 코드 4자리를 입력하세요.');
-    nickname=$('nick').value.trim()||'플레이어';save('name',nickname);const old=client;client=null;await old?.leave();const c=client=newClient();
-    try{if(create)await c.create({name:nickname,size,weapon:selected});else await c.join({name:nickname,code,weapon:selected});}catch(e){if(client===c)client=null;throw e;}};
-  $('createRoom').onclick=e=>spin(e.currentTarget,()=>enter(true));$('roomForm').onsubmit=e=>{e.preventDefault();spin($('joinRoom'),()=>enter(false));};
-};
+  const button=$('teamBtn');button.disabled=true;await canLAN;button.disabled=false;
+  const digits=lan?4:6;
+  showPanel('network','친구와 대전','<form id="roomForm"><label class="field">내 이름<input type="text" maxlength="16" id="nick" placeholder="플레이어" autocomplete="nickname"></label><label class="field code-field">방 코드<input type="text" id="joinCode" placeholder="'+(lan?'ABCD':'ABC234')+'" maxlength="'+digits+'" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="codeHint"></label><p id="codeHint" class="note">친구에게 받은 '+digits+'자리 코드를 입력하세요.</p><div class="row"><button class="primary" id="joinRoom">참가하기</button></div><div class="room-create"><span>내가 친구를 초대하려면</span><button type="button" class="secondary" id="createRoom">'+size+'v'+size+' 방 만들기</button></div><p class="bad" id="netError" role="alert"></p><p id="netStatus" class="note" role="status"></p></form>'+(lan?'<p class="note">현재 행사장 서버에 연결되어 있어요.</p>':'<p class="note room-host-note">설치 없이 플레이 · 방장은 게임 탭을 열어두세요.</p><details class="network-help"><summary>연결이 안 되나요?</summary><p>학교·게스트 Wi-Fi에서 기기 간 연결을 막으면 참가할 수 없어요. 방장이 접속 중인지 먼저 확인하세요.</p><p>행사장 전용 서버가 필요하면 <a href="./dockline-lan.zip" download>서버 묶음</a>의 PLAY-KO.txt를 따라 연결할 수 있어요.</p></details>'));
+  $('nick').value=nickname;$('joinCode').value=invite.slice(0,digits);
+  $('joinCode').oninput=e=>{e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');$('netError').textContent='';};
+  const enter=async create=>{
+    if(joining)return;
+    const code=$('joinCode').value.trim();
+    if(!create&&code.length!==digits){roomError('방 코드 '+digits+'자리를 입력하세요.');$('joinCode').focus();return;}
+    nickname=$('nick').value.trim()||'플레이어';save('name',nickname);
+    const attempt=++joinAttempt;joining=true;
+    const form=$('roomForm'),status=$('netStatus');
+    for(const el of form.querySelectorAll('button,input'))el.disabled=true;
+    $('netError').textContent='';status.textContent=create?'방을 만드는 중…':'방에 연결하는 중…';
+    let c;
+    try{
+      const Client=lan?RoomClient:(await import('./online-net.js')).OnlineRoomClient;
+      if(attempt!==joinAttempt)return;
+      const old=client;client=null;await old?.leave();c=client=newClient(Client);c.online=!lan;
+      if(create)await c.create({name:nickname,size,weapon:selected});else await c.join({name:nickname,code,weapon:selected});
+    }catch(e){
+      await c?.leave().catch(()=>{});if(client===c)client=null;
+      if(attempt===joinAttempt&&modal==='network')roomError(e);
+    }finally{
+      if(attempt===joinAttempt){joining=false;if(form.isConnected){for(const el of form.querySelectorAll('button,input'))el.disabled=false;status.textContent='';}}
+    }
+  };
+  $('createRoom').onclick=()=>enter(true);$('roomForm').onsubmit=e=>{e.preventDefault();enter(false);};
+  if(invite)$('joinRoom').focus();else $('joinCode').focus();
+}
+$('teamBtn').onclick=()=>openNetwork();
+async function copyInvite(value,label){
+  try{await navigator.clipboard.writeText(value);notify(label+' 복사했어요.');}
+  catch{const field=$('inviteFallback');field.hidden=false;field.value=value;field.focus();field.select();notify('선택된 내용을 Ctrl+C로 복사하세요.');}
+}
 function showRoom(r){
   const me=r.players.find(p=>p.id===client?.id),host=r.hostId===me?.id;
   const teams=[0,1].map(t=>{const list=r.players.filter(p=>p.team===t);return '<section><h3>'+teamName(t)+' 팀</h3>'+list.map(p=>'<div class="room-line"><b>'+esc(p.name)+(p.id===me?.id?' (나)':'')+'</b><small>'+(p.id===r.hostId?'방장':p.ready?'준비':'대기')+'</small></div>').join('')+'<div class="room-line empty">빈 자리</div>'.repeat(Math.max(0,r.size-list.length))+'</section>';}).join('');
   const full=r.players.length===r.needed,ready=r.players.every(p=>p.ready),startLabel=full?'경기 시작':'빈자리 봇으로 시작';
-  showPanel('room','대전 대기실','<div class="choice-line"><span>방 코드</span><b class="room-code">'+esc(r.code)+'</b></div><div class="room-teams">'+teams+'</div><div class="row">'+(host?'<button class="primary" id="roomStart" '+(!ready?'disabled':'')+'>'+startLabel+'</button>':'<button class="primary" id="ready">'+(me?.ready?'준비 취소':'준비 완료')+'</button>')+'<button class="secondary" id="switchTeam">팀 변경</button></div><p class="note">'+(host?(ready?'같은 경기 주소와 방 코드를 친구에게 알려 주세요.':'모든 참가자가 준비하면 시작할 수 있어요.'):'시작되면 경기 화면을 클릭해 마우스 조작을 켜세요.')+'</p><p id="netError" class="bad" role="alert"></p>');
+  showPanel('room','대전 대기실','<div class="choice-line"><span>방 코드</span><b class="room-code">'+esc(r.code)+'</b></div><div class="row invite-actions"><button id="copyCode" class="secondary">코드 복사</button><button id="copyLink" class="secondary">초대 링크 복사</button></div><input id="inviteFallback" type="text" aria-label="복사할 초대 내용" readonly hidden><p class="room-count" role="status">'+r.size+'v'+r.size+' · '+r.players.length+' / '+r.needed+'명 참가</p><div class="room-teams">'+teams+'</div><div class="row">'+(host?'<button class="primary" id="roomStart" '+(!ready?'disabled':'')+'>'+startLabel+'</button>':'<button class="primary" id="ready">'+(me?.ready?'준비 취소':'준비 완료')+'</button>')+'<button class="secondary" id="switchTeam">팀 변경</button></div><p class="note">'+(host?(ready?'코드나 초대 링크를 친구에게 보내세요.':'모든 참가자가 준비하면 시작할 수 있어요.'):'시작되면 경기 화면을 클릭해 마우스 조작을 켜세요.')+(host&&client.online?' 방장 탭을 닫으면 방이 종료돼요.':'')+'</p><p id="netError" class="bad" role="alert"></p>');
+  $('copyCode').onclick=()=>copyInvite(r.code,'코드를');
+  $('copyLink').onclick=()=>{if(lan&&['localhost','127.0.0.1','[::1]'].includes(location.hostname)){notify('친구에게 서버 창의 LAN 주소와 방 코드를 보내세요.');return;}const url=new URL(location.href);url.search='';url.hash='room='+r.code;copyInvite(url.href,'초대 링크를');};
   if($('roomStart'))$('roomStart').onclick=e=>{audio.unlock();spin(e.currentTarget,()=>client.start(!full));};
   if($('ready'))$('ready').onclick=e=>{audio.unlock();spin(e.currentTarget,()=>client.ready(!me.ready));};
   $('switchTeam').onclick=e=>spin(e.currentTarget,()=>client.team(1-me.team));
@@ -318,4 +348,6 @@ try{
   renderer=new ArenaRenderer(canvas,MAP);bindCanvas();
 }catch(error){console.info('도크라인 경량 렌더링',error.message);switchToLite();}
 $('rangeBtn').disabled=$('teamBtn').disabled=false;$('boot').textContent='';requestAnimationFrame(frame);
+const invite=new URLSearchParams(location.hash.slice(1)).get('room');
+if(invite&&/^[A-Z0-9]{4,6}$/i.test(invite))openNetwork(invite.toUpperCase());
 

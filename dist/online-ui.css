@@ -1,0 +1,17 @@
+.code-field input{font:700 28px/1.2 Arial,sans-serif;letter-spacing:.18em;text-transform:uppercase;padding:15px}
+.code-field input::placeholder{color:#91a5ab;opacity:1}
+#panelBody #codeHint{margin:6px 0 14px;font-size:12px}
+.room-create{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid #607e864b;margin-top:24px;padding-top:20px}
+.room-create>span{font-size:12px;color:var(--muted)}
+.room-create button{flex-shrink:0}
+#panelBody .room-host-note{margin:18px 0 8px;font-size:12px}
+.network-help{font-size:12px;color:var(--muted);padding-top:5px}
+.network-help summary{cursor:pointer;min-height:28px;padding:5px 0}
+.network-help a{color:var(--signal)}
+#panelBody .network-help p{font-size:12px}
+#netError:empty,#netStatus:empty{display:none}
+#panelBody #netStatus{color:var(--signal);margin-bottom:0}
+#panelBody .room-count{margin:20px 0 8px;font-size:12px;color:var(--muted)}
+.invite-actions .secondary{min-height:38px;font-size:12px}
+#inviteFallback{font-size:12px}
+@media(max-width:360px){.room-create{align-items:stretch;flex-direction:column}.room-code{font-size:35px}}

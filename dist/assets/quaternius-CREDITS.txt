@@ -1,0 +1,10 @@
+Weapon and soldier models by Quaternius: Toon Shooter Game Kit (December 2022).
+Creative Commons Zero 1.0 Universal (CC0).
+https://quaternius.com/packs/toonshootergamekit.html
+https://creativecommons.org/publicdomain/zero/1.0/
+
+DOCKLINE adaptations: compact local geometry, receiver recoloring, separated
+magazines, first-person grip and sight fitting, team colors, weapon scale,
+animation selection and blending. Editable OBJ/MTL and glTF source files are
+included in art-source/toon-shooter. Low-spec sprites and armory thumbnails
+are rendered from the same weapon models.

@@ -4,11 +4,11 @@ import { eyeHeight, WEAPONS } from './sim.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { pelletTrails, pelletSpan, PELLET_LIFE, PELLET_CAPACITY } from './shot-path.js';
 
-// 640×360 snapshots of the exact Kenney Blaster Kit rigs used by the WebGL view.
+// 640×360 snapshots of the exact Quaternius weapon rigs used by the WebGL view.
 // Each pair of muzzle positions is the projected world-space flash on the hip/ADS rig.
 const blasterFrames = {
-  rifle:[0,.569,.624,.602], shotgun:[1,.572,.597,.596],
-  sniper:[2,.542,.587,0], pistol:[3,.623,.728,.647]
+  rifle:[0,.562,.562,.583], shotgun:[1,.551,.590,.541],
+  sniper:[2,.539,.546,0], pistol:[3,.609,.628,.564]
 };
 function blasterPose(p,t,view,w,h,kick,kind=p.active){
   const ads=!!(view.ads??p.ads),frame=blasterFrames[kind]||blasterFrames.rifle;

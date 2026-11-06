@@ -1,0 +1,5 @@
+PeerJS 1.5.5
+https://github.com/peers/peerjs
+https://registry.npmjs.org/peerjs/-/peerjs-1.5.5.tgz
+MIT license; unmodified official browser bundle apart from source-map removal and an ES-module export.
+SHA512 (base64): viMUCPDL6CSfOu0ZqVcFqbWRXNHIbv2lPqNbrBIjbFYrflebOjItJ4hPfhjnuUCstqciHVu9vVJ7jFqqKi/EuQ==

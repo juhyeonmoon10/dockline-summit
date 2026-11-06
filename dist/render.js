@@ -5,6 +5,7 @@ import { makeYard, sky, Parts, glowMaterial } from './yard-art.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { PelletRenderer } from './pellet-render.js';
 import { knifeMesh,knifeFit,knifePose } from './knife.js';
+import { operatorAvailable,createOperator,updateOperator,disposeOperator } from './operator.js';
 
 const PI=Math.PI;
 const clamp=(n,min,max)=>Math.min(max,Math.max(min,n));
@@ -318,12 +319,14 @@ export class ArenaRenderer {
   }
   avatar(player) {
     let a=this.models.get(player.id);
-    if(a && a.team===player.team)return a;
-    if(a){this.scene.remove(a.group,a.shadow);}
-    const template=this.templates[player.team===1?1:0], group=template.group.clone(true);
+    const useRig=operatorAvailable();
+    if(a && a.team===player.team && !!a.rig===useRig)return a;
+    if(a){this.scene.remove(a.group,a.shadow);if(a.rig)disposeOperator(a.rig);}
+    const rig=useRig?createOperator(player.team===1?1:0):null;
+    const template=this.templates[player.team===1?1:0], group=rig?.group||template.group.clone(true);
     const shadow=new T.Mesh(this.shadowGeo,this.shadowMat);shadow.rotation.x=-PI/2;shadow.renderOrder=1;
-    const legs=group.children.slice(-2);
-    a={team:player.team,group,shadow,legs,torso:group.getObjectByName('torso'),loadout:group.getObjectByName('loadout'),x:player.x,y:player.y,z:player.z,gait:0,wasAlive:false};
+    const legs=rig?[]:group.children.slice(-2);
+    a={team:player.team,group,shadow,rig,legs,torso:group.getObjectByName('torso'),loadout:group.getObjectByName('loadout'),x:player.x,y:player.y,z:player.z,gait:0,wasAlive:false};
     this.models.set(player.id,a);this.scene.add(group,shadow);
     return a;
   }
@@ -432,7 +435,9 @@ export class ArenaRenderer {
         const snap=!a.wasAlive || Math.hypot(p.x-a.x,p.z-a.z)>3.5;
         a.x=snap?p.x:damp(a.x,p.x,30,dt);a.z=snap?p.z:damp(a.z,p.z,30,dt);
         a.y=snap?p.y:damp(a.y,p.y,28,dt);a.group.position.set(a.x,a.y,a.z);
-        a.group.rotation.y=-p.yaw;a.group.scale.y=damp(a.group.scale.y,p.slide>0?.67:1,18,dt);
+        a.group.rotation.y=-p.yaw;a.group.scale.y=damp(a.group.scale.y,!a.rig&&p.slide>0?.67:1,18,dt);
+        if(a.rig)updateOperator(a.rig,p,dt,this.meleeSwings.get(p.id));
+        else {
         if(a.active!==p.active){
           const held=p.active==='knife'?knifeMesh():blasterMesh(p.active);
           if(p.active==='knife')held.position.y=.075;
@@ -449,6 +454,7 @@ export class ArenaRenderer {
         a.legs[0].rotation.x=step;a.legs[1].rotation.x=-step;
         a.torso.position.y=.016*Math.abs(step);
         a.torso.rotation.z=step*.043+cut.rz*.07;
+        }
         let floor=0;
         for(const b of this.map.boxes)if(b.h<=a.y+.09 && Math.abs(a.x-b.x)<=b.w*.5 && Math.abs(a.z-b.z)<=b.d*.5)floor=Math.max(floor,b.h);
         for(const r of this.map.ramps||[])if(Math.abs(a.x-r.x)<=r.w*.5 && Math.abs(a.z-r.z)<=r.d*.5){
@@ -460,7 +466,7 @@ export class ArenaRenderer {
       a.wasAlive=show;
     }
     for(const [id,a] of this.models)if(!ids.has(id)){
-      this.scene.remove(a.group,a.shadow);this.models.delete(id);
+      this.scene.remove(a.group,a.shadow);if(a.rig)disposeOperator(a.rig);this.models.delete(id);
     }
   }
   lobby(t) {
