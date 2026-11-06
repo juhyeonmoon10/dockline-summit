@@ -482,7 +482,7 @@ export class ArenaRenderer {
     this.equip=damp(this.equip,0,14,dt);
     for(const [id,gun] of Object.entries(this.guns))gun.visible=id===key;
     const weapon=this.guns[key],sniper=key==='sniper';
-    const progress=focus.reload>0?clamp(1-focus.reload/WEAPONS[key].reload,0,1):0;
+    const progress=focus.reload>0?clamp(1-focus.reload/(focus.reloadDuration||WEAPONS[key].reload),0,1):0;
     const reloadWeight=Math.pow(Math.sin(PI*progress),.72);
     // Pull the real, separately authored magazine out of the receiver and reseat it.
     const pull=progress>.13&&progress<.83?Math.sin((progress-.13)/.70*PI):0;

@@ -5,9 +5,10 @@
  * src/goals/DodgeGoal.js and src/goals/HuntGoal.js. See assets/dive-LICENSE.txt.
  * Dockline uses its own collision queries, navigation, weapons and net inputs.
  */
+import { WEAPONS } from './balance.js';
+
 const limit = (value, min, max) => Math.max(min, Math.min(max, value));
 const angle = (from, to) => Math.atan2(Math.sin(to - from), Math.cos(to - from));
-const magSize = { rifle: 24, shotgun: 5, sniper: 5, pistol: 12 };
 
 function newBrain(p) {
   // Stable variation across rounds, without synchronising teammates' shots or footwork.
@@ -120,7 +121,7 @@ export function tacticalBotInput(g, p, dt, memory, env) {
   const target = b.target;
   const seen = target?.visible;
   const range = target ? Math.hypot(target.x - p.x, target.z - p.z) : Infinity;
-  const combatRange = p.weapon === 'shotgun' ? 5.4 : p.weapon === 'sniper' ? 20 : 13;
+  const combatRange = p.active === 'shotgun' ? 5.4 : p.active === 'sniper' ? 20 : 13;
   let movement = null;
   const overtime = g.phase === 'overtime';
   // DIVE AttackGoal: clear lane -> strafe while engaging; blocked -> close in.
@@ -157,14 +158,17 @@ export function tacticalBotInput(g, p, dt, memory, env) {
     pitch += limit(elevation - p.pitch, -3.4 * dt, 3.4 * dt);
     if (seen) {
       const reaction = .36 + b.tempo * .30;
-      const burst = p.weapon !== 'rifle' || (g.elapsed + b.phase) % (1.13 + b.tempo * .23) < .48 + b.tempo * .18;
+      const burst = p.active !== 'rifle' || (g.elapsed + b.phase) % (1.13 + b.tempo * .23) < .48 + b.tempo * .18;
       fire = g.elapsed - target.visibleSince >= reaction && Math.abs(turn) < .09 && Math.abs(pitch - elevation) < .07 && burst;
     }
   }
   const sy = Math.sin(yaw), cy = Math.cos(yaw);
+  const gun=WEAPONS[p.active];
+  const dry=p.ammo===0 && p.reserve===0;
   return {
-    yaw, pitch, fire, ads: seen && p.weapon === 'sniper' && range > 8, slot: 1,
+    yaw, pitch, fire:fire&&!dry, ads: seen && p.active === 'sniper' && range > 8,
+    slot: p.active==='pistol'||dry?2:1,
     forward: movement.x * sy - movement.z * cy, strafe: movement.x * cy + movement.z * sy,
-    jump: !!movement.jump, reload: !p.ammo || (!seen && p.ammo <= (magSize[p.active] || 12) * .35)
+    jump: !!movement.jump, reload: p.reserve>0 && !p.reload && (!p.ammo || (!seen && p.ammo <= gun.mag * .35))
   };
 }

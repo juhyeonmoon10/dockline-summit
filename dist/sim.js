@@ -3,14 +3,8 @@ import { MAP } from './arena-map.js';
 import { BODY_RADIUS, walkHeight, support, ceilingAt, intersect, worldHit } from './arena-world.js';
 import { nextWaypoint } from './arena-routes.js';
 import { tacticalBotInput } from './tactics.js';
-export { MAP };
-
-export const WEAPONS = {
-  rifle: { id: 'rifle', label: '돌격소총', mag: 24, damage: 25, head: 40, interval: .145, reload: 1.5, spread: .008 },
-  shotgun: { id: 'shotgun', label: '펌프 산탄총', mag: 5, damage: 16, head: 20, interval: .82, reload: 1.75, spread: .078, pellets: 8 },
-  sniper: { id: 'sniper', label: '저격소총', mag: 5, damage: 67, head: 110, interval: 1.05, reload: 1.9, spread: .005 },
-  pistol: { id: 'pistol', label: '권총', mag: 12, damage: 21, head: 35, interval: .235, reload: 1.0, spread: .013 }
-};
+import { MAX_HP, WEAPONS, impactDamage } from './balance.js';
+export { MAP, MAX_HP, WEAPONS };
 
 const playerMemory = new WeakMap();
 
@@ -22,7 +16,7 @@ export const spawnYaw = player => MAP.spawns[player.team][player.seat % 3].yaw;
 
 function memory(p) {
   if (!playerMemory.has(p)) {
-    playerMemory.set(p, { mag: { [p.weapon]: WEAPONS[p.weapon].mag, pistol: 12 }, cooldown: 0,
+    playerMemory.set(p, { holstered: {}, cooldown: 0,
       slideCooldown: 0, lastSlide: false, lastJump: false, vx: 0, vz: 0, vy: 0, grounded: true });
   }
   return playerMemory.get(p);
@@ -32,8 +26,9 @@ function resetPlayer(p) {
   const start = MAP.spawns[p.team][p.seat % 3];
   p.x=start.x; p.z=start.z; p.y=0; p.yaw=start.yaw; p.pitch=0; p.grounded=true;
 
-  p.hp = 100; p.alive = true; p.active = p.weapon;
-  p.ammo = WEAPONS[p.weapon].mag; p.ads = false; p.slide = 0; p.reload = 0; p.speed = 0;
+  p.hp = p.maxHp = MAX_HP; p.alive = true; p.active = p.weapon;
+  p.ammo = WEAPONS[p.weapon].mag; p.reserve = WEAPONS[p.weapon].reserve;
+  p.ads = false; p.slide = 0; p.reload = 0; p.reloadDuration = 0; p.speed = 0;
   playerMemory.delete(p);
 }
 
@@ -51,10 +46,11 @@ function initialState(size, phase, time, players, targets) {
 
 export function createRange({ id='local', name='나', weapon='rifle' } = {}) {
   const player = spawnPlayer({id, name, team:0, seat:0, bot:false, weapon:primary(weapon)});
+  player.reserve = null; // The range never runs out of practice rounds.
   const targets = MAP.rangeTargets.map((position, index) => ({
     ...position, kind:'dummy', id:'dummy-'+(index+1), name:'더미 '+(index+1),
     yaw:Math.atan2(player.x-position.x, position.z-player.z),
-    hp:100, maxHp:100, alive:true, respawnAt:0
+    hp:MAX_HP, maxHp:MAX_HP, alive:true, respawnAt:0
   }));
   const near = targets[0], dx = near.x-player.x, dz = near.z-player.z;
   player.yaw = Math.atan2(dx,-dz);
@@ -94,27 +90,55 @@ function emit(g, type, actor, fields = {}) {
   if (g.events.length > 40) g.events.splice(0, g.events.length - 40);
 }
 
-function changeWeapon(p, id) {
-  if (primary(id) !== id || id === p.weapon) return;
-  p.weapon = id; p.active = id; p.ammo = WEAPONS[id].mag; p.reload = 0;
-  memory(p).mag[id] = p.ammo;
+function equipWeapon(p, next, now) {
+  const m = memory(p);
+  m.holstered[p.active] = {ammo:p.ammo, reserve:p.reserve, readyAt:now+Math.max(0,m.cooldown)};
+  const gun = WEAPONS[next];
+  const stock = m.holstered[next] || {ammo:gun.mag, reserve:p.reserve===null?null:gun.reserve, readyAt:0};
+  p.active = next; p.ammo = stock.ammo; p.reserve = stock.reserve;
+  m.cooldown = Math.max(gun.equip,stock.readyAt-now);
+  p.reload = 0; p.reloadDuration = 0;
 }
 
-function changeSlot(p, slot) {
+function changeWeapon(p, id, now) {
+  if (primary(id) !== id || id === p.weapon) return;
+  p.weapon = id;
+  equipWeapon(p,id,now);
+}
+
+function changeSlot(p, slot, now) {
   const next = slot === 2 ? 'pistol' : p.weapon;
   if (p.active === next) return;
-  const m = memory(p);
-  m.mag[p.active] = p.ammo; p.active = next; p.ammo = m.mag[next] ?? WEAPONS[next].mag;
-  p.reload = 0; m.cooldown = Math.max(m.cooldown, .16);
+  equipWeapon(p,next,now);
 }
 
 function beginReload(g, p) {
-  if (p.reload > 0 || p.ammo === WEAPONS[p.active].mag) return;
-  p.reload = WEAPONS[p.active].reload;
+  const w = WEAPONS[p.active];
+  if (p.reload > 0 || p.ammo >= w.mag || p.reserve === 0) return;
+  p.reloadDuration = p.ammo===0 ? (w.emptyReload ?? w.reload) : w.reload;
+  p.reload = p.reloadDuration;
   emit(g, 'reload', p.id, { weapon: p.active });
 }
 
-
+function advanceReload(g, p, dt, firing) {
+  if (!p.reload) return;
+  const w = WEAPONS[p.active], remaining = p.reload - dt;
+  if (remaining > 1e-8) {
+    if (w.shellReload && firing && p.ammo>0) {
+      p.reload = 0; p.reloadDuration = 0;
+    } else p.reload = remaining;
+    return;
+  }
+  const needed = w.shellReload ? 1 : w.mag-p.ammo;
+  const count = Math.min(needed,p.reserve ?? needed);
+  p.ammo += count;
+  if (p.reserve!==null) p.reserve -= count;
+  p.reload = 0; p.reloadDuration = 0;
+  if (w.shellReload && !firing && p.ammo<w.mag && p.reserve!==0) {
+    beginReload(g,p);
+    p.reload += remaining; // Carry the unused part of this tick into the next shell.
+  }
+}
 
 function movePlayer(p, input, dt) {
   const m = memory(p);
@@ -130,7 +154,8 @@ function movePlayer(p, input, dt) {
   // Sliding into a jump carries the current speed. Air steering preserves a little momentum.
   if (input.jump && !m.lastJump && m.grounded) { m.vy=7.15; m.grounded=false; p.slide=0; }
   m.lastJump=!!input.jump; m.lastSlide=!!input.slide;
-  const rate = p.ads ? 3.65 : 6.2, slideSpeed = 7.7 + 4.1*(p.slide/.52);
+  const rate = (p.ads ? 3.65 : 6.2) * WEAPONS[p.active].moveScale;
+  const slideSpeed = 7.7 + 4.1*(p.slide/.52);
   const vx=p.slide>0?m.slideX*slideSpeed:dx*rate, vz=p.slide>0?m.slideZ*slideSpeed:dz*rate;
   const response=1-Math.exp(-dt*(m.grounded?24:3.1));
   m.vx+=(vx-m.vx)*response; m.vz+=(vz-m.vz)*response;
@@ -191,18 +216,19 @@ function trace(g, p, yaw, pitch) {
 function shoot(g, p) {
   if (!p.ammo) { beginReload(g,p); return; }
   const w = WEAPONS[p.active], m = memory(p);
-  p.ammo--; m.mag[p.active] = p.ammo; m.cooldown = w.interval;
+  p.ammo--;
+  // Carry the fraction of a tick past the deadline so a held trigger keeps its rate.
+  m.cooldown = w.interval + Math.min(0,m.cooldown);
   const total = new Map();
   let central;
   for (let i=0; i < (w.pellets || 1); i++) {
-    const spread = w.spread * (p.ads && !w.pellets ? .24 : 1) * (p.slide > 0 ? 1.45 : 1);
+    const spread = p.ads ? w.aimSpread : w.spread;
     const angle = Math.random() * Math.PI * 2, radius = Math.sqrt(Math.random()) * spread;
     const hit = trace(g, p, p.yaw + Math.cos(angle)*radius, p.pitch + Math.sin(angle)*radius);
     if (!central || (hit.target && !central.target)) central = hit;
     if (!hit.target) continue;
     const old = total.get(hit.target) || { damage: 0, headshot: false };
-    const falloff = w.pellets ? clamp(1 - Math.max(0,hit.distance - 7)*.045,.45,1) : 1;
-    old.damage += Math.round((hit.headshot ? w.head : w.damage)*falloff); old.headshot ||= hit.headshot;
+    old.damage += impactDamage(w,hit.distance,hit.headshot); old.headshot ||= hit.headshot;
     total.set(hit.target, old);
   }
   const {x,y,z,ex,ey,ez} = central;
@@ -213,17 +239,18 @@ function shoot(g, p) {
   }
   for (const [t, h] of total) {
     if(t.practice) { emit(g,'hit',p.id,{target:t.id,damage:0,headshot:false,weapon:p.active}); continue; }
-    const damage = Math.min(t.hp,h.damage);
+    const damage = Math.min(t.hp,Math.round(h.damage*100)/100);
     emit(g,'hit',p.id,{target:t.id, damage, headshot:h.headshot, weapon:p.active});
     if (g.phase === 'warmup') continue;
-    t.hp -= damage; p.damage += damage;
+    t.hp = Math.round((t.hp-damage)*100)/100;
+    p.damage = Math.round((p.damage+damage)*100)/100;
     if (t.hp > 0) continue;
     t.alive = false; p.kills++;
     if (t.kind==='dummy') {
       t.respawnAt = g.elapsed + 1.5;
       g.range.kills++;
     } else {
-      t.ads = false; t.slide = 0; t.speed = 0; t.reload = 0; t.deaths++;
+      t.ads = false; t.slide = 0; t.speed = 0; t.reload = 0; t.reloadDuration = 0; t.deaths++;
     }
     emit(g,'kill',p.id,{target:t.id,headshot:h.headshot,weapon:p.active});
   }
@@ -309,7 +336,7 @@ function tick(g, inputs, dt) {
     g.time=Math.max(0,g.time-dt);
   }
   if (g.phase==='range' || g.phase==='warmup' || g.phase==='between') {
-    for (const p of g.players) if (inputs[p.id]?.weapon) changeWeapon(p,inputs[p.id].weapon);
+    for (const p of g.players) if (inputs[p.id]?.weapon) changeWeapon(p,inputs[p.id].weapon,g.elapsed);
   }
   if (g.phase==='between') {
     if (g.time<=0) { g.round++; startRound(g); }
@@ -322,16 +349,13 @@ function tick(g, inputs, dt) {
     const input=p.bot ? botInput(g,p,dt) : (inputs[p.id] || {});
     const m=memory(p);
     p.yaw=number(input.yaw,p.yaw)%(Math.PI*2); p.pitch=clamp(number(input.pitch,p.pitch),-1.45,1.45);
-    if (input.slot===1 || input.slot===2) changeSlot(p,input.slot);
+    if (input.slot===1 || input.slot===2) changeSlot(p,input.slot,g.elapsed);
+    m.cooldown=m.cooldown>0?m.cooldown-dt:0;
+    advanceReload(g,p,dt,input.fire);
+    if (input.reload && (!input.fire || !p.ammo)) beginReload(g,p);
     p.ads=!!input.ads && !p.slide && !p.reload;
     movePlayer(p,input,dt);
-    m.cooldown=Math.max(0,m.cooldown-dt);
-    if (p.reload>0) {
-      p.reload=Math.max(0,p.reload-dt);
-      if (p.reload===0) { p.ammo=WEAPONS[p.active].mag; m.mag[p.active]=p.ammo; }
-    }
-    if (input.reload) beginReload(g,p);
-    if (input.fire && m.cooldown===0 && !p.reload) shooters.push(p);
+    if (input.fire && m.cooldown<=1e-8 && !p.reload) shooters.push(p);
   }
   // A paired trigger pull in one server tick allows a trade instead of favoring team order.
   for (const p of shooters) shoot(g,p);

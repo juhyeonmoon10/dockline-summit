@@ -1,4 +1,5 @@
-import { MAP, WEAPONS, createRange, stepGame, spawnYaw } from './sim.js';
+import { MAP, createRange, stepGame, spawnYaw } from './sim.js';
+import { MAX_HP, WEAPONS } from './balance.js';
 import { ArenaRenderer } from './render.js';
 import { LiteRenderer } from './lite.js';
 import { RoomClient, supportsLAN } from './net.js';
@@ -25,7 +26,6 @@ const esc=v=>String(v??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>'
 const clamp=(x,lo,hi)=>Math.max(lo,Math.min(hi,x));
 const teamName=t=>t===0?'블루':'오렌지';
 const primary=['rifle','shotgun','sniper'];
-const loadoutInfo={rifle:'24발 · 중거리 연사',shotgun:'5발 · 근거리 산탄',sniper:'5발 · 장거리 정밀 사격'};
 let size=read('size',2)===3?3:2, selected=primary.includes(read('weapon','rifle'))?read('weapon','rifle'):'rifle';
 let sensitivity=clamp(Number(read('sensitivity',1))||1,.35,2.4),quality=read('quality','auto'),nickname=String(read('name','')).slice(0,16);
 audio.enabled=read('sound',true);
@@ -46,7 +46,8 @@ function setLoadout(type){
   if(!primary.includes(type))return;
   selected=type;save('weapon',type);
   document.querySelectorAll('[data-weapon]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.weapon===type)));
-  $('gunDesc').textContent=loadoutInfo[type];
+  const gun=WEAPONS[type], pellets=gun.pellets?'×'+gun.pellets:'';
+  $('gunDesc').textContent='탄창 '+gun.mag+'발 · 근거리 몸통 '+gun.damage+pellets+' / 머리 '+gun.head+pellets;
 }
 document.querySelectorAll('[data-weapon]').forEach(b=>b.onclick=()=>setLoadout(b.dataset.weapon));
 setLoadout(selected);
@@ -170,7 +171,7 @@ function receiveEvents(now){
   for(const ev of game.events){if(ev.seq<=lastEvent)continue;lastEvent=ev.seq;const me=game.players.find(p=>p.id===selfId);audio.event(ev,game,watchPlayer());
     if(ev.type==='hit'&&ev.actor===selfId){
       hitTime=now+.14;
-      if(ev.damage){$('combatDamage').textContent=String(ev.damage);$('combatDamage').classList.toggle('head',!!ev.headshot);damageUntil=now+.4;}
+      if(ev.damage){$('combatDamage').textContent=String(Math.round(ev.damage*10)/10);$('combatDamage').classList.toggle('head',!!ev.headshot);damageUntil=now+.4;}
     }
     if(ev.type==='hit'&&ev.target===selfId)damageTime=now+.32;
     if(ev.type==='kill'){
@@ -198,11 +199,16 @@ function showHUD(now){
     $('orangeLive').textContent='오렌지 '+game.players.filter(m=>m.team===1&&m.alive).length+'/'+game.size;
     $('clock').textContent='0:'+String(Math.ceil(game.time)).padStart(2,'0');
     $('roundLabel').textContent=game.phase==='warmup'?'준비 시간':game.phase==='overtime'?'연장전':'ROUND '+game.round;
-    $('hp').textContent=Math.max(0,Math.ceil(p.hp));$('hpLabel').textContent=teamName(p.team)+' · 체력';$('hpBar').style.width=clamp(p.hp,0,100)+'%';
+    const maxHp=p.maxHp??MAX_HP;
+    $('hp').textContent=Math.max(0,Math.ceil(p.hp));$('hpLabel').textContent=teamName(p.team)+' · 체력';
+    $('hpBar').style.width=clamp(100*p.hp/maxHp,0,100)+'%';
     $('health').style.setProperty('--team-color',p.team===0?'var(--blue)':'var(--red)');
   }
   if(now>damageUntil)$('combatDamage').textContent='';if(now>fragUntil)$('fragConfirm').textContent='';
-  $('gun').textContent=WEAPONS[p.active]?.label||p.active;$('ammo').textContent=p.ammo;$('rounds').textContent=p.reload>0?'재장전':' / '+WEAPONS[p.active].mag;
+  const gun=WEAPONS[p.active];
+  $('gun').textContent=gun.label+(p.reload>0?' · 재장전 중':'');
+  $('ammo').textContent=p.ammo;
+  $('rounds').textContent='/ '+(game.phase==='range'?'∞':p.reserve??gun.reserve);
   const spectating=!me.alive&&game.phase!=='between'&&game.phase!=='end';$('spectator').hidden=!spectating;$('spectator').textContent=p.alive?'관전 · '+p.name+'   [Tab]':'다음 라운드 대기 중';
   $('sight').classList.toggle('scope',p.active==='sniper'&&(spectating?p.ads:ads));$('sight').hidden=!p.alive||game.phase==='between';
   let text='',sub='',hint='';

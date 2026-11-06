@@ -1,6 +1,7 @@
 // Editable author models and the offline conversion tool ship under art-source/blasters.
 import * as T from './assets/three.module.min.js';
 import { blasters } from './assets/blaster-geometry.js';
+import { WEAPONS } from './balance.js';
 
 const cache = new Map();
 const paint = new T.MeshStandardMaterial({vertexColors:true, roughness:.52, metalness:.13});
@@ -16,7 +17,8 @@ const finishes=new Map();
 function receiverPaint(kind){
   if(finishes.has(kind))return finishes.get(kind);
   const canvas=document.createElement('canvas');canvas.width=768;canvas.height=384;
-  const ctx=canvas.getContext('2d'),code={rifle:'AR / 24',shotgun:'SG / 05',sniper:'SR / 05',pistol:'SC / 12'}[kind];
+  const ctx=canvas.getContext('2d'),prefix={rifle:'AR',shotgun:'SG',sniper:'SR',pistol:'SC'}[kind];
+  const code=prefix+' / '+String(WEAPONS[kind].mag).padStart(2,'0');
   const cream='#eef2e5',ink='#223744',gold='#ffb540';
   const stripe=(x,y,w,h,fill)=>{
     ctx.fillStyle=fill;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+w,y);

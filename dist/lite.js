@@ -237,7 +237,7 @@ export class LiteRenderer {
     if(this.blasterAtlas.complete&&this.blasterAtlas.naturalWidth){
       const frame=blasterFrames[gun]||blasterFrames.rifle, gunWidth=Math.max(w,h*16/9),left=(w-gunWidth)*.5;
       const movement=Math.min(1,(p.speed||0)*.16)*(ads?.17:1),kick=this.recoil;
-      const reloadPose=reload?Math.sin(Math.PI*Math.max(0,Math.min(1,1-p.reload/(WEAPONS[gun]?.reload||1)))):0;
+      const reloadPose=reload?Math.sin(Math.PI*Math.max(0,Math.min(1,1-p.reload/(p.reloadDuration||WEAPONS[gun]?.reload||1)))):0;
       const mx=left+gunWidth*(ads?.5:frame[1]),my=h*(ads?frame[3]:frame[2]);
       const dx=Math.sin(t*10)*h*.005*movement,dy=Math.abs(Math.cos(t*10))*h*.006*movement+h*(kick*.018+reloadPose*.20);
       this.shotPoint=[mx+dx,my+dy];

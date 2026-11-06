@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createGame, createRange, eyeHeight, stepGame } from '../dist/sim.js';
+import { createGame, createRange, eyeHeight, MAX_HP, stepGame, WEAPONS } from '../dist/sim.js';
 
 function advance(game, seconds) {
   for (let remaining = seconds; remaining > 1e-8; remaining -= .25) {
@@ -20,16 +20,17 @@ function aim(player, target, height) {
 test('starting aim lands body hits, dummies fall and return without starting a match', () => {
   const game = createRange(), p = game.players[0], near = game.targets[0];
   assert.deepEqual(game.players.map(player=>player.bot), [false]);
-  for (let i=0; i<4; i++) {
-    if (i) advance(game,.15);
+  const shotsToKill = Math.ceil(MAX_HP / WEAPONS.rifle.damage);
+  for (let i=0; i<shotsToKill; i++) {
+    if (i) advance(game,WEAPONS.rifle.interval);
     shoot(game);
   }
-  assert.deepEqual(game.range,{shots:4,hits:4,kills:1});
+  assert.deepEqual(game.range,{shots:shotsToKill,hits:shotsToKill,kills:1});
   assert.equal(near.hp,0);
   assert.equal(near.alive,false);
   advance(game,.2);
   shoot(game);
-  assert.deepEqual(game.range,{shots:5,hits:4,kills:1});
+  assert.deepEqual(game.range,{shots:shotsToKill+1,hits:shotsToKill,kills:1});
   advance(game,1.1);
   assert.equal(near.alive,false);
   advance(game,.25);
@@ -37,7 +38,7 @@ test('starting aim lands body hits, dummies fall and return without starting a m
   assert.equal(near.hp,near.maxHp);
   advance(game,90);
   assert.equal(game.phase,'range');
-  assert.equal(p.hp,100);
+  assert.equal(p.hp,MAX_HP);
   assert.ok(game.events.every(e=>e.actor===p.id));
 });
 
@@ -46,7 +47,9 @@ test('every dummy can be hit from spawn, including an elevated headshot', () => 
   assert.ok(template.targets.length>=4);
   for (let i=0; i<template.targets.length; i++) {
     const game = createRange({weapon:'sniper'}), target=game.targets[i];
-    shoot(game,{...aim(game.players[0],target,1.61),ads:true});
+    const player=game.players[0], scoped={...aim(player,target,1.61),ads:true};
+    for(let frame=0;frame<60;frame++)stepGame(game,{[player.id]:scoped},1/60);
+    shoot(game,scoped);
     assert.equal(target.hp,0,target.name);
     assert.ok(game.events.some(e=>e.type==='hit' && e.target===target.id && e.headshot));
     assert.deepEqual(game.range,{shots:1,hits:1,kills:1});
@@ -55,9 +58,10 @@ test('every dummy can be hit from spawn, including an elevated headshot', () => 
 
 test('a pellet volley counts as one shot, and weapon changes remain available', () => {
   const game = createRange({weapon:'shotgun'}), p=game.players[0], near=game.targets[0];
-  p.z=near.z+1.5;
+  p.z=near.z+.8;
   shoot(game,aim(p,near,1.1));
-  assert.deepEqual(game.range,{shots:1,hits:1,kills:1});
+  assert.deepEqual(game.range,{shots:1,hits:1,kills:0});
+  assert.equal(near.hp,MAX_HP-WEAPONS.shotgun.damage*WEAPONS.shotgun.pellets);
   stepGame(game,{[p.id]:{weapon:'sniper',slot:1}});
   assert.equal(p.active,'sniper');
   stepGame(game,{[p.id]:{slot:2}});
@@ -67,12 +71,12 @@ test('a pellet volley counts as one shot, and weapon changes remain available', 
 test('the steel stand and targets hidden by solid cover do not score', () => {
   const game=createRange({weapon:'sniper'}), p=game.players[0], target=game.targets[0];
   shoot(game,{...aim(p,target,.34),ads:true});
-  advance(game,1.1);
+  advance(game,WEAPONS.sniper.interval+.05);
   p.x=-6.9; p.z=6;
   target.x=-6.9; target.z=14;
   shoot(game,{...aim(p,target,1.14),ads:true});
   assert.deepEqual(game.range,{shots:2,hits:0,kills:0});
-  assert.equal(target.hp,100);
+  assert.equal(target.hp,MAX_HP);
 });
 
 test('an ordinary team room still proceeds from warmup into a round', () => {
