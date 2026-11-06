@@ -243,8 +243,8 @@ function dummyMesh(faces) {
 }
 
 function lightScene(scene,world=false) {
-  scene.add(new T.HemisphereLight(0xe0f0ff,world?0xa0b4bd:0xa0b2c6,world?1.38:1.54));
-  const key=new T.DirectionalLight(0xffedca,world?2.05:2.65);key.position.set(-23,31,18);scene.add(key);
+  scene.add(new T.HemisphereLight(0xe0f0ff,world?0x718b9a:0xa0b2c6,world?1.05:1.54));
+  const key=new T.DirectionalLight(0xffedca,world?1.72:2.65);key.position.set(-23,31,18);scene.add(key);
   if(world){
     key.castShadow=true;key.shadow.mapSize.set(1024,1024);
     Object.assign(key.shadow.camera,{left:-30,right:30,top:32,bottom:-30,near:.5,far:98});

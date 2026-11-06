@@ -1,0 +1,9 @@
+Environment props by Kenney, Creative Commons Zero 1.0 Universal (CC0).
+Factory Kit 3.0: https://kenney.nl/assets/factory-kit
+City Kit Industrial 2.0: https://kenney.nl/assets/city-kit-industrial
+Blaster Kit 2.1 cargo case: https://kenney.nl/assets/blaster-kit
+License: https://creativecommons.org/publicdomain/zero/1.0/
+
+Selected models, editable original files, original license texts, and conversion
+instructions are included in art-source/environment. Palette colours are baked
+into vertices; the container receives blue/orange team variants in DOCKLINE.
