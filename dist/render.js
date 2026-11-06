@@ -3,6 +3,7 @@ import { blasterMesh, gunFit } from './blaster.js';
 import { WEAPONS } from './sim.js';
 import { makeYard, sky, Parts, glowMaterial } from './yard-art.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
+import { PelletRenderer } from './pellet-render.js';
 
 const PI=Math.PI;
 const clamp=(n,min,max)=>Math.min(max,Math.max(min,n));
@@ -58,7 +59,7 @@ function surfaceNormal(map,e,dir,out) {
 
 class ImpactMarks {
   constructor(scene) {
-    this.capacity=32;this.cursor=0;this.time=new Float32Array(this.capacity);
+    this.capacity=128;this.cursor=0;this.time=new Float32Array(this.capacity);
     const geo=new T.PlaneGeometry(.18,.18);
     this.opacity=new T.InstancedBufferAttribute(new Float32Array(this.capacity),1).setUsage(T.DynamicDrawUsage);
     geo.setAttribute('markOpacity',this.opacity);
@@ -82,9 +83,9 @@ class ImpactMarks {
     const i=this.cursor++%this.capacity,o=this.stamp;
     o.position.set(e.ex,e.ey,e.ez).addScaledVector(this.normal,.006);
     o.quaternion.setFromUnitVectors(this.forward,this.normal);o.rotateZ(e.seq*2.4);
-    const size=e.weapon==='sniper'?1.21:e.weapon==='pistol'?.82:1;
+    const size=e.weapon==='shotgun'?.40:e.weapon==='sniper'?1.21:e.weapon==='pistol'?.82:1;
     o.scale.set(size,size*.9,1);o.updateMatrix();this.mesh.setMatrixAt(i,o.matrix);
-    this.mesh.instanceMatrix.needsUpdate=true;this.time[i]=7;this.mesh.visible=true;return true;
+    this.mesh.instanceMatrix.needsUpdate=true;this.time[i]=e.weapon==='shotgun'?3:7;this.mesh.visible=true;return true;
   }
   step(dt) {
     if(!this.mesh.visible)return;
@@ -275,6 +276,7 @@ export class ArenaRenderer {
     this.aim=0;this.bob=0;this.eye=1.55;this.roll=0;this.lastFocus=null;
     this.lookSwayX=0;this.lookSwayY=0;this.lastYaw=null;this.lastPitch=null;this.equip=0;this.active=null;
     this.tracers=[];this.spark=[];this.marks=new ImpactMarks(this.scene);this.res={w:0,h:0};this.performanceScale=1;
+    this.shotTrails=new PelletRenderer(this.scene);
     const beamGeo=new T.CylinderGeometry(1,1,1,5,1,true);
     for(let i=0;i<16;i++){
       const mesh=new T.Mesh(beamGeo,new T.MeshBasicMaterial({color:0xffdd91,transparent:true,depthWrite:false}));
@@ -329,15 +331,16 @@ export class ArenaRenderer {
     p.velocity.set(vx,vy,vz);p.ttl=p.life=life;p.size=size;p.mesh.visible=true;
   }
   effects(game,focus,dt) {
+    this.shotTrails.step(dt);
     this.recoil=damp(this.recoil,0,18,dt);this.flashTime=Math.max(0,this.flashTime-dt);
-    if(game.seq<this.lastSeq || game.elapsed<this.lastElapsed){this.lastSeq=0;this.marks.clear();}
+    if(game.seq<this.lastSeq || game.elapsed<this.lastElapsed){this.lastSeq=0;this.marks.clear();this.shotTrails.clear();}
     this.lastElapsed=game.elapsed;
     const events=game.events||[];
     for(let i=0;i<events.length;i++){
       const e=events[i];
       if(e.seq<=this.lastSeq)continue;
       this.lastSeq=e.seq;
-      if(e.type==='round')this.marks.clear();
+      if(e.type==='round'){this.marks.clear();this.shotTrails.clear();}
       if(e.type==='hit'&&this.plates.has(e.target))this.plates.get(e.target).userData.hit=.18;
       if(e.type==='kill'&&e.target!==focus?.id){
         const fallen=game.players.find(p=>p.id===e.target) || game.targets?.find(v=>v.kind==='dummy'&&v.id===e.target);
@@ -349,6 +352,14 @@ export class ArenaRenderer {
       if(e.type!=='shot'||!Number.isFinite(e.ex))continue;
       const mine=e.actor===focus?.id;
       if(mine){this.recoil=(gunFit[e.weapon]?.flash||1);this.flashTime=.057;}
+      if(e.weapon==='shotgun'){
+        const trails=this.shotTrails.add(e,mine,focus?.ads);
+        trails.forEach((trail,index)=>{
+          direction.set(trail.dx,trail.dy,trail.dz).normalize();
+          trail.contact=!!trail.target||this.marks.add(this.map,{...trail,weapon:'shotgun',seq:e.seq*10+index},direction);
+        });
+        this.traceIndex++;continue;
+      }
       const trace=this.tracers[this.traceIndex++%this.tracers.length], line=trace.mesh;
       pose.set(e.x,e.y,e.z);endpoint.set(e.ex,e.ey,e.ez);
       direction.copy(endpoint).sub(pose);
@@ -415,6 +426,7 @@ export class ArenaRenderer {
     }
   }
   lobby(t) {
+    this.shotTrails.clear();
     if(this.marks.mesh.visible)this.marks.clear();
     for(const plate of this.plates.values())plate.visible=false;
     for(const a of this.models.values()){a.group.visible=false;a.shadow.visible=false;a.wasAlive=false;}
@@ -509,6 +521,11 @@ export class ArenaRenderer {
     this.flash.rotation.z=this.traceIndex*1.9;
     this.ring.material.opacity=game.phase==='overtime'?.70+.19*Math.sin(t*5):.32;
     this.ring.material.color.setHex(game.phase==='overtime'&&game.capture?.team!==null?teamLights[game.capture?.team]||0xffdf78:0xffd77b);
+    cam.updateMatrixWorld();this.flash.getWorldPosition(pose);
+    // Match the viewmodel's lens so the fan leaves the visible barrel, even in ADS.
+    const lens=Math.tan(cam.fov*PI/360)/Math.tan(this.gunCamera.fov*PI/360);
+    pose.x*=lens;pose.y*=lens;pose.applyQuaternion(cam.quaternion).add(cam.position);
+    this.shotTrails.draw(cam,this.res.h,pose);
     this.gl.clear();this.gl.render(this.scene,cam);
     this.gl.clearDepth();
     // High magnification is a clear center view; the DOM crosshair remains visible.

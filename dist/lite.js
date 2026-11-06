@@ -2,6 +2,7 @@
 // Reciprocal-depth tests keep players, short cover and the aim point correctly aligned.
 import { eyeHeight, WEAPONS } from './sim.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
+import { pelletTrails, pelletSpan, PELLET_LIFE, PELLET_CAPACITY } from './shot-path.js';
 
 // 640×360 snapshots of the exact Kenney Blaster Kit rigs used by the WebGL view.
 // Each pair of muzzle positions is the projected world-space flash on the hip/ADS rig.
@@ -9,6 +10,14 @@ const blasterFrames = {
   rifle:[0,.569,.624,.602], shotgun:[1,.572,.597,.596],
   sniper:[2,.542,.587,0], pistol:[3,.623,.728,.647]
 };
+function blasterPose(p,t,view,w,h,kick,kind=p.active){
+  const ads=!!(view.ads??p.ads),frame=blasterFrames[kind]||blasterFrames.rifle;
+  const gunWidth=Math.max(w,h*16/9),left=(w-gunWidth)*.5,movement=Math.min(1,(p.speed||0)*.16)*(ads?.17:1);
+  const reloadPose=p.reload>0?Math.sin(Math.PI*Math.max(0,Math.min(1,1-p.reload/(p.reloadDuration||WEAPONS[kind]?.reload||1)))):0;
+  const mx=left+gunWidth*(ads?.5:frame[1]),my=h*(ads?frame[3]:frame[2]);
+  const dx=Math.sin(t*10)*h*.005*movement,dy=Math.abs(Math.cos(t*10))*h*.006*movement+h*(kick*.018+reloadPose*.20);
+  return {frame,gunWidth,left,mx,my,dx,dy,reloadPose,kick};
+}
 
 const rgb = (r,g,b) => ((255<<24)|(b<<16)|(g<<8)|r)>>>0;
 function tint(hex,light=1) {
@@ -193,11 +202,33 @@ export class LiteRenderer {
     this.blasterAtlas=document.getElementById('blaster-atlas') || new Image();
     if (!this.blasterAtlas.src) this.blasterAtlas.src='./assets/blaster-views.webp';
     this.trails=[];this.quality='auto';this.lastFrame=-1;this.lastGame=null;this.scale=1;
+    this.pellets=Array.from({length:PELLET_CAPACITY},()=>({age:PELLET_LIFE}));this.pelletIndex=0;this.lastElapsed=-1;this.lastRound=null;
     this.dummyMeshes=new WeakMap();this.dummyHits=new Map();
   }
   setQuality(q){this.quality=q;this.lastFrame=-1;}
   resize() { this.lastFrame=-1; }
-  dispose() {this.staticMesh=[];this.trails=[];this.lastGame=null;}
+  dispose() {this.staticMesh=[];this.trails=[];this.clearPellets();this.lastGame=null;}
+  clearPellets(){for(const pellet of this.pellets)pellet.age=PELLET_LIFE;this.pelletIndex=0;}
+  anchorPellet(pellet,cam,p,t,view){
+    if(!pellet.own)return;
+    const depth=.9,end=cameraVertex(cam,[pellet.ex,pellet.ey,pellet.ez,0,0]);
+    if(end[2]<=depth+.03)return;
+    let screenX,screenY;
+    if(this.blasterAtlas.complete&&this.blasterAtlas.naturalWidth){
+      const pose=blasterPose(p,t,view,this.width,this.height,this.recoil,'shotgun');
+      screenX=pose.mx+pose.dx;screenY=pose.my+pose.dy;
+    }else{
+      const ads=!!(view.ads??p.ads),bob=p.speed>1?Math.sin(t*10)*.006:0;
+      screenX=this.width*(ads?.5:.57)+this.height*bob;
+      screenY=this.height*(ads?.56:.64)+this.height*(this.recoil*.045+(p.reload>0?.17:0));
+    }
+    // Invert the camera projection at the visible barrel, retaining the hitscan endpoint.
+    const right=(screenX-this.width*.5)*depth/this.focal,up=(this.height*.5-screenY)*depth/this.focal;
+    const forward=depth*cam.cp-up*cam.sp;
+    pellet.x=cam.x+right*cam.cy+forward*cam.sy;pellet.y=cam.y+up*cam.cp+depth*cam.sp;pellet.z=cam.z+right*cam.sy-forward*cam.cy;
+    pellet.dx=pellet.ex-pellet.x;pellet.dy=pellet.ey-pellet.y;pellet.dz=pellet.ez-pellet.z;
+    pellet.length=Math.hypot(pellet.dx,pellet.dy,pellet.dz);
+  }
   project(v) {const iz=1/v[2],f=this.focal*iz;return [this.width*.5+v[0]*f,this.height*.5-v[1]*f,iz,v[3]*iz,v[4]*iz];}
   triangle(a,b,c,texture,color) {
     const minX=Math.max(0,Math.floor(Math.min(a[0],b[0],c[0]))),maxX=Math.min(this.width-1,Math.ceil(Math.max(a[0],b[0],c[0])));
@@ -230,16 +261,58 @@ export class LiteRenderer {
       for(let i=1;i<p.length-1;i++)this.triangle(p[0],p[i],p[i+1],tex,col);
     }
   }
+  pelletStroke(cam,pellet,span){
+    let a=cameraVertex(cam,[pellet.x+pellet.dx*span.tail,pellet.y+pellet.dy*span.tail,pellet.z+pellet.dz*span.tail,0,0]);
+    let b=cameraVertex(cam,[pellet.x+pellet.dx*span.head,pellet.y+pellet.dy*span.head,pellet.z+pellet.dz*span.head,0,0]);
+    if(a[2]<.14&&b[2]<.14)return;
+    if(a[2]<.14||b[2]<.14){
+      const t=(.14-a[2])/(b[2]-a[2]),edge=a.map((v,i)=>v+(b[i]-v)*t);
+      if(a[2]<.14)a=edge;else b=edge;
+    }
+    a=this.project(a);b=this.project(b);
+    const dx=b[0]-a[0],dy=b[1]-a[1],dz=b[2]-a[2];
+    let lo=0,hi=1;
+    // Clip to the viewport before spending any depth samples.
+    for(const [p,q] of [[-dx,a[0]],[dx,this.width-1-a[0]],[-dy,a[1]],[dy,this.height-1-a[1]]]){
+      if(Math.abs(p)<1e-9){if(q<0)return;continue;}
+      const r=q/p;if(p<0)lo=Math.max(lo,r);else hi=Math.min(hi,r);if(lo>hi)return;
+    }
+    const steps=Math.min(96,Math.max(1,Math.ceil(Math.hypot(dx,dy)*(hi-lo))));
+    const paths=[new Path2D(),new Path2D(),new Path2D()];let previous=null;
+    for(let i=0;i<=steps;i++){
+      const t=lo+(hi-lo)*i/steps,x=a[0]+dx*t,y=a[1]+dy*t,iz=a[2]+dz*t;
+      const px=Math.min(this.width-1,Math.max(0,Math.round(x))),py=Math.min(this.height-1,Math.max(0,Math.round(y)));
+      const visible=iz+Math.max(.00012,iz*.006)>=this.depth[py*this.width+px];
+      if(visible&&previous){const path=paths[Math.min(2,Math.floor(t*3))];path.moveTo(previous[0],previous[1]);path.lineTo(x,y);}
+      previous=visible?[x,y]:null;
+    }
+    const c=this.ctx;c.lineCap='round';
+    for(let i=0;i<3;i++){
+      c.strokeStyle=i===2?'#fff5cf':'#f0bd70';c.globalAlpha=span.alpha*[.35,.65,.95][i];c.lineWidth=[.45,.8,1.05][i];c.stroke(paths[i]);
+    }
+    c.globalAlpha=1;c.lineCap='butt';
+  }
+  pelletImpact(cam,pellet,alpha){
+    const v=cameraVertex(cam,[pellet.ex,pellet.ey,pellet.ez,0,0]);if(v[2]<.14)return;
+    const [x,y,iz]=this.project(v),px=Math.round(x),py=Math.round(y);
+    if(px<1||py<1||px>=this.width-1||py>=this.height-1)return;
+    const tolerance=Math.max(.00012,iz*.012),surface=this.depth[py*this.width+px];
+    // No hit flecks in empty space, behind cover, or on a different surface.
+    if(!surface||Math.abs(surface-iz)>tolerance)return;
+    const c=this.ctx;c.globalAlpha=alpha*.9;
+    for(const [dx,dy] of [[0,0],[-1,-1],[1,1],[2,-1]]){
+      const xx=px+dx,yy=py+dy;if(xx<0||yy<0||xx>=this.width||yy>=this.height)continue;
+      if(Math.abs(this.depth[yy*this.width+xx]-iz)>tolerance)continue;
+      c.fillStyle=dx===0?'#fff4c5':pellet.target?'#ffc976':'#db9950';c.fillRect(xx,yy,1,1);
+    }
+    c.globalAlpha=1;
+  }
   weapon(p,t,view) {
     const c=this.ctx,w=this.width,h=this.height,ads=!!(view.ads??p.ads),reload=p.reload>0;
     const gun=p.active, isPistol=gun==='pistol', isShot=gun==='shotgun',isSniper=gun==='sniper';
     if(ads&&isSniper) {c.save();c.fillStyle='rgba(5,12,18,.87)';c.beginPath();c.rect(0,0,w,h);c.arc(w/2,h/2,h*.42,0,Math.PI*2,true);c.fill('evenodd');c.strokeStyle='rgba(26,30,30,.8)';c.lineWidth=1;c.beginPath();c.moveTo(w/2-h*.42,h/2);c.lineTo(w/2+h*.42,h/2);c.moveTo(w/2,h/2-h*.42);c.lineTo(w/2,h/2+h*.42);c.stroke();c.restore();return;}
     if(this.blasterAtlas.complete&&this.blasterAtlas.naturalWidth){
-      const frame=blasterFrames[gun]||blasterFrames.rifle, gunWidth=Math.max(w,h*16/9),left=(w-gunWidth)*.5;
-      const movement=Math.min(1,(p.speed||0)*.16)*(ads?.17:1),kick=this.recoil;
-      const reloadPose=reload?Math.sin(Math.PI*Math.max(0,Math.min(1,1-p.reload/(p.reloadDuration||WEAPONS[gun]?.reload||1)))):0;
-      const mx=left+gunWidth*(ads?.5:frame[1]),my=h*(ads?frame[3]:frame[2]);
-      const dx=Math.sin(t*10)*h*.005*movement,dy=Math.abs(Math.cos(t*10))*h*.006*movement+h*(kick*.018+reloadPose*.20);
+      const {frame,gunWidth,left,mx,my,dx,dy,reloadPose,kick}=blasterPose(p,t,view,w,h,this.recoil);
       this.shotPoint=[mx+dx,my+dy];
       c.save();c.translate(mx+dx,my+dy);c.rotate(reloadPose*.28+kick*.014);c.scale(1+kick*.035,1+kick*.035);
       if(kick>.53){
@@ -276,6 +349,7 @@ export class LiteRenderer {
     const cap=(this.quality==='low'?425:playing?535:690)*this.scale;
     const factor=Math.min(1,cap/Math.max(sizeX,sizeY));const w=Math.max(2,Math.round(sizeX*factor)),h=Math.max(2,Math.round(sizeY*factor));
     if(w!==this.width||h!==this.height){this.width=this.canvas.width=w;this.height=this.canvas.height=h;this.image=this.ctx.createImageData(w,h);this.pixels=new Uint32Array(this.image.data.buffer);this.depth=new Float32Array(w*h);this.lastFrame=-1;}
+    if(now<this.lastFrame){this.lastFrame=-1;this.clearPellets();}
     if(this.lastFrame>=0 && now-this.lastFrame<(playing?1/45:1/18))return;
     const dt=this.lastFrame<0?.03:Math.min(.1,now-this.lastFrame);this.lastFrame=now;
     const p=playing?(game.players.find(v=>v.id===(view.spectatorId||selfId))||game.players[0]):null;
@@ -318,15 +392,30 @@ export class LiteRenderer {
     }
     this.ctx.putImageData(this.image,0,0);
     if(performance.now()-began>40 && this.scale>.69 && this.quality==='auto')this.scale=Math.max(.69,this.scale-.08);
-    if(!mode){this.lastSeq=0;this.trails=[];this.dummyHits.clear();return;}
-    if(game.seq<this.lastSeq)this.lastSeq=0;
+    if(!mode){this.lastSeq=0;this.trails=[];this.clearPellets();this.lastElapsed=-1;this.lastRound=null;this.dummyHits.clear();return;}
+    if(game.seq<this.lastSeq||game.elapsed<this.lastElapsed){
+      this.lastSeq=game.elapsed<this.lastElapsed?game.seq:0;this.trails=[];this.clearPellets();
+    }
+    if(this.lastRound!==game.round)this.clearPellets();this.lastRound=game.round;this.lastElapsed=game.elapsed;
+    for(const pellet of this.pellets)if(pellet.age<PELLET_LIFE)pellet.age+=dt;
     for(const e of game.events??[]){
       if(e.seq<=this.lastSeq)continue;this.lastSeq=e.seq;
-      if(e.type==='shot'){if(e.actor===p.id)this.recoil=1;this.trails.push({e,until:now+.07});}
+      if(e.type==='round')this.clearPellets();
+      if(e.type==='shot'){
+        if(e.actor===p.id)this.recoil=1;
+        if(e.weapon==='shotgun')for(const pellet of pelletTrails(e,e.actor===p.id,!!(view.ads??p.ads))){
+          this.anchorPellet(pellet,cam,p,now,view);Object.assign(this.pellets[this.pelletIndex++%PELLET_CAPACITY],pellet);
+        }
+        else this.trails.push({e,until:now+.07});
+      }
       if(game.phase==='range'&&e.type==='hit')this.dummyHits.set(e.target,now+.14);
     }
     this.trails=this.trails.filter(tr=>tr.until>now);
     for(const {e} of this.trails){const a=cameraVertex(cam,[e.x,e.y,e.z,0,0]),b=cameraVertex(cam,[e.ex,e.ey,e.ez,0,0]);if(b[2]<.14)continue;const end=this.project(b);const start=e.actor===p.id?(this.shotPoint||[w*.57,h*.64]):a[2]>.13?this.project(a):null;if(!start)continue;this.ctx.strokeStyle='rgba(255,218,135,.65)';this.ctx.lineWidth=1;this.ctx.beginPath();this.ctx.moveTo(start[0],start[1]);this.ctx.lineTo(end[0],end[1]);this.ctx.stroke();}
+    for(const pellet of this.pellets)if(pellet.age<PELLET_LIFE){
+      const span=pelletSpan(pellet);this.pelletStroke(cam,pellet,span);
+      if(span.contactAlpha>0)this.pelletImpact(cam,pellet,span.contactAlpha);
+    }
     this.weapon(p,now,view);this.recoil=Math.max(0,this.recoil-dt*9);
   }
 }

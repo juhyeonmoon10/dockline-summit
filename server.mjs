@@ -7,6 +7,7 @@ import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { createGame, stepGame } from './dist/sim.js';
+import { gameSnapshot } from './dist/game-snapshot.js';
 
 const root = fileURLToPath(new URL('./dist/', import.meta.url));
 const port = Number(process.env.PORT || 8787);
@@ -32,7 +33,7 @@ const roster = room => ({
   code: room.code, size: room.size, hostId: room.hostId, phase: room.phase,
   players: room.players, needed: room.size * 2
 });
-const toEvent = (type, data) => 'event: ' + type + '\ndata: ' + JSON.stringify(data) + '\n\n';
+const toEvent = (type, data) => 'event: ' + type + '\ndata: ' + JSON.stringify(type==='game'?gameSnapshot(data):data) + '\n\n';
 
 function writeTo(session, packet, important = false) {
   if (!session.stream || session.stream.destroyed) return;

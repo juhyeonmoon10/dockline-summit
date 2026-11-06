@@ -219,12 +219,13 @@ function shoot(g, p) {
   p.ammo--;
   // Carry the fraction of a tick past the deadline so a held trigger keeps its rate.
   m.cooldown = w.interval + Math.min(0,m.cooldown);
-  const total = new Map();
+  const total = new Map(), pellets = p.active==='shotgun' ? [] : null;
   let central;
   for (let i=0; i < (w.pellets || 1); i++) {
     const spread = p.ads ? w.aimSpread : w.spread;
     const angle = Math.random() * Math.PI * 2, radius = Math.sqrt(Math.random()) * spread;
     const hit = trace(g, p, p.yaw + Math.cos(angle)*radius, p.pitch + Math.sin(angle)*radius);
+    if(pellets)pellets.push({ex:hit.ex,ey:hit.ey,ez:hit.ez,target:hit.target?.id||null});
     if (!central || (hit.target && !central.target)) central = hit;
     if (!hit.target) continue;
     const old = total.get(hit.target) || { damage: 0, headshot: false };
@@ -232,7 +233,7 @@ function shoot(g, p) {
     total.set(hit.target, old);
   }
   const {x,y,z,ex,ey,ez} = central;
-  emit(g,'shot',p.id,{ weapon:p.active,x,y,z,ex,ey,ez });
+  emit(g,'shot',p.id,{ weapon:p.active,x,y,z,ex,ey,ez,...(pellets?{pellets,at:g.elapsed}:{}) });
   if (g.phase==='range') {
     g.range.shots++;
     if (total.size) g.range.hits++;
