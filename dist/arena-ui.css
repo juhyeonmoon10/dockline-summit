@@ -21,6 +21,8 @@
 #rangeStats>strong{display:grid;place-items:center;background:var(--signal);color:#182931;padding:0 12px;font-size:13px}
 #rangeStats>span{min-width:45px;padding:5px 8px;text-align:center;color:#d1dde4}
 #rangeStats b{display:block;font:800 20px/1.15 Dock,sans-serif;color:white;font-variant-numeric:tabular-nums}
+#weaponHud.melee strong{font-size:26px;line-height:1.5;font-style:normal}
+#weaponHud.melee #rounds{display:block;padding:0;color:#f3d857}
 
 .sense-control{padding:5px 0 14px;border-bottom:1px solid #607e864b}
 .sense-heading,.sense-inputs{display:flex;align-items:center;gap:10px}

@@ -4,12 +4,14 @@ import { WEAPONS } from './sim.js';
 import { makeYard, sky, Parts, glowMaterial } from './yard-art.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { PelletRenderer } from './pellet-render.js';
+import { knifeMesh,knifeFit,knifePose } from './knife.js';
 
 const PI=Math.PI;
 const clamp=(n,min,max)=>Math.min(max,Math.max(min,n));
 const damp=(from,to,rate,dt)=>from+(to-from)*(1-Math.exp(-rate*dt));
-const weaponNames=['rifle','shotgun','sniper','pistol'];
+const weaponNames=['rifle','shotgun','sniper','pistol','knife'];
 const pose=new T.Vector3(),direction=new T.Vector3(),endpoint=new T.Vector3();
+const knifeWrist=new T.Vector3(),knifeShoulder=new T.Vector3(.50,-.55,.18);
 const vertical=new T.Vector3(0,1,0);
 const teamColors=['#168bc9','#ed7040'];
 const teamLights=[0x66dcff,0xff975e];
@@ -113,17 +115,19 @@ function limb(parts,a,b,from,to,hue) {
     new T.Quaternion().setFromUnitVectors(vertical,axis.normalize()),new T.Vector3(1,1,1));
   parts.append(geo,matrix,hue);geo.dispose();
 }
-function glove(support,fit) {
+function glove(support,fit,handOnly=false) {
   const parts=new Parts(),group=new T.Group();
   const side=support?-1:1, center=support?fit.support:0, grip=support?-.066:fit.grip;
   const elbow=[side*(support?.188:.235),support?-.258:-.258,center+(support?.50:.36)];
   const cuff=[side*(support?.065:.069),grip-.048,center+.03];
   const joint=f=>elbow.map((n,i)=>n+(cuff[i]-n)*f);
-  limb(parts,elbow,joint(.73),.065,.051,'#30475a');
-  limb(parts,joint(.53),joint(.66),.059,.056,'#5f7784');
-  limb(parts,joint(.68),joint(.82),.054,.045,'#d5dde0');
-  limb(parts,joint(.78),cuff,.049,.040,'#2c3947');
-  limb(parts,joint(.80),joint(.84),.051,.051,'#ffbf43');
+  if(!handOnly){
+    limb(parts,elbow,joint(.73),.065,.051,'#30475a');
+    limb(parts,joint(.53),joint(.66),.059,.056,'#5f7784');
+    limb(parts,joint(.68),joint(.82),.054,.045,'#d5dde0');
+    limb(parts,joint(.78),cuff,.049,.040,'#2c3947');
+    limb(parts,joint(.80),joint(.84),.051,.051,'#ffbf43');
+  }
   pod(parts,side*.058,grip,center+.005,.077,.093,.124,'#3c4d59',-.23,0,side*.10);
   // The backhand's raised flexible plate remains visible when aiming down sights.
   pod(parts,side*.084,grip+.007,center+.006,.035,.061,.078,'#8199a7',-.20);
@@ -137,6 +141,10 @@ function glove(support,fit) {
 }
 
 function gunModel(type) {
+  if(type==='knife'){
+    const group=new T.Group(),body=knifeMesh(),strong=glove(false,knifeFit,true),support=new T.Group();
+    group.add(body,strong,support);group.userData={fit:knifeFit,body,support};return group;
+  }
   const group=new T.Group(),body=blasterMesh(type),fit=gunFit[type];
   const strong=glove(false,fit),support=glove(true,fit);
   group.add(body,strong,support);group.userData={fit,body,support,magazine:body.getObjectByName('magazine')};
@@ -263,6 +271,12 @@ export class ArenaRenderer {
     this.gunRig=new T.Group();this.gunRig.scale.setScalar(.91);
     Object.values(this.guns).forEach(g=>this.gunRig.add(g));
     this.gunScene.add(this.gunRig);
+    const sleeve=new Parts(),sleeveShape=new T.CylinderGeometry(.095,.052,1,10);
+    sleeve.piece(sleeveShape,0,0,0,1,1,1,'#30475a');sleeveShape.dispose();
+    sleeve.tube(0,-.40,0,.129,.10,.129,'#5f7784');
+    sleeve.tube(0,-.455,0,.120,.035,.120,'#d5dde0');
+    sleeve.tube(0,-.477,0,.113,.018,.113,'#ffbf43');
+    this.knifeArm=sleeve.mesh();this.knifeArm.visible=false;this.gunScene.add(this.knifeArm);
     this.flash=new T.Group();
     const flare=new Parts();
     flare.six(0,0,0,.037,.155,.037,'#fff2b9',PI/2);
@@ -272,6 +286,7 @@ export class ArenaRenderer {
     this.templates=[operatorTemplate(0),operatorTemplate(1)];
     this.shadowMat=shadowStamp();this.shadowGeo=new T.PlaneGeometry(1.12,1.05);
     this.models=new Map();this.lastSeq=0;this.lastElapsed=-1;this.recoil=0;this.flashTime=0;
+    this.meleeAge=.55;this.meleeSide=1;this.meleeSwings=new Map();
     this.plates=new Map();
     this.aim=0;this.bob=0;this.eye=1.55;this.roll=0;this.lastFocus=null;
     this.lookSwayX=0;this.lookSwayY=0;this.lastYaw=null;this.lastPitch=null;this.equip=0;this.active=null;
@@ -331,16 +346,32 @@ export class ArenaRenderer {
     p.velocity.set(vx,vy,vz);p.ttl=p.life=life;p.size=size;p.mesh.visible=true;
   }
   effects(game,focus,dt) {
+    this.meleeAge=Math.min(.55,this.meleeAge+dt);
+    if(!focus?.alive||focus.active!=='knife')this.meleeAge=.55;
+    for(const [id,swing] of this.meleeSwings){
+      const actor=game.players.find(player=>player.id===id);swing.age+=dt;
+      if(!actor?.alive||actor.active!=='knife'||swing.age>=.55)this.meleeSwings.delete(id);
+    }
     this.shotTrails.step(dt);
     this.recoil=damp(this.recoil,0,18,dt);this.flashTime=Math.max(0,this.flashTime-dt);
-    if(game.seq<this.lastSeq || game.elapsed<this.lastElapsed){this.lastSeq=0;this.marks.clear();this.shotTrails.clear();}
+    if(game.seq<this.lastSeq || game.elapsed<this.lastElapsed){this.lastSeq=0;this.marks.clear();this.shotTrails.clear();this.meleeAge=.55;this.meleeSwings.clear();}
     this.lastElapsed=game.elapsed;
     const events=game.events||[];
     for(let i=0;i<events.length;i++){
       const e=events[i];
       if(e.seq<=this.lastSeq)continue;
       this.lastSeq=e.seq;
-      if(e.type==='round'){this.marks.clear();this.shotTrails.clear();}
+      if(e.type==='round'){this.marks.clear();this.shotTrails.clear();this.meleeAge=.55;this.meleeSwings.clear();}
+      if(e.type==='melee'){
+        const actor=game.players.find(player=>player.id===e.actor);
+        if(actor?.alive&&actor.active==='knife'){
+          const side=e.seq%2?1:-1;this.meleeSwings.set(e.actor,{age:0,side});
+          if(e.actor===focus?.id){this.meleeAge=0;this.meleeSide=side;this.flashTime=0;}
+        }
+      }
+      if(e.type==='meleeImpact'&&Number.isFinite(e.ex)){
+        for(let k=0;k<3;k++)this.burst(e.ex,e.ey,e.ez,e.target?0xf4dfb5:0xffc56a,.10+k*.022,.035+k*.009,(k-1)*.65,.3+k*.2,.10*(k-1));
+      }
       if(e.type==='hit'&&this.plates.has(e.target))this.plates.get(e.target).userData.hit=.18;
       if(e.type==='kill'&&e.target!==focus?.id){
         const fallen=game.players.find(p=>p.id===e.target) || game.targets?.find(v=>v.kind==='dummy'&&v.id===e.target);
@@ -403,14 +434,21 @@ export class ArenaRenderer {
         a.y=snap?p.y:damp(a.y,p.y,28,dt);a.group.position.set(a.x,a.y,a.z);
         a.group.rotation.y=-p.yaw;a.group.scale.y=damp(a.group.scale.y,p.slide>0?.67:1,18,dt);
         if(a.active!==p.active){
-          a.loadout.clear();a.loadout.add(blasterMesh(p.active));a.active=p.active;
+          const held=p.active==='knife'?knifeMesh():blasterMesh(p.active);
+          if(p.active==='knife')held.position.y=.075;
+          a.loadout.clear();a.loadout.add(held);a.active=p.active;
         }
         a.loadout.rotation.x=clamp(p.pitch,-.78,.78);
+        const slash=p.active==='knife'?this.meleeSwings.get(p.id):null,cut=knifePose(slash?.age??.55,slash?.side||1);
+        a.loadout.position.set(.127,p.active==='knife'?1.11:1.166,-.277);
+        a.loadout.rotation.y=p.active==='knife'?-.3+cut.ry:0;
+        a.loadout.rotation.z=p.active==='knife'?.4+cut.rz:0;
+        if(p.active==='knife')a.loadout.rotation.x+=cut.rx-.18;
         const speed=p.speed||0; a.gait+=dt*Math.min(speed,9)*2.9;
         const step=p.slide>0?0:Math.sin(a.gait)*Math.min(speed*.113,.55);
         a.legs[0].rotation.x=step;a.legs[1].rotation.x=-step;
         a.torso.position.y=.016*Math.abs(step);
-        a.torso.rotation.z=step*.043;
+        a.torso.rotation.z=step*.043+cut.rz*.07;
         let floor=0;
         for(const b of this.map.boxes)if(b.h<=a.y+.09 && Math.abs(a.x-b.x)<=b.w*.5 && Math.abs(a.z-b.z)<=b.d*.5)floor=Math.max(floor,b.h);
         for(const r of this.map.ramps||[])if(Math.abs(a.x-r.x)<=r.w*.5 && Math.abs(a.z-r.z)<=r.d*.5){
@@ -426,6 +464,7 @@ export class ArenaRenderer {
     }
   }
   lobby(t) {
+    this.meleeAge=.55;this.meleeSwings.clear();
     this.shotTrails.clear();
     if(this.marks.mesh.visible)this.marks.clear();
     for(const plate of this.plates.values())plate.visible=false;
@@ -473,8 +512,9 @@ export class ArenaRenderer {
     const yaw=playerView && Number.isFinite(view.yaw)?view.yaw:focus.yaw;
     const pitch=playerView && Number.isFinite(view.pitch)?view.pitch:focus.pitch;
     this.effects(game,focus,dt);this.updateModels(game.players,focus.id,dt);
+    if(first){const swing=this.meleeSwings.get(focus.id);this.meleeAge=swing?.age??.55;this.meleeSide=swing?.side||1;}
     this.lastFocus=focus.id;
-    const ads=playerView&&view.ads!==undefined?view.ads:focus.ads;
+    const ads=focus.active!=='knife'&&(playerView&&view.ads!==undefined?view.ads:focus.ads);
     this.aim=damp(this.aim,ads && !(focus.reload>0)?1:0,14,dt);
     this.eye=first?(focus.slide>0?1:1.55):damp(this.eye,focus.slide>0?1:1.55,19,dt);
     const move=Math.min((focus.speed||0)/5.4,1),slide=focus.slide>0;
@@ -490,7 +530,7 @@ export class ArenaRenderer {
     const fov=(slide?78:72)+(focus.active==='sniper'?-38:-13)*this.aim;
     if(Math.abs(cam.fov-fov)>.03){cam.fov=fov;cam.updateProjectionMatrix();}
     const key=weaponNames.includes(focus.active)?focus.active:'rifle';
-    if(key!==this.active){this.equip=this.active ? .85 : 0;this.active=key;}
+    if(key!==this.active){this.equip=this.active ? .85 : 0;this.active=key;if(key!=='knife'||!this.meleeSwings.has(focus.id))this.meleeAge=.55;}
     this.equip=damp(this.equip,0,14,dt);
     for(const [id,gun] of Object.entries(this.guns))gun.visible=id===key;
     const weapon=this.guns[key],sniper=key==='sniper';
@@ -517,7 +557,18 @@ export class ArenaRenderer {
     this.gunRig.position.set(gunX+reloadWeight*.010,gunY-reloadWeight*.038-this.equip*.12,gunZ+this.recoil*.045);
     this.gunRig.rotation.set(this.recoil*.094+hip*.049-reloadWeight*.19-this.equip*.18,
       .090*hip+reloadWeight*.13+this.lookSwayX*.55,-.032*hip+reloadWeight*.46+this.recoil*.017);
-    this.flash.position.set(0,fit.muzzleY,fit.muzzle-.036);this.flash.scale.setScalar(fit.flash);this.flash.visible=this.flashTime>0;
+    if(key==='knife'){
+      const cut=knifePose(this.meleeAge,this.meleeSide);
+      this.gunRig.position.set(.245+cut.x+Math.sin(this.bob)*.008*sway-this.lookSwayX,-.235+cut.y-Math.abs(Math.cos(this.bob))*.007*sway-this.equip*.22,-.52+cut.z);
+      this.gunRig.rotation.set(-.16+cut.rx-this.equip*.35,-.25+cut.ry,.38+cut.rz);
+      // Keep the sleeve rooted below/behind the camera while the hand cuts across it.
+      this.gunRig.updateMatrixWorld(true);knifeWrist.set(.057,-.135,.060).applyMatrix4(this.gunRig.matrixWorld);
+      direction.copy(knifeShoulder).sub(knifeWrist);const armLength=direction.length();
+      this.knifeArm.position.copy(knifeWrist).lerp(knifeShoulder,.5);
+      this.knifeArm.quaternion.setFromUnitVectors(vertical,direction.normalize());this.knifeArm.scale.set(1,armLength,1);
+    }
+    this.knifeArm.visible=key==='knife';
+    this.flash.position.set(0,fit.muzzleY,fit.muzzle-.036);this.flash.scale.setScalar(fit.flash);this.flash.visible=key!=='knife'&&this.flashTime>0;
     this.flash.rotation.z=this.traceIndex*1.9;
     this.ring.material.opacity=game.phase==='overtime'?.70+.19*Math.sin(t*5):.32;
     this.ring.material.color.setHex(game.phase==='overtime'&&game.capture?.team!==null?teamLights[game.capture?.team]||0xffdf78:0xffd77b);

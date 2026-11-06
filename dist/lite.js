@@ -160,7 +160,13 @@ function makeScene(map,m) {
   return geo;
 }
 
-function operator(dst,p,clock) {
+function knifeMotion(age){
+  if(age<0||age>=.55)return {cut:0,wind:0};
+  if(age<.06)return {cut:0,wind:Math.sin(age/.06*Math.PI*.5)};
+  if(age<.18)return {cut:Math.sin((age-.06)/.12*Math.PI*.5),wind:1-(age-.06)/.12};
+  return {cut:Math.cos((age-.18)/.37*Math.PI*.5)**2,wind:0};
+}
+function operator(dst,p,clock,swing) {
   const h=eyeHeight(p)/1.55,y=p.y,x=p.x,z=p.z,yaw=p.yaw,sy=Math.sin(yaw),cy=Math.cos(yaw);
   const color=p.team===0?0x369fde:0xeb754b,dark=0x263d49;
   const part=(sx,yy,sz,w,hh,d,col)=>block(dst,x+sx*cy-sz*sy,y+yy*h,z+sx*sy+sz*cy,w,hh*h,d,col,yaw);
@@ -169,7 +175,18 @@ function operator(dst,p,clock) {
   part(0,.69,0,.55,.59,.38,color);part(0,.82,-.14,.42,.24,.16,0x394e59);
   part(-.33,.82,-.08,.16,.42,.20,color);part(.33,.82,-.14,.17,.42,.22,color);
   part(0,1.30,0,.45,.39,.43,color);part(0,1.43,-.206,.42,.115,.035,0x1b2c39);
-  part(.1,1.45,-.232,.13,.024,.02,0xbfedef);part(.24,.93,-.39,.13,.13,.54,0x253641);
+  part(.1,1.45,-.232,.13,.024,.02,0xbfedef);
+  if(p.active==='knife'){
+    const {cut}=knifeMotion(clock-(swing?.at??-10)),handX=.27-cut*.20,handY=1.02+cut*.04,handZ=-.35-cut*.16;
+    part(handX,handY-.10,handZ,.105,.17,.11,0x263641);
+    part(handX,handY+.045,handZ,.17,.035,.07,0xe9b44a);
+    const point=(xx,yy,zz)=>{const sx=handX+xx-cut*yy*.8,sz=handZ+zz;return [x+sx*cy-sz*sy,y+(handY+yy)*h,z+sx*sy+sz*cy];};
+    const face=(points,col)=>quad(dst,points.map(v=>point(...v)),col);
+    face([[-.038,.08,.018],[.038,.08,.018],[.026,.32,.018],[0,.43,.018]],0xbccbd0);
+    face([[.038,.08,.018],[.026,.32,.018],[0,.43,.018],[.012,.12,.025]],0xf0f4e8);
+    face([[-.038,.08,-.018],[0,.43,-.018],[.026,.32,-.018],[.038,.08,-.018]],0x788f9a);
+    face([[.038,.08,-.018],[.026,.32,-.018],[.026,.32,.018],[.038,.08,.018]],0xdce8e4);
+  }else part(.24,.93,-.39,.13,.13,.54,0x253641);
 }
 
 function dummyFaces(target,faces) {
@@ -204,11 +221,35 @@ export class LiteRenderer {
     this.trails=[];this.quality='auto';this.lastFrame=-1;this.lastGame=null;this.scale=1;
     this.pellets=Array.from({length:PELLET_CAPACITY},()=>({age:PELLET_LIFE}));this.pelletIndex=0;this.lastElapsed=-1;this.lastRound=null;
     this.dummyMeshes=new WeakMap();this.dummyHits=new Map();
+    this.meleeSwings=new Map();this.meleeImpacts=[];this.lastMeleeSeq=0;this.knifeEquippedAt=0;this.knifeFocus=null;this.lastWeapon=null;
   }
   setQuality(q){this.quality=q;this.lastFrame=-1;}
   resize() { this.lastFrame=-1; }
-  dispose() {this.staticMesh=[];this.trails=[];this.clearPellets();this.lastGame=null;}
+  dispose() {this.staticMesh=[];this.trails=[];this.clearPellets();this.clearMelee();this.lastGame=null;}
   clearPellets(){for(const pellet of this.pellets)pellet.age=PELLET_LIFE;this.pelletIndex=0;}
+  clearMelee(){this.meleeSwings.clear();this.meleeImpacts=[];this.lastMeleeSeq=0;this.knifeFocus=null;this.lastWeapon=null;}
+  meleeEvents(game,p,now){
+    const rewind=game.elapsed<this.lastElapsed&&game.seq>=this.lastMeleeSeq;
+    if(game.seq<this.lastMeleeSeq||game.elapsed<this.lastElapsed||game.round!==this.lastRound)this.clearMelee();
+    if(rewind)this.lastMeleeSeq=game.seq;
+    for(const event of game.events||[]){
+      if(event.seq<=this.lastMeleeSeq)continue;this.lastMeleeSeq=event.seq;
+      if(event.type==='round'){this.meleeSwings.clear();this.meleeImpacts=[];}
+      if(event.type==='melee')this.meleeSwings.set(event.actor,{at:now});
+      if(event.type==='meleeImpact'&&[event.ex,event.ey,event.ez].every(Number.isFinite)){
+        this.meleeImpacts.push({event,until:now+.10});
+        if(this.meleeImpacts.length>16)this.meleeImpacts.shift();
+      }
+    }
+    for(const [id,swing] of this.meleeSwings){
+      const actor=game.players.find(v=>v.id===id);
+      if(!actor?.alive||actor.active!=='knife'||now-swing.at>=.55)this.meleeSwings.delete(id);
+    }
+    this.meleeImpacts=this.meleeImpacts.filter(impact=>impact.until>now);
+    if(this.knifeFocus!==p.id||this.lastWeapon!==p.active){
+      this.knifeEquippedAt=now;this.knifeFocus=p.id;this.lastWeapon=p.active;
+    }
+  }
   anchorPellet(pellet,cam,p,t,view){
     if(!pellet.own)return;
     const depth=.9,end=cameraVertex(cam,[pellet.ex,pellet.ey,pellet.ez,0,0]);
@@ -307,7 +348,53 @@ export class LiteRenderer {
     }
     c.globalAlpha=1;
   }
+  knifeWeapon(p,t){
+    const c=this.ctx,w=this.width,h=this.height;
+    const swing=this.meleeSwings.get(p.id),{cut,wind}=knifeMotion(t-(swing?.at??-10));
+    const equip=Math.max(0,1-(t-this.knifeEquippedAt)/.20)**2;
+    const walk=Math.min(1,(p.speed||0)/5.4),bob=Math.sin(t*9)*walk;
+    const handX=w*(.74-.29*cut+.025*wind)+h*.006*bob,handY=h*(.83-.13*cut+.025*wind+.34*equip)+h*.003*Math.abs(bob);
+    const angle=-.24-1.05*cut+.20*wind+.26*equip,scale=h/520,cs=Math.cos(angle),sn=Math.sin(angle);
+    const handPoint=(x,y)=>[handX+(x*cs-y*sn)*scale,handY+(x*sn+y*cs)*scale];
+    const poly=(color,points)=>{c.fillStyle=color;c.beginPath();points.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.closePath();c.fill();};
+    c.save();
+    // The wrist follows the slash, while the forearm stays attached beyond the viewport.
+    const wristLow=handPoint(-5,72),wristHigh=handPoint(63,28),farHigh=[w*1.10,h*.98],farLow=[w*.90,h*1.22];
+    poly('#263e50',[wristLow,wristHigh,farHigh,farLow]);
+    poly('#486273',[handPoint(42,44),wristHigh,farHigh,[w*1.02,h*1.08]]);
+    c.translate(handX,handY);c.rotate(angle);c.scale(scale,scale);
+    // The cuff overlaps the screen-anchored sleeve so no capped stump appears mid-swing.
+    poly('#b7c6c8',[[13,55],[58,42],[72,65],[21,80]]);
+    poly('#f3b947',[[20,75],[69,61],[73,70],[24,85]]);
+    poly('#202f3a',[[-20,-5],[13,-17],[40,-5],[52,29],[38,57],[4,67],[-24,38]]);
+    poly('#405461',[[13,-17],[40,-5],[43,17],[22,30],[-8,20],[-20,-5]]);
+    poly('#84969c',[[9,-11],[30,-7],[37,7],[20,17],[1,10]]);
+    // Charcoal wrapped grip, beveled pommel, and a narrow amber guard.
+    poly('#182a34',[[-13,-44],[12,-43],[15,48],[-11,51]]);
+    poly('#3c505b',[[3,-42],[12,-43],[15,48],[5,47]]);
+    for(let i=0;i<6;i++)poly(i%2?'#52636a':'#263943',[[-13,-35+i*12],[12,-39+i*12],[13,-34+i*12],[-13,-30+i*12]]);
+    poly('#b07d2e',[[-17,45],[17,44],[21,56],[-14,60]]);
+    poly('#f1bc57',[[-15,45],[15,44],[16,49],[-16,53]]);
+    // Faceted drop-point steel: dark spine, broad satin face, polished cutting bevel.
+    poly('#617c89',[[-14,-48],[-18,-147],[-9,-193],[5,-176],[19,-70],[16,-49]]);
+    poly('#afc3cb',[[-11,-49],[-14,-146],[-9,-193],[5,-176],[12,-69],[10,-49]]);
+    poly('#e6eee6',[[10,-49],[12,-69],[5,-176],[-9,-193],[13,-167],[24,-76],[19,-49]]);
+    poly('#f7f6df',[[19,-49],[24,-76],[13,-167],[-9,-193],[16,-165],[28,-75],[23,-49]]);
+    poly('#718e9b',[[-7,-72],[-9,-140],[-6,-161],[-2,-148],[2,-72]]);
+    poly('#d0dfe0',[[-6,-72],[-8,-141],[-6,-161],[-3,-140],[-1,-72]]);
+    poly('#9f742c',[[-28,-48],[29,-49],[33,-38],[-26,-35]]);
+    poly('#f0bb51',[[-28,-48],[29,-49],[29,-43],[-28,-40]]);
+    // Fingers wrap around the near side of the handle, not over the blade.
+    for(let i=0;i<3;i++){
+      const y=-12+i*15;
+      poly('#334752',[[-22,y],[6,y-5],[20,y+1],[18,y+10],[-13,y+14],[-24,y+8]]);
+      poly('#60747e',[[-19,y],[5,y-4],[13,y],[8,y+4],[-17,y+8]]);
+    }
+    poly('#536873',[[17,-14],[31,-12],[39,2],[33,15],[22,10],[12,-2]]);
+    c.restore();
+  }
   weapon(p,t,view) {
+    if(p.active==='knife'){this.knifeWeapon(p,t);return;}
     const c=this.ctx,w=this.width,h=this.height,ads=!!(view.ads??p.ads),reload=p.reload>0;
     const gun=p.active, isPistol=gun==='pistol', isShot=gun==='shotgun',isSniper=gun==='sniper';
     if(ads&&isSniper) {c.save();c.fillStyle='rgba(5,12,18,.87)';c.beginPath();c.rect(0,0,w,h);c.arc(w/2,h/2,h*.42,0,Math.PI*2,true);c.fill('evenodd');c.strokeStyle='rgba(26,30,30,.8)';c.lineWidth=1;c.beginPath();c.moveTo(w/2-h*.42,h/2);c.lineTo(w/2+h*.42,h/2);c.moveTo(w/2,h/2-h*.42);c.lineTo(w/2,h/2+h*.42);c.stroke();c.restore();return;}
@@ -349,20 +436,21 @@ export class LiteRenderer {
     const cap=(this.quality==='low'?425:playing?535:690)*this.scale;
     const factor=Math.min(1,cap/Math.max(sizeX,sizeY));const w=Math.max(2,Math.round(sizeX*factor)),h=Math.max(2,Math.round(sizeY*factor));
     if(w!==this.width||h!==this.height){this.width=this.canvas.width=w;this.height=this.canvas.height=h;this.image=this.ctx.createImageData(w,h);this.pixels=new Uint32Array(this.image.data.buffer);this.depth=new Float32Array(w*h);this.lastFrame=-1;}
-    if(now<this.lastFrame){this.lastFrame=-1;this.clearPellets();}
+    if(now<this.lastFrame){this.lastFrame=-1;this.clearPellets();this.clearMelee();}
     if(this.lastFrame>=0 && now-this.lastFrame<(playing?1/45:1/18))return;
     const dt=this.lastFrame<0?.03:Math.min(.1,now-this.lastFrame);this.lastFrame=now;
     const p=playing?(game.players.find(v=>v.id===(view.spectatorId||selfId))||game.players[0]):null;
     const mode=Boolean(p), yaw=mode?(view.yaw??p.yaw):-.58+Math.sin(now*.045)*.012;
     const pitch=mode?(view.pitch??p.pitch):-.22;
     const cam={x:mode?p.x:13,y:mode?p.y+eyeHeight(p):7.1,z:mode?p.z:20,sy:Math.sin(yaw),cy:Math.cos(yaw),sp:Math.sin(pitch),cp:Math.cos(pitch)};
-    const fov=mode?((view.ads??p.ads)?(p.active==='sniper'?26:58):75):58;
+    const fov=mode?((p.active!=='knife'&&(view.ads??p.ads))?(p.active==='sniper'?26:58):75):58;
     this.focal=(h/2)/Math.tan(fov*Math.PI/360);this.depth.fill(0);
+    if(mode)this.meleeEvents(game,p,now);
     for(let y=0;y<h;y++){const sky=Math.max(0,Math.min(1,.45-(y-h*.5)/(h*.8)+pitch*1.1));const c=rgb(219-sky*103,234-sky*57,240-sky*18);this.pixels.fill(c,y*w,(y+1)*w);}
     this.faces(this.staticMesh,cam);
     if(playing){
       const dynamic=[];
-      for(const actor of game.players)if(actor.alive&&actor.id!==p?.id)operator(dynamic,actor,now);
+      for(const actor of game.players)if(actor.alive&&actor.id!==p?.id)operator(dynamic,actor,now,this.meleeSwings.get(actor.id));
       for(const target of game.targets||[]){
         if(target.kind==='dummy'){
           let model=this.dummyMeshes.get(target);
@@ -392,7 +480,7 @@ export class LiteRenderer {
     }
     this.ctx.putImageData(this.image,0,0);
     if(performance.now()-began>40 && this.scale>.69 && this.quality==='auto')this.scale=Math.max(.69,this.scale-.08);
-    if(!mode){this.lastSeq=0;this.trails=[];this.clearPellets();this.lastElapsed=-1;this.lastRound=null;this.dummyHits.clear();return;}
+    if(!mode){this.lastSeq=0;this.trails=[];this.clearPellets();this.clearMelee();this.lastElapsed=-1;this.lastRound=null;this.dummyHits.clear();return;}
     if(game.seq<this.lastSeq||game.elapsed<this.lastElapsed){
       this.lastSeq=game.elapsed<this.lastElapsed?game.seq:0;this.trails=[];this.clearPellets();
     }
@@ -416,6 +504,7 @@ export class LiteRenderer {
       const span=pelletSpan(pellet);this.pelletStroke(cam,pellet,span);
       if(span.contactAlpha>0)this.pelletImpact(cam,pellet,span.contactAlpha);
     }
+    for(const impact of this.meleeImpacts)this.pelletImpact(cam,impact.event,Math.max(0,(impact.until-now)/.10));
     this.weapon(p,now,view);this.recoil=Math.max(0,this.recoil-dt*9);
   }
 }

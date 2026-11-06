@@ -80,7 +80,7 @@ function help(){
   const teamRules='<div class="keyrow"><span>팀전 관전 대상 변경</span><kbd>Tab</kbd></div><p>팀전은 3선승입니다. 상대 팀을 전멸시키거나 연장전에 중앙 거점을 3초간 지키세요.</p>';
   const rangeRules='<p>사격장에서는 더미가 쓰러진 자리에 다시 나타납니다. Q로 주무기를 바꿔 가며 연습하세요.</p>';
   const rules=game?.phase==='range'?rangeRules:client?teamRules:rangeRules+teamRules;
-  showPanel('help','조작 안내','<div class="keyrow"><span>이동</span><kbd>W A S D</kbd></div><div class="keyrow"><span>시점 · 발사 · 조준</span><b>마우스 이동 · 좌클릭 · 우클릭</b></div><div class="keyrow"><span>점프 · 이동 중 슬라이딩</span><kbd>Space / C</kbd></div><div class="keyrow"><span>재장전 · 주무기 / 권총</span><kbd>R · 1 / 2</kbd></div><div class="keyrow"><span>주무기 변경 (사격장 · 팀전 준비 시간)</span><kbd>Q</kbd></div><div class="keyrow"><span>메뉴 · 마우스 감도</span><kbd>Esc</kbd></div>'+rules+'<button class="primary" id="helpDone">확인</button>');
+  showPanel('help','조작 안내','<div class="keyrow"><span>이동</span><kbd>W A S D</kbd></div><div class="keyrow"><span>시점 · 공격 · 조준</span><b>마우스 이동 · 좌클릭 · 우클릭</b></div><div class="keyrow"><span>점프 · 이동 중 슬라이딩</span><kbd>Space / C</kbd></div><div class="keyrow"><span>주무기 · 권총 · 칼</span><kbd>1 / 2 / 3</kbd></div><div class="keyrow"><span>총기 재장전</span><kbd>R</kbd></div><div class="keyrow"><span>주무기 변경 (사격장 · 팀전 준비 시간)</span><kbd>Q</kbd></div><div class="keyrow"><span>메뉴 · 마우스 감도</span><kbd>Esc</kbd></div><p>3번으로 칼을 꺼낸 뒤 좌클릭으로 가까운 대상을 공격하세요.</p>'+rules+'<button class="primary" id="helpDone">확인</button>');
   $('helpDone').onclick=returnFromPanel;
 }
 function sensitivityControls(){
@@ -226,13 +226,14 @@ function showHUD(now){
   }
   if(now>damageUntil)$('combatDamage').textContent='';if(now>fragUntil)$('fragConfirm').textContent='';
   const gun=WEAPONS[p.active];
-  $('gun').textContent=gun.label+(p.reload>0?' · 재장전 중':'');
-  $('ammo').textContent=p.ammo;
-  $('rounds').textContent='/ '+(game.phase==='range'?'∞':p.reserve??gun.reserve);
+  $('gun').textContent=(gun.melee?'3 · ':'')+gun.label+(p.reload>0?' · 재장전 중':'');
+  $('weaponHud').classList.toggle('melee',!!gun.melee);
+  $('ammo').textContent=gun.melee?'근접':p.ammo;
+  $('rounds').textContent=gun.melee?'좌클릭 공격':'/ '+(game.phase==='range'?'∞':p.reserve??gun.reserve);
   const spectating=!me.alive&&game.phase!=='between'&&game.phase!=='end';$('spectator').hidden=!spectating;$('spectator').textContent=p.alive?'관전 · '+p.name+'   [Tab]':'다음 라운드 대기 중';
   $('sight').classList.toggle('scope',p.active==='sniper'&&(spectating?p.ads:ads));$('sight').hidden=!p.alive||game.phase==='between';
   let text='',sub='',hint='';
-  if(game.phase==='range'){hint='C  슬라이딩 · Q  주무기 변경 · R  재장전';}
+  if(game.phase==='range'){hint=gun.melee?'좌클릭  칼 공격 · 1  주무기 · 2  권총':'3  칼 · C  슬라이딩 · Q  주무기 변경 · R  재장전';}
   else if(game.phase==='warmup'){text='준비 사격';sub=teamName(me.team)+' 팀 · '+sizeText(game.size);hint='Q  주무기 변경 · '+WEAPONS[selected].label;}
   else if(game.phase==='between'){text=game.roundWinner==null?'라운드 무승부':(game.roundWinner===me.team?'라운드 승리':'라운드 패배');sub=game.reason;hint='Q  다음 라운드 무기 · '+WEAPONS[selected].label;}
   else if(game.phase==='overtime'){text='중앙 거점 점령';sub=game.capture?.team==null?'거점에서 3초 버티기':teamName(game.capture.team)+' 점령 중 '+Math.round(game.capture.progress*100)+'%';}
@@ -242,15 +243,16 @@ function showHUD(now){
   $('contextHint').textContent=hint;$('feed').innerHTML=eventFeed.filter(f=>now-f.at<4).map(f=>'<div>'+esc(f.text)+'</div>').join('');
 }
 function sizeText(n){return n+' vs '+n;}
+function aiming(){return ads&&slot!==3&&!WEAPONS[watchPlayer()?.active]?.melee;}
 function currentInput(){
   const blocked=paused||!!modal;
   return {yaw,pitch,forward:blocked?0:Number(keys.has('KeyW'))-Number(keys.has('KeyS')),strafe:blocked?0:Number(keys.has('KeyD'))-Number(keys.has('KeyA')),
-    fire:!blocked&&(heldFire||pendingFire),ads:!blocked&&ads,jump:!blocked&&(pressed.has('Space')||keys.has('Space')),slide:!blocked&&(pressed.has('KeyC')||keys.has('KeyC')),
+    fire:!blocked&&(heldFire||pendingFire),ads:!blocked&&aiming(),jump:!blocked&&(pressed.has('Space')||keys.has('Space')),slide:!blocked&&(pressed.has('KeyC')||keys.has('KeyC')),
     reload:!blocked&&(pressed.has('KeyR')||keys.has('KeyR')),slot,weapon:selected};
 }
 function aim(dx,dy){
   if(!Number.isFinite(dx)||Math.abs(dx)>450||!Number.isFinite(dy)||Math.abs(dy)>450)return;
-  const scale=.00225*sensitivity*(ads?(watchPlayer()?.active==='sniper'?.31:.58):1);
+  const scale=.00225*sensitivity*(aiming()?(watchPlayer()?.active==='sniper'?.31:.58):1);
   yaw+=dx*scale;pitch=clamp(pitch-dy*scale,-1.40,1.40);
 }
 function bindCanvas(){
@@ -258,7 +260,7 @@ function bindCanvas(){
   canvas.addEventListener('mousedown',e=>{
     if(screen!=='game'||modal)return;e.preventDefault();audio.unlock();
     if(!pointerMode){attemptLock();dragX=e.clientX;dragY=e.clientY;}
-    if(e.button===0)heldFire=pendingFire=true;if(e.button===2)ads=true;
+    if(e.button===0)heldFire=pendingFire=true;if(e.button===2&&slot!==3&&!WEAPONS[watchPlayer()?.active]?.melee)ads=true;
   });
 }
 window.addEventListener('mouseup',e=>{if(e.button===0)heldFire=false;if(e.button===2)ads=false;if(!e.buttons)dragX=dragY=null;});
@@ -274,11 +276,11 @@ document.addEventListener('pointerlockchange',()=>{
 document.addEventListener('pointerlockerror',()=>{if(!modal&&screen==='game')hintLock();});
 document.addEventListener('keydown',e=>{
   if(screen!=='game'||modal||paused)return;
-  const used=['KeyW','KeyA','KeyS','KeyD','KeyR','KeyQ','KeyC','Space','Digit1','Digit2','Tab','Escape'];
+  const used=['KeyW','KeyA','KeyS','KeyD','KeyR','KeyQ','KeyC','Space','Digit1','Digit2','Digit3','Tab','Escape'];
   if(!used.includes(e.code))return;e.preventDefault();keys.add(e.code);if(e.repeat)return;
   pressed.add(e.code);
   if(e.code==='Escape'){showPause();return;}
-  if(e.code==='Digit1'||e.code==='Digit2')slot=e.code==='Digit2'?2:1;
+  if(['Digit1','Digit2','Digit3'].includes(e.code)){slot=Number(e.code.slice(-1));if(slot===3)ads=false;}
   if(e.code==='Tab')spectatorIndex++;
   if(e.code==='KeyQ'&&['range','warmup','between'].includes(game.phase)){setLoadout(primary[(primary.indexOf(selected)+1)%3]);slot=1;}
 });
@@ -301,7 +303,7 @@ function frame(ms){
     if(!client){if(!paused)stepGame(game,{[selfId]:input},dt);}else client.input(input);
     pendingFire=false;pressed.clear();receiveEvents(t);audio.reconcile(game);const p=watchPlayer();if(!paused)audio.steps(game,p,t);
     const visual=visualState(ms),watch=p?.id!==selfId;
-    try{renderer.draw(visual,selfId,{lobby:false,ads:watch?!!p?.ads:ads,quality,yaw:watch?p?.yaw:yaw,pitch:watch?p?.pitch:pitch,spectatorId:watch?p?.id:undefined,t,dt});}
+    try{renderer.draw(visual,selfId,{lobby:false,ads:watch?!!p?.ads:aiming(),quality,yaw:watch?p?.yaw:yaw,pitch:watch?p?.pitch:pitch,spectatorId:watch?p?.id:undefined,t,dt});}
     catch(err){console.error(err);if(!(renderer instanceof LiteRenderer))switchToLite();else throw err;}
     $('hitMark').style.opacity=String(clamp((hitTime-t)/.09,0,1));$('damage').style.opacity=String(clamp((damageTime-t)*2,0,.64));
     if(ms-hudStamp>70||firstFrame){showHUD(t);hudStamp=ms;firstFrame=false;}

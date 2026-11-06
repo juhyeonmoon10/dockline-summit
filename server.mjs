@@ -116,7 +116,7 @@ function sanitizedInput(input = {}) {
     forward: number(input.forward, -1, 1), strafe: number(input.strafe, -1, 1),
     yaw: number(input.yaw, -1e6, 1e6), pitch: number(input.pitch, -Math.PI / 2, Math.PI / 2),
     fire: input.fire === true, reload: input.reload === true, jump: input.jump === true,
-    slide: input.slide === true, ads: input.ads === true, slot: input.slot === 2 ? 2 : 1,
+    slide: input.slide === true, ads: input.ads === true, slot: input.slot === 3 ? 3 : input.slot === 2 ? 2 : 1,
     ...(primaryWeapons.has(input.weapon) ? { weapon: input.weapon } : {})
   };
 }

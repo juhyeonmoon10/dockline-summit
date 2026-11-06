@@ -22,6 +22,11 @@ export const WEAPONS = {
     id:'pistol', label:'권총', mag:13, reserve:91, damage:12, head:15,
     interval:.13, equip:.20, reload:1.06, spread:.5*degree, aimSpread:.12*degree, moveScale:1,
     falloff:{start:50*stud, end:125*stud, damage:3, head:4}
+  },
+  knife: {
+    id:'knife', label:'전투용 칼', melee:true, mag:null, reserve:null, damage:50, head:50,
+    range:1.8, arc:20*degree, windup:.10, interval:.55, equip:.20, reload:0,
+    spread:0, aimSpread:0, moveScale:1.05
   }
 };
 

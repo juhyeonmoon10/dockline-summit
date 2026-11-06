@@ -52,6 +52,29 @@ function clip(ctx,source,from=0,duration=source.duration,level=.65){
   return buffer;
 }
 
+// Short, original foley buffers; generated once, without another audio download.
+function meleeBuffer(ctx,kind){
+  const swing=kind==='bladeSwing',wall=kind==='bladeWall',duration=swing?.17:wall?.12:.10;
+  const rate=ctx.sampleRate,buffer=ctx.createBuffer(1,Math.ceil(rate*duration),rate),data=buffer.getChannelData(0);
+  let seed=83921,low=0,previous=0,high=0,phase=0,peak=0;
+  const hp=Math.exp(-2*Math.PI*(swing?480:140)/rate);
+  for(let i=0;i<data.length;i++){
+    const t=i/rate,u=t/duration;
+    seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+    const noise=seed/2147483648-1;
+    high=hp*(high+noise-previous);previous=noise;
+    const cutoff=swing?2900-1900*u:wall?4200:1100;
+    low+=(high-low)*(1-Math.exp(-2*Math.PI*cutoff/rate));
+    const envelope=swing?Math.pow(Math.sin(Math.PI*u),1.8):Math.exp(-t/.024)*(1-Math.exp(-t/.001));
+    phase+=2*Math.PI*(wall?540:170*Math.exp(-t/.045))/rate;
+    const body=swing?0:Math.sin(phase)*.40+(wall?Math.sin(2*Math.PI*2380*t)*Math.exp(-t/.03)*.10:0);
+    data[i]=(low+body)*envelope*Math.min(1,(duration-t)/.012);
+    peak=Math.max(peak,Math.abs(data[i]));
+  }
+  if(peak>0)for(let i=0;i<data.length;i++)data[i]*=.65/peak;
+  return buffer;
+}
+
 export class ArenaSound {
   constructor(){
     this._enabled=true;this.ctx=null;this.ready=null;this.loaded=false;
@@ -80,6 +103,7 @@ export class ArenaSound {
         ceiling.curve=curve;master.gain.value=.78;
         bus.connect(ceiling);ceiling.connect(master);master.connect(ctx.destination);
         this.bus=bus;this.master=master;
+        for(const kind of ['bladeSwing','bladeHit','bladeWall'])this.buffers.set(kind,meleeBuffer(ctx,kind));
         const resume=ctx.state==='suspended'?ctx.resume().catch(()=>{}):Promise.resolve();
         this.ready=Promise.all([resume,...Object.entries(samples).map(async([id,b64])=>{
           try{
@@ -161,9 +185,11 @@ export class ArenaSound {
   }
   playEvent(event,actor,view){
     const own=actor.id===view.id;
-    const origin=event.type==='shot'&&Number.isFinite(event.x)&&Number.isFinite(event.z)?event:actor;
+    const origin=['shot','melee','meleeImpact'].includes(event.type)&&Number.isFinite(event.x)&&Number.isFinite(event.z)?event:actor;
     const {dist,pan}=this.relative(origin,view),attenuation=own?1:.65/(1+(dist/9)**1.35),position=own?0:pan;
     const options={priority:own?3:2,lowpass:own?0:Math.max(1800,16000/(1+dist*.12))};
+    if(event.type==='melee')this.sample('bladeSwing',.34*attenuation,position,.96+(event.seq%3)*.04,0,options);
+    if(event.type==='meleeImpact')this.sample(event.target?'bladeHit':'bladeWall',.44*attenuation,position,.98+(event.seq%3)*.025,0,options);
     if(event.type==='shot'&&guns[event.weapon]){
       const profile=guns[event.weapon],delay=own?0:Math.min(.12,dist/343);
       this.sample(event.weapon,profile.volume*attenuation,position,.985+Math.random()*.030,delay,options);

@@ -16,7 +16,8 @@ export const spawnYaw = player => MAP.spawns[player.team][player.seat % 3].yaw;
 
 function memory(p) {
   if (!playerMemory.has(p)) {
-    playerMemory.set(p, { holstered: {}, cooldown: 0,
+    playerMemory.set(p, { holstered: {}, cooldown: 0, melee:null,
+      unlimitedAmmo:p.reserve===null&&!WEAPONS[p.active]?.melee,
       slideCooldown: 0, lastSlide: false, lastJump: false, vx: 0, vz: 0, vy: 0, grounded: true });
   }
   return playerMemory.get(p);
@@ -94,9 +95,10 @@ function equipWeapon(p, next, now) {
   const m = memory(p);
   m.holstered[p.active] = {ammo:p.ammo, reserve:p.reserve, readyAt:now+Math.max(0,m.cooldown)};
   const gun = WEAPONS[next];
-  const stock = m.holstered[next] || {ammo:gun.mag, reserve:p.reserve===null?null:gun.reserve, readyAt:0};
+  const stock = m.holstered[next] || {ammo:gun.mag, reserve:m.unlimitedAmmo?null:gun.reserve, readyAt:0};
   p.active = next; p.ammo = stock.ammo; p.reserve = stock.reserve;
   m.cooldown = Math.max(gun.equip,stock.readyAt-now);
+  m.melee = null;
   p.reload = 0; p.reloadDuration = 0;
 }
 
@@ -107,14 +109,14 @@ function changeWeapon(p, id, now) {
 }
 
 function changeSlot(p, slot, now) {
-  const next = slot === 2 ? 'pistol' : p.weapon;
+  const next = slot === 3 ? 'knife' : slot === 2 ? 'pistol' : p.weapon;
   if (p.active === next) return;
   equipWeapon(p,next,now);
 }
 
 function beginReload(g, p) {
   const w = WEAPONS[p.active];
-  if (p.reload > 0 || p.ammo >= w.mag || p.reserve === 0) return;
+  if (w.melee || p.reload > 0 || p.ammo >= w.mag || p.reserve === 0) return;
   p.reloadDuration = p.ammo===0 ? (w.emptyReload ?? w.reload) : w.reload;
   p.reload = p.reloadDuration;
   emit(g, 'reload', p.id, { weapon: p.active });
@@ -238,26 +240,71 @@ function shoot(g, p) {
     g.range.shots++;
     if (total.size) g.range.hits++;
   }
-  for (const [t, h] of total) {
-    if(t.practice) { emit(g,'hit',p.id,{target:t.id,damage:0,headshot:false,weapon:p.active}); continue; }
-    const damage = Math.min(t.hp,Math.round(h.damage*100)/100);
-    emit(g,'hit',p.id,{target:t.id, damage, headshot:h.headshot, weapon:p.active});
-    if (g.phase === 'warmup') continue;
-    t.hp = Math.round((t.hp-damage)*100)/100;
-    p.damage = Math.round((p.damage+damage)*100)/100;
-    if (t.hp > 0) continue;
-    t.alive = false; p.kills++;
-    if (t.kind==='dummy') {
-      t.respawnAt = g.elapsed + 1.5;
-      g.range.kills++;
-    } else {
-      t.ads = false; t.slide = 0; t.speed = 0; t.reload = 0; t.reloadDuration = 0; t.deaths++;
-    }
-    emit(g,'kill',p.id,{target:t.id,headshot:h.headshot,weapon:p.active});
-  }
+  for (const [t,h] of total) applyHit(g,p,t,h.damage,h.headshot);
 }
 
+function applyHit(g,p,t,amount,headshot=false) {
+  if(t.practice) { emit(g,'hit',p.id,{target:t.id,damage:0,headshot:false,weapon:p.active}); return; }
+  const damage = Math.min(t.hp,Math.round(amount*100)/100);
+  emit(g,'hit',p.id,{target:t.id,damage,headshot,weapon:p.active});
+  if (g.phase === 'warmup') return;
+  t.hp = Math.round((t.hp-damage)*100)/100;
+  p.damage = Math.round((p.damage+damage)*100)/100;
+  if (t.hp > 0) return;
+  t.alive = false; p.kills++;
+  if (t.kind==='dummy') {
+    t.respawnAt = g.elapsed + 1.5;g.range.kills++;
+  } else {
+    t.ads = false;t.slide = 0;t.speed = 0;t.reload = 0;t.reloadDuration = 0;t.deaths++;
+    memory(t).melee=null;
+  }
+  emit(g,'kill',p.id,{target:t.id,headshot,weapon:p.active});
+}
 
+function beginMelee(g,p) {
+  const w=WEAPONS[p.active],m=memory(p);
+  m.cooldown=w.interval+Math.min(0,m.cooldown);
+  m.melee={at:g.elapsed+w.windup};
+  emit(g,'melee',p.id,{weapon:p.active,x:p.x,y:p.y+eyeHeight(p),z:p.z,at:g.elapsed});
+  if(g.phase==='range')g.range.shots++;
+}
+
+function meleeContact(g,p) {
+  const w=WEAPONS.knife,x=p.x,y=p.y+eyeHeight(p),z=p.z,cp=Math.cos(p.pitch);
+  const forward=[Math.sin(p.yaw)*cp,Math.sin(p.pitch),-Math.cos(p.yaw)*cp],cone=Math.cos(w.arc);
+  let nearest=null;
+  const targets=g.phase==='range'?g.targets:g.phase==='warmup'?[...g.players,...g.targets]:g.players;
+  for(const target of targets) {
+    if(target===p||(!target.practice&&!target.alive)||(!target.practice&&target.team===p.team))continue;
+    const heights=target.practice?[0]:target.kind==='dummy'?[.83,1.21,1.63]:[.55,1.05,eyeHeight(target)+.05];
+    for(const height of heights) {
+      const vx=target.x-x,vy=target.y+height-y,vz=target.z-z,length=Math.hypot(vx,vy,vz);
+      if(length<.001||length>w.range+.5)continue;
+      const dx=vx/length,dy=vy/length,dz=vz/length;
+      if(dx*forward[0]+dy*forward[1]+dz*forward[2]<cone)continue;
+      const distance=target.practice?length:Math.min(...bodyHit(target,x,y,z,dx,dy,dz));
+      if(distance>w.range||distance<0||distance>=(nearest?.distance??Infinity))continue;
+      if(worldHit(x,y,z,dx,dy,dz,distance+.001)<distance-.001)continue;
+      nearest={x,y,z,ex:x+dx*distance,ey:y+dy*distance,ez:z+dz*distance,distance,target};
+    }
+  }
+  if(nearest)return nearest;
+  const distance=worldHit(x,y,z,...forward,w.range);
+  if(distance<w.range-.001)return {x,y,z,ex:x+forward[0]*distance,ey:y+forward[1]*distance,ez:z+forward[2]*distance,target:null};
+  return null;
+}
+
+function resolveMelee(g,p) {
+  const m=memory(p);if(!m.melee||!p.alive||p.active!=='knife')return;
+  m.melee=null;
+  const contact=meleeContact(g,p);if(!contact)return;
+  const {x,y,z,ex,ey,ez,target}=contact;
+  emit(g,'meleeImpact',p.id,{weapon:'knife',x,y,z,ex,ey,ez,target:target?.id||null,at:g.elapsed});
+  if(target){
+    if(g.phase==='range')g.range.hits++;
+    applyHit(g,p,target,WEAPONS.knife.damage,false);
+  }
+}
 
 function visibleHeight(p,t) {
   const ox = p.x, oy = p.y+eyeHeight(p), oz = p.z;
@@ -291,6 +338,7 @@ function startRound(g) {
 }
 
 function finishRound(g,team,reason) {
+  for(const p of g.players)memory(p).melee=null;
   if (team!==null) g.score[team]++;
   g.roundWinner=team; g.reason=reason;
   emit(g,'roundEnd',null,{team,reason});
@@ -344,22 +392,24 @@ function tick(g, inputs, dt) {
     return;
   }
   if (g.phase==='warmup' && g.time<=0) { startRound(g); return; }
-  const shooters=[];
+  const shooters=[],meleeContacts=[];
   for (const p of g.players) {
-    if (!p.alive) continue;
+    if (!p.alive) { memory(p).melee=null;continue; }
     const input=p.bot ? botInput(g,p,dt) : (inputs[p.id] || {});
     const m=memory(p);
     p.yaw=number(input.yaw,p.yaw)%(Math.PI*2); p.pitch=clamp(number(input.pitch,p.pitch),-1.45,1.45);
-    if (input.slot===1 || input.slot===2) changeSlot(p,input.slot,g.elapsed);
+    if (input.slot===1 || input.slot===2 || input.slot===3) changeSlot(p,input.slot,g.elapsed);
     m.cooldown=m.cooldown>0?m.cooldown-dt:0;
     advanceReload(g,p,dt,input.fire);
     if (input.reload && (!input.fire || !p.ammo)) beginReload(g,p);
-    p.ads=!!input.ads && !p.slide && !p.reload;
+    p.ads=!!input.ads && !p.slide && !p.reload && !WEAPONS[p.active].melee;
     movePlayer(p,input,dt);
+    if(m.melee&&m.melee.at<=g.elapsed+1e-8)meleeContacts.push(p);
     if (input.fire && m.cooldown<=1e-8 && !p.reload) shooters.push(p);
   }
   // A paired trigger pull in one server tick allows a trade instead of favoring team order.
-  for (const p of shooters) shoot(g,p);
+  for (const p of shooters)WEAPONS[p.active].melee?beginMelee(g,p):shoot(g,p);
+  for (const p of meleeContacts)resolveMelee(g,p);
   if (g.phase==='round' || g.phase==='overtime') updateRound(g,dt);
 }
 
