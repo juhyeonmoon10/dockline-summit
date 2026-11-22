@@ -1,7 +1,8 @@
 import { createGame, stepGame } from './sim.js';
 import { gameSnapshot } from './game-snapshot.js';
+import { getArena } from './arena-map.js';
+import { isPrimaryWeapon, botLoadouts } from './balance.js';
 
-const primary = new Set(['rifle', 'shotgun', 'sniper']);
 const fail = message => { throw new Error(message); };
 const cleanName = name => String(name || '').replace(/[<>\u0000-\u001F\u007F]/g, '').trim().slice(0, 16) || '플레이어';
 function sanitizedInput(input) {
@@ -11,17 +12,17 @@ function sanitizedInput(input) {
     yaw:number(input.yaw,-1e6,1e6), pitch:number(input.pitch,-Math.PI/2,Math.PI/2),
     fire:input.fire===true, reload:input.reload===true, jump:input.jump===true,
     slide:input.slide===true, ads:input.ads===true, slot:input.slot===3?3:input.slot===2?2:1,
-    ...(primary.has(input.weapon)?{weapon:input.weapon}:{})
+    ...(isPrimaryWeapon(input.weapon)?{weapon:input.weapon}:{})
   };
 }
 
 // Transport assigns player IDs. Only inputs and lobby requests cross the connection;
 // this host owns all movement, ammunition, hits and match transitions.
 export class OnlineHost {
-  constructor({code,size,hostId,name,weapon,onRoom,onGame,now=()=>performance.now()}) {
+  constructor({code,size,hostId,name,weapon,mapId,onRoom,onGame,now=()=>performance.now()}) {
     if(![2,3].includes(size))fail('팀 인원은 2명 또는 3명입니다.');
     if(typeof hostId!=='string'||!hostId)fail('방장 연결을 확인해 주세요.');
-    this.state={code,size,hostId,phase:'lobby',players:[],needed:size*2};
+    this.state={code,size,mapId:getArena(mapId).id,hostId,phase:'lobby',players:[],needed:size*2};
     this.members=new Map();this.game=null;this.closed=false;this.broadcastTime=0;
     this.onRoom=onRoom;this.onGame=onGame;this.now=now;
     this.join(hostId,{name,weapon});
@@ -36,7 +37,7 @@ export class OnlineHost {
     if(!fields||typeof fields!=='object'||Array.isArray(fields))fail('잘못된 요청입니다.');
     if(this.state.players.length>=this.state.needed)fail('방이 가득 찼습니다.');
     const counts=[0,0];this.state.players.forEach(p=>counts[p.team]++);
-    const player={id,name:cleanName(fields.name),weapon:primary.has(fields.weapon)?fields.weapon:'rifle',
+    const player={id,name:cleanName(fields.name),weapon:isPrimaryWeapon(fields.weapon)?fields.weapon:'rifle',
       team:counts[0]<=counts[1]?0:1,bot:false,ready:id===this.state.hostId};
     this.state.players.push(player);
     this.members.set(id,{player,lastInput:{},lastInputAt:-Infinity,seq:-1});
@@ -71,12 +72,13 @@ export class OnlineHost {
       if(room.phase!=='lobby')fail('이미 경기가 시작됐습니다.');
       if(room.players.some(p=>!p.ready))fail('다른 참가자가 준비를 누르면 시작할 수 있습니다.');
       if(room.players.length!==room.needed&&body.fillBots!==true)fail('자리가 남았습니다. 참가자를 기다리거나 봇을 선택해 주세요.');
+      const botWeapon=botLoadouts();
       for(let team=0;team<2;team++) {
         const count=room.players.filter(p=>p.team===team).length;
         for(let seat=count;seat<room.size;seat++)room.players.push({id:'bot-'+team+'-'+seat,
-          name:['봇 리프','봇 루크','봇 코브'][seat],team,bot:true,ready:true,weapon:['rifle','shotgun','sniper'][seat]});
+          name:['봇 리프','봇 루크','봇 코브'][seat],team,bot:true,ready:true,weapon:botWeapon(team,seat)});
       }
-      this.game=createGame({size:room.size,players:room.players.map(p=>({...p}))});room.phase='playing';
+      this.game=createGame({size:room.size,mapId:room.mapId,players:room.players.map(p=>({...p}))});room.phase='playing';
       this.broadcastTime=0;
       for(const m of this.members.values()){m.lastInput={};m.lastInputAt=-Infinity;}
       this.roomUpdate();this.gameUpdate();return this.room;
@@ -90,7 +92,7 @@ export class OnlineHost {
       if(room.phase!=='lobby')fail('대기실에서만 변경할 수 있습니다.');
       if(action==='ready')player.ready=body.ready===true||host;
       if(action==='weapon') {
-        if(!primary.has(body.weapon))fail('무기를 다시 선택해 주세요.');
+        if(!isPrimaryWeapon(body.weapon))fail('무기를 다시 선택해 주세요.');
         player.weapon=body.weapon;
       }
       if(action==='team'&&body.team!==player.team) {

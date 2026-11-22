@@ -1,0 +1,141 @@
+/* The sight uses CSS pixels, independent of the 3D renderer's resolution. */
+#sight {
+  --gap: calc(max(3px, var(--cone, 6px)) + var(--kick, 0px));
+  --tick: 6px;
+  --optic: min(76vmin, 660px);
+}
+#sight::before {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: #fffdf5;
+  box-shadow: 0 0 0 1px #15272bb3;
+}
+#sight i {
+  --line: 2px;
+  border-radius: 1px;
+  background: #fffdf5;
+  box-shadow: 0 0 0 1px #10232da8;
+}
+#sight i:nth-child(1), #sight i:nth-child(2) {
+  top: -1px;
+  width: var(--tick);
+  height: var(--line);
+}
+#sight i:nth-child(3), #sight i:nth-child(4) {
+  left: -1px;
+  width: var(--line);
+  height: var(--tick);
+}
+#sight i:nth-child(1) { left: calc(0px - var(--gap) - var(--tick)); }
+#sight i:nth-child(2) { left: var(--gap); }
+#sight i:nth-child(3) { top: calc(0px - var(--gap) - var(--tick)); }
+#sight i:nth-child(4) { top: var(--gap); }
+#sight[data-equipped="shotgun"] { --tick: 9px; }
+#sight[data-equipped="knife"] i { display: none; }
+#sight.scope { --gap: 5px; --tick: calc(var(--optic) / 2 - 5px); }
+#sight.scope::before { background: #f05942; box-shadow: 0 0 0 1px #492d2c; }
+#sight.scope i { --line: 1px; background: #1d272a; box-shadow: 0 0 1px #e3e8dfaa; }
+#sight.scope::after {
+  width: var(--optic);
+  border: 3px solid #1a242b;
+  box-shadow: 0 0 0 150vmax #081017ed, inset 0 0 0 1px #e2e8e4a1, inset 0 0 20px #111e293d;
+}
+
+#hitMark {
+  --hit-color: #fffdf5;
+  --stroke: 2px;
+  --length: 6px;
+  width: 26px;
+  height: 26px;
+  z-index: 1;
+  pointer-events: none;
+  transform: translate(-50%, -50%) rotate(45deg) scale(var(--mark-scale, 1));
+  background:
+    linear-gradient(var(--hit-color) 0 0) left center / var(--length) var(--stroke),
+    linear-gradient(var(--hit-color) 0 0) right center / var(--length) var(--stroke),
+    linear-gradient(var(--hit-color) 0 0) top center / var(--stroke) var(--length),
+    linear-gradient(var(--hit-color) 0 0) bottom center / var(--stroke) var(--length);
+  background-repeat: no-repeat;
+  filter: drop-shadow(0 1px 1px #10212e);
+}
+#hitMark[data-kind="head"] { --hit-color: #ffdf66; --stroke: 3px; --length: 7px; }
+#hitMark[data-kind="kill"] { --hit-color: #ffab70; --stroke: 4px; --length: 9px; width: 33px; height: 33px; }
+#combatDamage {
+  z-index: 1;
+  left: calc(50% + 19px);
+  top: calc(50% - 30px);
+  font: 800 19px/1 Arial, sans-serif;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 3px #122630, 0 0 2px #122630;
+}
+#fragConfirm {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 9px;
+  z-index: 1;
+  padding: 6px 13px 6px 8px;
+  border: 1px solid #fff4;
+  border-radius: 3px;
+  background: #17262df0;
+  color: white;
+  text-shadow: none;
+}
+#fragConfirm b {
+  padding: 3px 6px;
+  border-radius: 1px;
+  background: #ffad72;
+  color: #19262e;
+  font-size: 11px;
+}
+#fragConfirm[data-headshot="true"] b { background: #ffdf66; }
+#fragConfirm:empty { display: none; }
+#damage { box-shadow: inset 0 0 10vw #d8443277; }
+#damage[data-direction="true"]::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: clamp(120px, 20vmin, 185px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) rotate(var(--incoming, 0rad));
+  background: conic-gradient(from -36deg, transparent 0deg, #ef694e 12deg, #ffd3aa 36deg, #ef694e 60deg, transparent 72deg);
+  -webkit-mask: radial-gradient(closest-side, transparent 92%, #000 93%, #000 98%, transparent);
+  mask: radial-gradient(closest-side, transparent 92%, #000 93%, #000 98%, transparent);
+}
+#weaponHud .weapon-status {
+  display: block;
+  color: #f5d990;
+  font-size: 11px;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+#weaponHud .weapon-status:empty { display: none; }
+#weaponHud.low-ammo #ammo { color: #ffb47d; }
+#weaponHud.reloading::before, #weaponHud.reloading::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: #8298a4;
+}
+#weaponHud.reloading::after {
+  background: #ffe078;
+  transform-origin: left;
+  transform: scaleX(var(--reload-progress, 0));
+  transition: transform 70ms linear;
+}
+@media (prefers-reduced-motion: reduce) {
+  #sight { --gap: max(3px, var(--cone, 6px)); }
+  #sight.scope { --gap: 5px; }
+  #hitMark { transform: translate(-50%, -50%) rotate(45deg); }
+  #weaponHud.reloading::after { transition: none; }
+}

@@ -2,13 +2,23 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OnlineHost } from '../dist/online-host.js';
 
-function fixture(size=2) {
+function fixture(size=2,mapId) {
   let wall=1000;
   const rooms=[],games=[];
-  const host=new OnlineHost({code:'ABC234',size,hostId:'host',name:'방장',weapon:'rifle',
+  const host=new OnlineHost({code:'ABC234',size,mapId,hostId:'host',name:'방장',weapon:'rifle',
     now:()=>wall,onRoom:r=>rooms.push(r),onGame:g=>games.push(g)});
   return {host,rooms,games,tick(dt=.05){wall+=dt*1000;host.tick(dt,wall);},advance(ms){wall+=ms;}};
 }
+
+test('guests see the host arena in both the lobby and the first match snapshot',()=>{
+  const {host,games}=fixture(2,'switchyard');
+  const room=host.join('guest',{name:'게스트',mapId:'summit',weapon:'burst'});
+  assert.equal(room.mapId,'switchyard');
+  host.action('guest','ready',{ready:true});
+  host.action('host','start',{fillBots:true});
+  assert.equal(games[0].mapId,'switchyard');
+  assert.equal(games[0].players.find(p=>p.id==='guest').weapon,'burst');
+});
 
 test('online lobby enforces capacity, balanced teams, names and ready/start gates',()=>{
   const {host}=fixture();

@@ -1,31 +1,31 @@
 // Shared rules for the standalone practice arena and the authoritative room host.
-import { MAP } from './arena-map.js';
+import { MAP, getArena } from './arena-map.js';
 import { BODY_RADIUS, walkHeight, support, ceilingAt, intersect, worldHit } from './arena-world.js';
 import { nextWaypoint } from './arena-routes.js';
 import { tacticalBotInput } from './tactics.js';
-import { MAX_HP, WEAPONS, impactDamage } from './balance.js';
+import { MAX_HP, WEAPONS, impactDamage, isPrimaryWeapon, botLoadouts } from './balance.js';
 export { MAP, MAX_HP, WEAPONS };
 
 const playerMemory = new WeakMap();
 
 const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
 const number = (v, fallback = 0) => Number.isFinite(v) ? v : fallback;
-const primary = id => ['rifle', 'shotgun', 'sniper'].includes(id) ? id : 'rifle';
+const primary = id => isPrimaryWeapon(id) ? id : 'rifle';
 export const eyeHeight = player => player.slide > 0 ? 1.0 : 1.55;
-export const spawnYaw = player => MAP.spawns[player.team][player.seat % 3].yaw;
+export const spawnYaw = (player, mapId) => getArena(mapId).spawns[player.team][player.seat % 3].yaw;
 
 function memory(p) {
   if (!playerMemory.has(p)) {
-    playerMemory.set(p, { holstered: {}, cooldown: 0, melee:null,
+    playerMemory.set(p, { holstered: {}, cooldown: 0, melee:null, burstLeft:0, semiLatched:false,
       unlimitedAmmo:p.reserve===null&&!WEAPONS[p.active]?.melee,
       slideCooldown: 0, lastSlide: false, lastJump: false, vx: 0, vz: 0, vy: 0, grounded: true });
   }
   return playerMemory.get(p);
 }
 
-function resetPlayer(p) {
-  const start = MAP.spawns[p.team][p.seat % 3];
-  p.x=start.x; p.z=start.z; p.y=0; p.yaw=start.yaw; p.pitch=0; p.grounded=true;
+function resetPlayer(p, map) {
+  const start = map.spawns[p.team][p.seat % 3];
+  p.x=start.x; p.z=start.z; p.y=start.y??0; p.yaw=start.yaw; p.pitch=0; p.grounded=true;
 
   p.hp = p.maxHp = MAX_HP; p.alive = true; p.active = p.weapon;
   p.ammo = WEAPONS[p.weapon].mag; p.reserve = WEAPONS[p.weapon].reserve;
@@ -33,37 +33,40 @@ function resetPlayer(p) {
   playerMemory.delete(p);
 }
 
-function spawnPlayer(fields) {
+function spawnPlayer(fields, map) {
   const p = { ...fields, kills:0, deaths:0, damage:0 };
-  resetPlayer(p);
+  resetPlayer(p, map);
   return p;
 }
 
-function initialState(size, phase, time, players, targets) {
-  return { size, phase, time, elapsed:0, round:1, score:[0,0],
+function initialState(map, size, phase, time, players, targets) {
+  return { mapId:map.id, size, phase, time, elapsed:0, round:1, score:[0,0],
     winner:null, roundWinner:null, reason:'', players, targets,
     events:[], seq:0, capture:{team:null,progress:0} };
 }
 
-export function createRange({ id='local', name='나', weapon='rifle' } = {}) {
-  const player = spawnPlayer({id, name, team:0, seat:0, bot:false, weapon:primary(weapon)});
+export function createRange({ id='local', name='나', weapon='rifle', mapId } = {}) {
+  const map = getArena(mapId);
+  const player = spawnPlayer({id, name, team:0, seat:0, bot:false, weapon:primary(weapon)}, map);
   player.reserve = null; // The range never runs out of practice rounds.
-  const targets = MAP.rangeTargets.map((position, index) => ({
+  const targets = map.rangeTargets.map((position, index) => ({
     ...position, kind:'dummy', id:'dummy-'+(index+1), name:'더미 '+(index+1),
     yaw:Math.atan2(player.x-position.x, position.z-player.z),
     hp:MAX_HP, maxHp:MAX_HP, alive:true, respawnAt:0
   }));
   const near = targets[0], dx = near.x-player.x, dz = near.z-player.z;
   player.yaw = Math.atan2(dx,-dz);
-  player.pitch = Math.atan2(near.y + 1.14 - eyeHeight(player),Math.hypot(dx,dz));
-  const game = initialState(1,'range',0,[player],targets);
+  player.pitch = Math.atan2(near.y + 1.14 - player.y - eyeHeight(player),Math.hypot(dx,dz));
+  const game = initialState(map,1,'range',0,[player],targets);
   game.range = {shots:0,hits:0,kills:0};
   return game;
 }
 
-export function createGame({ size = 2, players = [], warmup = 15 } = {}) {
+export function createGame({ size = 2, players = [], warmup = 15, mapId } = {}) {
+  const map = getArena(mapId);
   size = size === 3 ? 3 : 2;
   const roster = [];
+  const botWeapon = botLoadouts();
   const used = new Set();
   const names = [['PIER', 'TUG', 'FERRY'], ['CRANE', 'SKIFF', 'BUOY']];
   for (let team = 0; team < 2; team++) {
@@ -74,16 +77,16 @@ export function createGame({ size = 2, players = [], warmup = 15 } = {}) {
       while (used.has(id)) id += '-';
       used.add(id);
       roster.push(spawnPlayer({ id, team, seat, name: String(source?.name ?? names[team][seat]).slice(0, 24),
-        bot: source ? Boolean(source.bot) : true, weapon: primary(source?.weapon ?? ['rifle', 'shotgun', 'sniper'][seat]) }));
+        bot: source ? Boolean(source.bot) : true, weapon: primary(source?.weapon ?? botWeapon(team,seat)) }, map));
     }
   }
   warmup = clamp(number(warmup, 15), 0, 60);
-  const targets = warmup ? MAP.plates.map((plate,team)=>({...plate,team,id:"target-"+team,practice:true,r:.50})) : [];
+  const targets = warmup ? map.plates.map((plate,team)=>({...plate,team,id:"target-"+team,practice:true,r:.50})) : [];
   if(warmup) for(const p of roster){
     const plate=targets[p.team], dx=plate.x-p.x, dz=plate.z-p.z;
-    p.yaw=Math.atan2(dx,-dz);p.pitch=Math.atan2(plate.y-eyeHeight(p),Math.hypot(dx,dz));
+    p.yaw=Math.atan2(dx,-dz);p.pitch=Math.atan2(plate.y-p.y-eyeHeight(p),Math.hypot(dx,dz));
   }
-  return initialState(size, warmup > 0 ? 'warmup' : 'round', warmup || 40, roster, targets);
+  return initialState(map, size, warmup > 0 ? 'warmup' : 'round', warmup || 40, roster, targets);
 }
 
 function emit(g, type, actor, fields = {}) {
@@ -99,6 +102,7 @@ function equipWeapon(p, next, now) {
   p.active = next; p.ammo = stock.ammo; p.reserve = stock.reserve;
   m.cooldown = Math.max(gun.equip,stock.readyAt-now);
   m.melee = null;
+  m.burstLeft = 0; m.semiLatched = false;
   p.reload = 0; p.reloadDuration = 0;
 }
 
@@ -117,6 +121,7 @@ function changeSlot(p, slot, now) {
 function beginReload(g, p) {
   const w = WEAPONS[p.active];
   if (w.melee || p.reload > 0 || p.ammo >= w.mag || p.reserve === 0) return;
+  memory(p).burstLeft = 0;
   p.reloadDuration = p.ammo===0 ? (w.emptyReload ?? w.reload) : w.reload;
   p.reload = p.reloadDuration;
   emit(g, 'reload', p.id, { weapon: p.active });
@@ -142,7 +147,7 @@ function advanceReload(g, p, dt, firing) {
   }
 }
 
-function movePlayer(p, input, dt) {
+function movePlayer(p, input, dt, map) {
   const m = memory(p);
   const f = clamp(number(input.forward), -1, 1), s = clamp(number(input.strafe), -1, 1);
   const len = Math.max(1, Math.hypot(f, s));
@@ -164,12 +169,12 @@ function movePlayer(p, input, dt) {
   p.slide=Math.max(0,p.slide-dt);
   const height=p.slide>0?1.23:1.79, step=m.grounded?.26:.022;
   const nextX=p.x+m.vx*dt, nextZ=p.z+m.vz*dt;
-  const hx=walkHeight(nextX,p.z,p.y,step,BODY_RADIUS,height);
+  const hx=walkHeight(nextX,p.z,p.y,step,BODY_RADIUS,height,map);
   if(hx!=null){p.x=nextX;p.y=hx;}else m.vx=0;
-  const hz=walkHeight(p.x,nextZ,p.y,step,BODY_RADIUS,height);
+  const hz=walkHeight(p.x,nextZ,p.y,step,BODY_RADIUS,height,map);
   if(hz!=null){p.z=nextZ;p.y=hz;}else m.vz=0;
-  const floor=support(p.x,p.z,p.y+.018);
-  const ceiling=ceilingAt(p.x,p.z,p.y+height);
+  const floor=support(p.x,p.z,p.y+.018,BODY_RADIUS,map);
+  const ceiling=ceilingAt(p.x,p.z,p.y+height,BODY_RADIUS,map);
   m.vy-=18.3*dt;
   const nextY=p.y+m.vy*dt;
   if(m.vy>0 && nextY+height>ceiling){p.y=ceiling-height;m.vy=0;m.grounded=false;}
@@ -195,10 +200,10 @@ function bodyHit(t, x,y,z, dx,dy,dz) {
   return [body,head];
 }
 
-function trace(g, p, yaw, pitch) {
+function trace(g, p, yaw, pitch, map) {
   const x = p.x, y = p.y + eyeHeight(p), z = p.z;
   const cp = Math.cos(pitch), dx = Math.sin(yaw) * cp, dz = -Math.cos(yaw) * cp, dy = Math.sin(pitch);
-  let distance = worldHit(x,y,z,dx,dy,dz), target = null, headshot = false;
+  let distance = worldHit(x,y,z,dx,dy,dz,100,map), target = null, headshot = false;
   if (g.phase==='warmup' && Math.abs(dz)>=.0001) {
     for (const plate of g.targets) {
       const t=(plate.z-z)/dz;
@@ -215,18 +220,21 @@ function trace(g, p, yaw, pitch) {
   return { x,y,z, ex:x+dx*distance, ey:y+dy*distance, ez:z+dz*distance, target, headshot, distance };
 }
 
-function shoot(g, p) {
+function shoot(g, p, map) {
   if (!p.ammo) { beginReload(g,p); return; }
   const w = WEAPONS[p.active], m = memory(p);
+  if(w.burstCount && !m.burstLeft) m.burstLeft=Math.min(w.burstCount,p.ammo);
   p.ammo--;
+  if (m.burstLeft) m.burstLeft--;
+  if (w.semiAuto) m.semiLatched=true;
   // Carry the fraction of a tick past the deadline so a held trigger keeps its rate.
-  m.cooldown = w.interval + Math.min(0,m.cooldown);
+  m.cooldown = (m.burstLeft ? w.burstInterval : w.interval) + Math.min(0,m.cooldown);
   const total = new Map(), pellets = p.active==='shotgun' ? [] : null;
   let central;
   for (let i=0; i < (w.pellets || 1); i++) {
     const spread = p.ads ? w.aimSpread : w.spread;
     const angle = Math.random() * Math.PI * 2, radius = Math.sqrt(Math.random()) * spread;
-    const hit = trace(g, p, p.yaw + Math.cos(angle)*radius, p.pitch + Math.sin(angle)*radius);
+    const hit = trace(g, p, p.yaw + Math.cos(angle)*radius, p.pitch + Math.sin(angle)*radius, map);
     if(pellets)pellets.push({ex:hit.ex,ey:hit.ey,ez:hit.ez,target:hit.target?.id||null});
     if (!central || (hit.target && !central.target)) central = hit;
     if (!hit.target) continue;
@@ -269,7 +277,7 @@ function beginMelee(g,p) {
   if(g.phase==='range')g.range.shots++;
 }
 
-function meleeContact(g,p) {
+function meleeContact(g,p,map) {
   const w=WEAPONS.knife,x=p.x,y=p.y+eyeHeight(p),z=p.z,cp=Math.cos(p.pitch);
   const forward=[Math.sin(p.yaw)*cp,Math.sin(p.pitch),-Math.cos(p.yaw)*cp],cone=Math.cos(w.arc);
   let nearest=null;
@@ -284,20 +292,20 @@ function meleeContact(g,p) {
       if(dx*forward[0]+dy*forward[1]+dz*forward[2]<cone)continue;
       const distance=target.practice?length:Math.min(...bodyHit(target,x,y,z,dx,dy,dz));
       if(distance>w.range||distance<0||distance>=(nearest?.distance??Infinity))continue;
-      if(worldHit(x,y,z,dx,dy,dz,distance+.001)<distance-.001)continue;
+      if(worldHit(x,y,z,dx,dy,dz,distance+.001,map)<distance-.001)continue;
       nearest={x,y,z,ex:x+dx*distance,ey:y+dy*distance,ez:z+dz*distance,distance,target};
     }
   }
   if(nearest)return nearest;
-  const distance=worldHit(x,y,z,...forward,w.range);
+  const distance=worldHit(x,y,z,...forward,w.range,map);
   if(distance<w.range-.001)return {x,y,z,ex:x+forward[0]*distance,ey:y+forward[1]*distance,ez:z+forward[2]*distance,target:null};
   return null;
 }
 
-function resolveMelee(g,p) {
+function resolveMelee(g,p,map) {
   const m=memory(p);if(!m.melee||!p.alive||p.active!=='knife')return;
   m.melee=null;
-  const contact=meleeContact(g,p);if(!contact)return;
+  const contact=meleeContact(g,p,map);if(!contact)return;
   const {x,y,z,ex,ey,ez,target}=contact;
   emit(g,'meleeImpact',p.id,{weapon:'knife',x,y,z,ex,ey,ez,target:target?.id||null,at:g.elapsed});
   if(target){
@@ -306,32 +314,39 @@ function resolveMelee(g,p) {
   }
 }
 
-function visibleHeight(p,t) {
+function visibleHeight(p,t,map) {
   const ox = p.x, oy = p.y+eyeHeight(p), oz = p.z;
   for (const ty of [t.y+eyeHeight(t)-.30, t.y+eyeHeight(t)+.06]) {
     const dx=t.x-ox, dy=ty-oy, dz=t.z-oz, len=Math.hypot(dx,dy,dz);
-    if (len > .01 && worldHit(ox,oy,oz,dx/len,dy/len,dz/len,len) >= len-.015) return ty;
+    if (len > .01 && worldHit(ox,oy,oz,dx/len,dy/len,dz/len,len,map) >= len-.015) return ty;
   }
   return null;
 }
 
-const botWorld={
-  map:MAP,visibleHeight,eyeHeight,nextWaypoint,
-  canStep(p,x,z){
-    const step=walkHeight(x,z,p.y,.28);
-    return step!=null && Math.abs(support(x,z,step+.01)-p.y)<.48;
-  },
-  patrolPoint(p,stage){
-    const side=p.team?-1:1;
-    if(stage%3===0) return [{x:0,y:MAP.zone.y,z:.35*side},{x:-10.85*side,y:1.64,z:.7*side},{x:11.1*side,y:0,z:6*side}][p.seat%3];
-    if(stage%3===1) return {x:(p.seat-1)*5*side,y:0,z:-14*side};
-    return {x:0,y:MAP.zone.y,z:side};
-  }
-};
-function botInput(g,p,dt){return tacticalBotInput(g,p,dt,memory(p),botWorld);}
+function patrolPoint(p,stage,map) {
+  const side=p.team?-1:1;
+  const route=map.patrols[p.seat], point=route[stage%(route.length+1)];
+  if (point) return {x:point.x*side,y:point.y??0,z:point.z*side};
+  return {x:map.zone.x,y:map.zone.y,z:map.zone.z+side};
+}
 
-function startRound(g) {
-  for (const p of g.players) resetPlayer(p);
+const botWorlds = new WeakMap();
+function botWorldFor(map) {
+  if (!botWorlds.has(map)) botWorlds.set(map, {
+    map, eyeHeight,
+    visibleHeight:(p,t)=>visibleHeight(p,t,map),
+    nextWaypoint:(p,x,z,y)=>nextWaypoint(p,x,z,y,map),
+    canStep(p,x,z) {
+      const step=walkHeight(x,z,p.y,.28,BODY_RADIUS,1.8,map);
+      return step!=null && Math.abs(support(x,z,step+.01,BODY_RADIUS,map)-p.y)<.48;
+    },
+    patrolPoint
+  });
+  return botWorlds.get(map);
+}
+
+function startRound(g,map) {
+  for (const p of g.players) resetPlayer(p,map);
   g.targets=[];
   g.phase='round'; g.time=40; g.roundWinner=null; g.reason=''; g.capture={team:null,progress:0};
   emit(g,'round',null,{round:g.round});
@@ -348,9 +363,9 @@ function finishRound(g,team,reason) {
   } else { g.phase='between'; g.time=3; }
 }
 
-function updateRound(g,dt) {
+function updateRound(g,dt,map) {
   const alive=[0,0], hp=[0,0], inside=[0,0];
-  const zone=MAP.zone;
+  const zone=map.zone;
   for (const p of g.players) if (p.alive) {
     alive[p.team]++; hp[p.team]+=p.hp;
     if (Math.abs(p.y-zone.y)<.95 && (p.x-zone.x)**2+(p.z-zone.z)**2<=zone.r**2) inside[p.team]++;
@@ -372,7 +387,7 @@ function updateRound(g,dt) {
   finishRound(g,advantage===0?null:advantage>0?0:1, alive[0]!==alive[1]?'생존 인원 우세':hp[0]!==hp[1]?'남은 체력 우세':'동점');
 }
 
-function tick(g, inputs, dt) {
+function tick(g, inputs, dt, map) {
   if (g.phase==='end') return;
   g.elapsed+=dt;
   if (g.phase==='range') {
@@ -388,14 +403,14 @@ function tick(g, inputs, dt) {
     for (const p of g.players) if (inputs[p.id]?.weapon) changeWeapon(p,inputs[p.id].weapon,g.elapsed);
   }
   if (g.phase==='between') {
-    if (g.time<=0) { g.round++; startRound(g); }
+    if (g.time<=0) { g.round++; startRound(g,map); }
     return;
   }
-  if (g.phase==='warmup' && g.time<=0) { startRound(g); return; }
+  if (g.phase==='warmup' && g.time<=0) { startRound(g,map); return; }
   const shooters=[],meleeContacts=[];
   for (const p of g.players) {
     if (!p.alive) { memory(p).melee=null;continue; }
-    const input=p.bot ? botInput(g,p,dt) : (inputs[p.id] || {});
+    const input=p.bot ? tacticalBotInput(g,p,dt,memory(p),botWorldFor(map)) : (inputs[p.id] || {});
     const m=memory(p);
     p.yaw=number(input.yaw,p.yaw)%(Math.PI*2); p.pitch=clamp(number(input.pitch,p.pitch),-1.45,1.45);
     if (input.slot===1 || input.slot===2 || input.slot===3) changeSlot(p,input.slot,g.elapsed);
@@ -403,19 +418,21 @@ function tick(g, inputs, dt) {
     advanceReload(g,p,dt,input.fire);
     if (input.reload && (!input.fire || !p.ammo)) beginReload(g,p);
     p.ads=!!input.ads && !p.slide && !p.reload && !WEAPONS[p.active].melee;
-    movePlayer(p,input,dt);
+    movePlayer(p,input,dt,map);
     if(m.melee&&m.melee.at<=g.elapsed+1e-8)meleeContacts.push(p);
-    if (input.fire && m.cooldown<=1e-8 && !p.reload) shooters.push(p);
+    if (!input.fire) m.semiLatched=false;
+    if ((m.burstLeft || (input.fire && !m.semiLatched)) && m.cooldown<=1e-8 && !p.reload) shooters.push(p);
   }
   // A paired trigger pull in one server tick allows a trade instead of favoring team order.
-  for (const p of shooters)WEAPONS[p.active].melee?beginMelee(g,p):shoot(g,p);
-  for (const p of meleeContacts)resolveMelee(g,p);
-  if (g.phase==='round' || g.phase==='overtime') updateRound(g,dt);
+  for (const p of shooters)WEAPONS[p.active].melee?beginMelee(g,p):shoot(g,p,map);
+  for (const p of meleeContacts)resolveMelee(g,p,map);
+  if (g.phase==='round' || g.phase==='overtime') updateRound(g,dt,map);
 }
 
 /** Advance the match in seconds, splitting long frames to keep collisions stable. */
 export function stepGame(game, inputs = {}, dt = 1/30) {
+  const map=getArena(game.mapId);
   let left=clamp(number(dt),0,.25);
-  while (left>1e-8) { const slice=Math.min(left,1/30); tick(game,inputs,slice); left-=slice; }
+  while (left>1e-8) { const slice=Math.min(left,1/30); tick(game,inputs,slice,map); left-=slice; }
   return game;
 }

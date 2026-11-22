@@ -1,16 +1,18 @@
 import * as T from './assets/three.module.min.js';
 import { blasterMesh, gunFit } from './blaster.js';
-import { WEAPONS } from './sim.js';
+import { PRIMARY_WEAPONS } from './balance.js';
+import { eyeHeight, WEAPONS } from './sim.js';
+import { approachAim, canAim, weaponFov } from './weapon-view.js';
 import { makeYard, sky, Parts, glowMaterial } from './yard-art.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { PelletRenderer } from './pellet-render.js';
 import { knifeMesh,knifeFit,knifePose } from './knife.js';
-import { operatorAvailable,createOperator,updateOperator,disposeOperator } from './operator.js';
+import { loadOperators,operatorAvailable,createOperator,updateOperator,disposeOperator } from './operator.js';
 
 const PI=Math.PI;
 const clamp=(n,min,max)=>Math.min(max,Math.max(min,n));
 const damp=(from,to,rate,dt)=>from+(to-from)*(1-Math.exp(-rate*dt));
-const weaponNames=['rifle','shotgun','sniper','pistol','knife'];
+const weaponNames=[...PRIMARY_WEAPONS,'pistol','knife'];
 const pose=new T.Vector3(),direction=new T.Vector3(),endpoint=new T.Vector3();
 const knifeWrist=new T.Vector3(),knifeShoulder=new T.Vector3(.50,-.55,.18);
 const vertical=new T.Vector3(0,1,0);
@@ -141,7 +143,7 @@ function glove(support,fit,handOnly=false) {
   group.add(parts.mesh());return group;
 }
 
-function gunModel(type) {
+export function gunModel(type) {
   if(type==='knife'){
     const group=new T.Group(),body=knifeMesh(),strong=glove(false,knifeFit,true),support=new T.Group();
     group.add(body,strong,support);group.userData={fit:knifeFit,body,support};return group;
@@ -254,9 +256,9 @@ function lightScene(scene,world=false) {
 }
 
 export class ArenaRenderer {
-  constructor(canvas,map) {
+  constructor(canvas,map,context) {
     this.canvas=canvas;this.map=map;
-    this.gl=new T.WebGLRenderer({canvas,antialias:true,alpha:false,powerPreference:'low-power',stencil:false});
+    this.gl=new T.WebGLRenderer({canvas,context,antialias:true,alpha:false,powerPreference:'low-power',stencil:false});
     this.gl.outputColorSpace=T.SRGBColorSpace;
     this.gl.shadowMap.enabled=true;this.gl.shadowMap.type=T.PCFSoftShadowMap;
     this.gl.shadowMap.autoUpdate=false;this.gl.shadowMap.needsUpdate=true;
@@ -267,7 +269,8 @@ export class ArenaRenderer {
     this.gunScene=new T.Scene();this.gunCamera=new T.PerspectiveCamera(63,1,.012,4);
     this.worldCamera.rotation.order='YXZ';
     lightScene(this.scene,true);lightScene(this.gunScene);sky(this.scene);
-    this.ring=makeYard(this.scene,map);
+    this.yards=new Map();
+    this.setMap(map);
     this.guns=Object.fromEntries(weaponNames.map(type=>[type,gunModel(type)]));
     this.gunRig=new T.Group();this.gunRig.scale.setScalar(.91);
     Object.values(this.guns).forEach(g=>this.gunRig.add(g));
@@ -306,6 +309,20 @@ export class ArenaRenderer {
     this.traceIndex=0;this.sparkIndex=0;
     this.sampleSeconds=0;this.sampleFrames=0;
   }
+  setMap(map) {
+    let yard=this.yards.get(map.id);
+    if(!yard){
+      const group=new T.Group();
+      yard={group,ring:makeYard(group,map)};
+      this.yards.set(map.id,yard);this.scene.add(group);
+    }
+    for(const entry of this.yards.values())entry.group.visible=entry===yard;
+    this.map=map;this.ring=yard.ring;
+    this.gl.shadowMap.needsUpdate=true;
+    this.marks?.clear();
+    this.shotTrails?.clear();
+    this.lastFocus=null;this.lastSeq=0;this.lastElapsed=-1;
+  }
   resize(view) {
     const canvas=this.canvas;
     const w=Math.max(1,canvas.clientWidth||window.innerWidth), h=Math.max(1,canvas.clientHeight||window.innerHeight);
@@ -318,6 +335,7 @@ export class ArenaRenderer {
     this.worldCamera.updateProjectionMatrix();this.gunCamera.updateProjectionMatrix();
   }
   avatar(player) {
+    if(!operatorAvailable())loadOperators();
     let a=this.models.get(player.id);
     const useRig=operatorAvailable();
     if(a && a.team===player.team && !!a.rig===useRig)return a;
@@ -428,8 +446,9 @@ export class ArenaRenderer {
   updateModels(players,focusId,dt) {
     const ids=new Set();
     for(const p of players){
+      if(p.id===focusId)continue;
       ids.add(p.id);
-      const a=this.avatar(p),show=p.alive&&p.id!==focusId;
+      const a=this.avatar(p),show=p.alive;
       a.group.visible=show;a.shadow.visible=show;
       if(show){
         const snap=!a.wasAlive || Math.hypot(p.x-a.x,p.z-a.z)>3.5;
@@ -520,21 +539,24 @@ export class ArenaRenderer {
     this.effects(game,focus,dt);this.updateModels(game.players,focus.id,dt);
     if(first){const swing=this.meleeSwings.get(focus.id);this.meleeAge=swing?.age??.55;this.meleeSide=swing?.side||1;}
     this.lastFocus=focus.id;
-    const ads=focus.active!=='knife'&&(playerView&&view.ads!==undefined?view.ads:focus.ads);
-    this.aim=damp(this.aim,ads && !(focus.reload>0)?1:0,14,dt);
-    this.eye=first?(focus.slide>0?1:1.55):damp(this.eye,focus.slide>0?1:1.55,19,dt);
+    const ads=canAim(focus,playerView?view.ads??focus.ads:focus.ads);
+    this.aim=first?Number(ads):approachAim(this.aim,ads,dt);
+    const height=eyeHeight(focus);
+    this.eye=first||playerView?height:damp(this.eye,height,19,dt);
     const move=Math.min((focus.speed||0)/5.4,1),slide=focus.slide>0;
     this.bob+=dt*(slide?0:move*12);
     const cam=this.worldCamera;
-    if(first||Math.hypot(focus.x-cam.position.x,focus.z-cam.position.z)>3.5)cam.position.set(focus.x,focus.y+this.eye,focus.z);
+    if(first||playerView||Math.hypot(focus.x-cam.position.x,focus.z-cam.position.z)>3.5)cam.position.set(focus.x,focus.y+this.eye,focus.z);
     else {
       cam.position.x=damp(cam.position.x,focus.x,37,dt);cam.position.z=damp(cam.position.z,focus.z,37,dt);
       cam.position.y=damp(cam.position.y,focus.y+this.eye,28,dt);
     }
     this.roll=damp(this.roll,slide?-.017:0,16,dt);
-    cam.rotation.set(clamp(pitch+this.recoil*.012,-1.5,1.5),-yaw,this.roll,'YXZ');
-    const fov=(slide?78:72)+(focus.active==='sniper'?-38:-13)*this.aim;
-    if(Math.abs(cam.fov-fov)>.03){cam.fov=fov;cam.updateProjectionMatrix();}
+    // The simulation fires down this axis. The weapon rig carries the recoil.
+    cam.rotation.set(pitch,-yaw,this.roll,'YXZ');
+    const fov=weaponFov(focus.active,this.aim,slide);
+    if(cam.fov!==fov){cam.fov=fov;cam.updateProjectionMatrix();}
+    this.viewFov=cam.fov;
     const key=weaponNames.includes(focus.active)?focus.active:'rifle';
     if(key!==this.active){this.equip=this.active ? .85 : 0;this.active=key;if(key!=='knife'||!this.meleeSwings.has(focus.id))this.meleeAge=.55;}
     this.equip=damp(this.equip,0,14,dt);
@@ -586,6 +608,6 @@ export class ArenaRenderer {
     this.gl.clear();this.gl.render(this.scene,cam);
     this.gl.clearDepth();
     // High magnification is a clear center view; the DOM crosshair remains visible.
-    if(!(sniper&&this.aim>.85))this.gl.render(this.gunScene,this.gunCamera);
+    if(!(sniper&&ads))this.gl.render(this.gunScene,this.gunCamera);
   }
 }

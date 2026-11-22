@@ -1,4 +1,4 @@
-const PRIMARY = new Set(['rifle', 'shotgun', 'sniper']);
+import { isPrimaryWeapon } from './balance.js';
 const protocolVersion = 1;
 const api = path => new URL('api/' + path, new URL('./', location.href));
 
@@ -74,7 +74,7 @@ export class RoomClient {
     this.onRoom?.(this.room);
     return this.room;
   }
-  create({ name, size, weapon = 'rifle' }) { return this.enter('create', { name, size, weapon }); }
+  create({ name, size, weapon = 'rifle', mapId = 'summit' }) { return this.enter('create', { name, size, weapon, mapId }); }
   join({ name, code, weapon = 'rifle' }) { return this.enter('join', { name, code: String(code).trim().toUpperCase(), weapon }); }
   ready(ready = true) { return this.post('ready', { ready }); }
   weapon(weapon) { return this.post('weapon', { weapon }); }
@@ -84,7 +84,7 @@ export class RoomClient {
   input(input) {
     if (!this.token || this.room?.phase !== 'playing') return;
     const next = { ...input };
-    if (!PRIMARY.has(next.weapon)) delete next.weapon;
+    if (!isPrimaryWeapon(next.weapon)) delete next.weapon;
     // Preserve short tap edges occurring between two 25 Hz transfers.
     for (const key of ['fire', 'slide', 'jump', 'reload']) {
       if (this.pendingInput?.[key]) next[key] = true;

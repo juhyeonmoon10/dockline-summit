@@ -8,12 +8,13 @@ import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { createGame, stepGame } from './dist/sim.js';
 import { gameSnapshot } from './dist/game-snapshot.js';
+import { getArena } from './dist/arena-map.js';
+import { isPrimaryWeapon, botLoadouts } from './dist/balance.js';
 
 const root = fileURLToPath(new URL('./dist/', import.meta.url));
 const port = Number(process.env.PORT || 8787);
 const rooms = new Map();
 const sessions = new Map();
-const primaryWeapons = new Set(['rifle', 'shotgun', 'sniper']);
 const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const mime = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -30,7 +31,7 @@ const json = (res, status, data) => {
 const cleanName = name => (String(name || '').replace(/[<>\u0000-\u001F\u007F]/g, '').trim().slice(0, 16) || '플레이어');
 const codeForRoom = () => Array.from({ length: 4 }, () => alphabet[randomInt(alphabet.length)]).join('');
 const roster = room => ({
-  code: room.code, size: room.size, hostId: room.hostId, phase: room.phase,
+  code: room.code, size: room.size, mapId:room.mapId, hostId: room.hostId, phase: room.phase,
   players: room.players, needed: room.size * 2
 });
 const toEvent = (type, data) => 'event: ' + type + '\ndata: ' + JSON.stringify(type==='game'?gameSnapshot(data):data) + '\n\n';
@@ -55,7 +56,7 @@ function addMember(room, fields) {
   room.players.forEach(p => counts[p.team]++);
   const host = !room.hostId;
   const player = {
-    id, name: cleanName(fields.name), weapon: primaryWeapons.has(fields.weapon) ? fields.weapon : 'rifle',
+    id, name: cleanName(fields.name), weapon: isPrimaryWeapon(fields.weapon) ? fields.weapon : 'rifle',
     team: counts[0] <= counts[1] ? 0 : 1, bot: false, ready: host
   };
   if (host) room.hostId = id;
@@ -117,7 +118,7 @@ function sanitizedInput(input = {}) {
     yaw: number(input.yaw, -1e6, 1e6), pitch: number(input.pitch, -Math.PI / 2, Math.PI / 2),
     fire: input.fire === true, reload: input.reload === true, jump: input.jump === true,
     slide: input.slide === true, ads: input.ads === true, slot: input.slot === 3 ? 3 : input.slot === 2 ? 2 : 1,
-    ...(primaryWeapons.has(input.weapon) ? { weapon: input.weapon } : {})
+    ...(isPrimaryWeapon(input.weapon) ? { weapon: input.weapon } : {})
   };
 }
 
@@ -127,14 +128,15 @@ function startMatch(session, fillBots) {
   if (room.phase !== 'lobby') fail(409, '이미 경기가 시작됐습니다.');
   if (room.players.some(p => !p.ready)) fail(409, '다른 참가자가 준비를 누르면 시작할 수 있습니다.');
   if (room.players.length !== room.size * 2 && !fillBots) fail(409, '자리가 남았습니다. 참가자를 기다리거나 봇을 선택해 주세요.');
+  const botWeapon=botLoadouts();
   for (let team = 0; team < 2; team++) {
     const current = room.players.filter(p => p.team === team).length;
     for (let i = current; i < room.size; i++) {
       room.players.push({ id: 'bot-' + team + '-' + i, name: ['봇 리프', '봇 루크', '봇 코브'][i], team,
-        bot: true, ready: true, weapon: ['rifle', 'shotgun', 'sniper'][i] });
+        bot: true, ready: true, weapon: botWeapon(team,i) });
     }
   }
-  room.game = createGame({ size: room.size, players: room.players.map(p => ({ ...p })) });
+  room.game = createGame({ size: room.size, mapId:room.mapId, players: room.players.map(p => ({ ...p })) });
   room.phase = 'playing';
   for (const member of room.members.values()) { member.lastInput = {}; member.lastInputAt = 0; }
   roomUpdate(room);
@@ -180,7 +182,7 @@ async function handleAPI(req, res, url) {
     if (rooms.size >= 32) fail(503, '사용 중인 방이 많습니다. 잠시 뒤 다시 시도해 주세요.');
     let code;
     do { code = codeForRoom(); } while (rooms.has(code));
-    const room = { code, size: body.size, hostId: null, phase: 'lobby', players: [], members: new Map(), game: null };
+    const room = { code, size: body.size, mapId:getArena(body.mapId).id, hostId: null, phase: 'lobby', players: [], members: new Map(), game: null };
     rooms.set(code, room);
     json(res, 201, addMember(room, body)); return;
   }
@@ -217,7 +219,7 @@ async function handleAPI(req, res, url) {
     if (room.phase !== 'lobby') fail(409, '대기실에서만 변경할 수 있습니다.');
     if (action === 'ready') player.ready = body.ready === true || session.id === room.hostId;
     if (action === 'weapon') {
-      if (!primaryWeapons.has(body.weapon)) fail(400, '무기를 다시 선택해 주세요.');
+      if (!isPrimaryWeapon(body.weapon)) fail(400, '무기를 다시 선택해 주세요.');
       player.weapon = body.weapon;
     }
     if (action === 'team' && body.team !== player.team) {

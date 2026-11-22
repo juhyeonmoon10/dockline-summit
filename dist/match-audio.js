@@ -1,10 +1,12 @@
-import { samples } from './assets/match-samples.js';
-
 const guns={
   rifle:{length:.36,hold:.025,decay:.080,body:.12,frequency:155,volume:.72,echo:.06},
   pistol:{length:.26,hold:.016,decay:.045,body:.08,frequency:190,volume:.60,echo:.025},
   shotgun:{length:.66,hold:.060,decay:.140,body:.18,frequency:105,volume:.76,echo:.10},
-  sniper:{length:.82,hold:.025,decay:.180,body:.14,frequency:125,volume:.72,echo:.14}
+  sniper:{length:.82,hold:.025,decay:.180,body:.14,frequency:125,volume:.72,echo:.14},
+  smg:{source:'pistol',length:.18,hold:.010,decay:.032,body:.075,frequency:245,volume:.48,echo:.018,rate:1.18},
+  burst:{source:'rifle',length:.27,hold:.018,decay:.047,body:.13,frequency:195,volume:.57,echo:.038,rate:1.09},
+  marksman:{source:'sniper',length:.54,hold:.014,decay:.103,body:.13,frequency:168,volume:.65,echo:.092,rate:1.12},
+  lmg:{source:'rifle',length:.36,hold:.036,decay:.070,body:.19,frequency:92,volume:.64,echo:.044,rate:.86}
 };
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 function mono(buffer){
@@ -105,18 +107,7 @@ export class ArenaSound {
         this.bus=bus;this.master=master;
         for(const kind of ['bladeSwing','bladeHit','bladeWall'])this.buffers.set(kind,meleeBuffer(ctx,kind));
         const resume=ctx.state==='suspended'?ctx.resume().catch(()=>{}):Promise.resolve();
-        this.ready=Promise.all([resume,...Object.entries(samples).map(async([id,b64])=>{
-          try{
-            const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
-            const decoded=await ctx.decodeAudioData(bytes.buffer);
-            this.buffers.set(id,guns[id]?gunBuffer(ctx,decoded,guns[id]):clip(ctx,decoded));
-            if(id==='reload'){
-              this.buffers.set('magOut',clip(ctx,decoded,.100,.34,.48));
-              this.buffers.set('rack',clip(ctx,decoded,.970,.43,.58));
-              this.buffers.set('shell',clip(ctx,decoded,.100,.20,.42));
-            }
-          }catch{}
-        })]).then(()=>{
+        this.ready=Promise.all([resume,this.loadSamples(ctx)]).then(()=>{
           this.loaded=true;
           const queued=this.pending.splice(0);
           if(this.enabled)for(const cue of queued)if(performance.now()-cue.at<350)this.playEvent(cue.event,cue.actor,cue.view);
@@ -124,6 +115,26 @@ export class ArenaSound {
       }else if(this.ctx.state==='suspended')this.ctx.resume().catch(()=>{});
       return this.ready;
     }catch{return Promise.resolve();}
+  }
+  async loadSamples(ctx){
+    try{
+      const {samples}=await import('./assets/match-samples.js');
+      await Promise.all(Object.entries(samples).map(async ([id,b64])=>{
+        try{
+          const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+          const decoded=await ctx.decodeAudioData(bytes.buffer);
+          this.buffers.set(id,guns[id]?gunBuffer(ctx,decoded,guns[id]):clip(ctx,decoded));
+          for(const [variant,profile] of Object.entries(guns)){
+            if(profile.source===id)this.buffers.set(variant,gunBuffer(ctx,decoded,profile));
+          }
+          if(id==='reload'){
+            this.buffers.set('magOut',clip(ctx,decoded,.100,.34,.48));
+            this.buffers.set('rack',clip(ctx,decoded,.970,.43,.58));
+            this.buffers.set('shell',clip(ctx,decoded,.100,.20,.42));
+          }
+        }catch(error){console.warn('효과음 해석 실패',id,error);}
+      }));
+    }catch(error){console.warn('효과음을 불러오지 못했습니다.',error);}
   }
   stop(voice){
     const now=this.ctx.currentTime;
@@ -192,7 +203,7 @@ export class ArenaSound {
     if(event.type==='meleeImpact')this.sample(event.target?'bladeHit':'bladeWall',.44*attenuation,position,.98+(event.seq%3)*.025,0,options);
     if(event.type==='shot'&&guns[event.weapon]){
       const profile=guns[event.weapon],delay=own?0:Math.min(.12,dist/343);
-      this.sample(event.weapon,profile.volume*attenuation,position,.985+Math.random()*.030,delay,options);
+      this.sample(event.weapon,profile.volume*attenuation,position,(profile.rate??1)*(.985+Math.random()*.030),delay,options);
       if(event.weapon==='shotgun'||event.weapon==='sniper')this.sample('rack',.20*attenuation,position,event.weapon==='shotgun'?1.18:.82,delay+.22,{...options,priority:1,mechanic:true,actor:actor.id,weapon:event.weapon});
     }
     if(event.type==='hit'&&own)this.note(event.headshot?1350:840,event.headshot?1760:1060,.035,.07);

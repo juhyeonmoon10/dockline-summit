@@ -1,6 +1,8 @@
 import * as T from './assets/three.module.min.js';
 import { Parts, glowMaterial } from './arena-parts.js';
 import { propMesh } from './arena-props.js';
+import { roofVentFaces } from './roof-vent.js';
+import { buildSwitchyard, paintSwitchyardGround, paintSwitchyardPanel } from './switchyard-art.js';
 
 const PI=Math.PI, TAU=PI*2;
 const white='#edf1e8', pale='#ced7d8', mid='#8b9faa', dark='#304858', iron='#233744';
@@ -277,7 +279,58 @@ function environmentProps(scene,map){
     placeProp(scene,'valve',side*21.1,-.02,side*-3,1.48,1.48,1.50,PI/2);
   }
 }
-export function makeYard(scene,map) {
+
+function serviceFans(parts) {
+  // Bake both units into the static scenery. Their intake faces open toward
+  // the arena and their feet rest on the existing exterior maintenance deck.
+  const edge=new T.Vector3(),normal=new T.Vector3(),color=new T.Color();
+  for(const side of [-1,1]) for(const face of roofVentFaces){
+    const points=face.points.map(([x,y,z])=>[side*(20.25+z*1.2),y*1.2-.02,-side*(10+x*1.2)]);
+    const offset=parts.points.length/3;
+    const [a,b,c]=points;
+    edge.fromArray(b).sub(new T.Vector3(...a));
+    normal.fromArray(c).sub(new T.Vector3(...a)).crossVectors(edge,normal).normalize();
+    color.setHex(face.color);
+    for(const point of points) {
+      parts.points.push(...point);parts.normals.push(normal.x,normal.y,normal.z);
+      parts.colors.push(color.r,color.g,color.b);
+    }
+    for(let i=2;i<points.length;i++)parts.indices.push(offset,offset+i-1,offset+i);
+  }
+}
+function switchyardScene(scene,map) {
+  const [floorCanvas,floorContext]=canvas(1024,1024);
+  paintSwitchyardGround(floorContext,1024,1024,map);
+  const floor=new T.Mesh(new T.PlaneGeometry(map.width,map.depth),new T.MeshLambertMaterial({map:texture(floorCanvas)}));
+  floor.rotation.x=-PI/2;floor.receiveShadow=true;scene.add(floor);
+  const batches=new Map(),tint=new T.Color();
+  buildSwitchyard(map,(points,paint)=>{
+    const textured=typeof paint==='string',key=textured?paint:'solid';
+    if(!batches.has(key))batches.set(key,{pos:[],uv:[],colors:[],indices:[]});
+    const batch=batches.get(key),first=batch.pos.length/3;
+    for(const point of points)batch.pos.push(...point);
+    batch.indices.push(first,first+1,first+2,first,first+2,first+3);
+    if(textured)batch.uv.push(0,0,1,0,1,1,0,1);
+    else{tint.setHex(paint);for(let i=0;i<4;i++)batch.colors.push(tint.r,tint.g,tint.b);}
+  });
+  for(const [key,batch] of batches){
+    const geo=new T.BufferGeometry();
+    geo.setAttribute('position',new T.Float32BufferAttribute(batch.pos,3));geo.setIndex(batch.indices);geo.computeVertexNormals();
+    let material;
+    if(key==='solid'){
+      geo.setAttribute('color',new T.Float32BufferAttribute(batch.colors,3));material=new T.MeshLambertMaterial({vertexColors:true});
+    }else{
+      const [c,g]=canvas(key==='terminal'?1024:512,256);
+      paintSwitchyardPanel(g,c.width,c.height,key);
+      geo.setAttribute('uv',new T.Float32BufferAttribute(batch.uv,2));
+      const Material=(key==='proceed'||key==='stop')?T.MeshBasicMaterial:T.MeshLambertMaterial;
+      material=new Material({map:texture(c)});
+    }
+    const mesh=new T.Mesh(geo,material);mesh.castShadow=mesh.receiveShadow=true;scene.add(mesh);
+  }
+}
+
+function summitScene(scene,map) {
   const geo=new Surfaces(),parts=new Parts(),lit=new Parts(),signs=new Signs();
   const floor=new T.Mesh(new T.PlaneGeometry(map.width+.04,map.depth+.04),new T.MeshLambertMaterial({map:groundTexture(map)}));
   floor.rotation.x=-PI/2;floor.receiveShadow=true;scene.add(floor);
@@ -291,11 +344,14 @@ export function makeYard(scene,map) {
     for(let z=-15;z<=15;z+=5)parts.cube(side*21.1,.18,z,.54,.36,.16,iron);
   }
   for(const b of map.boxes)boxArt(geo,parts,b);for(const ramp of map.ramps||[])rampArt(geo,parts,ramp);
-  perimeter(parts,signs,map);crane(parts);environmentProps(scene,map);
+  perimeter(parts,signs,map);crane(parts);environmentProps(scene,map);serviceFans(parts);
   for(const sx of [-1,1])for(const sz of [-1,1])floodlight(parts,lit,sx*(map.width/2+4.2),sz*(map.depth/2-2),-sz);
   const surfaces=geo.mesh(new T.MeshLambertMaterial({map:gridTexture(),vertexColors:true}));
   surfaces.castShadow=surfaces.receiveShadow=true;scene.add(surfaces);
   const structure=parts.mesh();structure.castShadow=structure.receiveShadow=true;scene.add(structure,lit.mesh(glowMaterial),signs.mesh());skyline(scene);
+}
+export function makeYard(scene,map) {
+  if(map.id==='switchyard')switchyardScene(scene,map);else summitScene(scene,map);
   const ring=new T.Mesh(new T.RingGeometry(map.zone.r-.125,map.zone.r,64),new T.MeshBasicMaterial({color:0xffcf63,transparent:true,opacity:.53,depthWrite:false}));
   ring.rotation.x=-PI/2;ring.position.set(map.zone.x,(map.zone.y||0)+.014,map.zone.z);scene.add(ring);return ring;
 }

@@ -121,7 +121,8 @@ export function tacticalBotInput(g, p, dt, memory, env) {
   const target = b.target;
   const seen = target?.visible;
   const range = target ? Math.hypot(target.x - p.x, target.z - p.z) : Infinity;
-  const combatRange = p.active === 'shotgun' ? 5.4 : p.active === 'sniper' ? 20 : 13;
+  const gun=WEAPONS[p.active];
+  const combatRange = gun.botRange ?? 13;
   let movement = null;
   const overtime = g.phase === 'overtime';
   // DIVE AttackGoal: clear lane -> strafe while engaging; blocked -> close in.
@@ -163,10 +164,9 @@ export function tacticalBotInput(g, p, dt, memory, env) {
     }
   }
   const sy = Math.sin(yaw), cy = Math.cos(yaw);
-  const gun=WEAPONS[p.active];
   const dry=p.ammo===0 && p.reserve===0;
   return {
-    yaw, pitch, fire:fire&&!dry, ads: seen && p.active === 'sniper' && range > 8,
+    yaw, pitch, fire:fire&&!dry&&!(gun.semiAuto&&memory.semiLatched), ads: seen && gun.aimFov<=55 && range > 8,
     slot: p.active==='pistol'||dry?2:1,
     forward: movement.x * sy - movement.z * cy, strafe: movement.x * cy + movement.z * sy,
     jump: !!movement.jump, reload: p.reserve>0 && !p.reload && (!p.ammo || (!seen && p.ammo <= gun.mag * .35))

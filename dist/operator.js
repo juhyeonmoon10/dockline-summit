@@ -1,17 +1,21 @@
 import * as T from './assets/three.module.min.js';
-import { GLTFLoader } from './assets/GLTFLoader.js';
 import { clone } from './assets/SkeletonUtils.js';
-import { soldierData } from './assets/soldier-data.js';
 import { blasterMesh } from './blaster.js';
+import { PRIMARY_WEAPONS } from './balance.js';
 import { knifeMesh,knifePose } from './knife.js';
 
 let source=null;
+let loading;
 const teamMaterials=new Map();
-export const operatorsReady=new Promise((resolve,reject)=>new GLTFLoader().parse(soldierData,'',resolve,reject)).then(gltf=>{
- source=gltf;
- source.scene.updateMatrixWorld(true);
- return gltf;
-}).catch(error=>{console.warn('캐릭터 모델을 불러오지 못했습니다.',error);});
+export function loadOperators(){
+ if(!loading){
+   loading=Promise.all([import('./assets/GLTFLoader.js'),import('./assets/soldier-data.js')])
+     .then(([{GLTFLoader},{soldierData}])=>new GLTFLoader().parseAsync(soldierData,''))
+     .then(gltf=>{gltf.scene.updateMatrixWorld(true);source=gltf;})
+     .catch(error=>{console.warn('캐릭터 모델을 불러오지 못했습니다.',error);});
+ }
+ return loading;
+}
 export const operatorAvailable=()=>source!==null;
 const handPoint=new T.Vector3();
 function materialFor(original,team){
@@ -34,7 +38,7 @@ export function createOperator(team){
  // The source faces +Z; the arena's forward direction is -Z.
  model.rotation.y=Math.PI;
  const loadout=new T.Group(),loadouts={};loadout.scale.setScalar(.86);group.add(loadout);
- for(const key of ['rifle','shotgun','sniper','pistol','knife']){const mesh=key==='knife'?knifeMesh():blasterMesh(key);loadouts[key]=mesh;mesh.visible=false;loadout.add(mesh);}
+ for(const key of [...PRIMARY_WEAPONS,'pistol','knife']){const mesh=key==='knife'?knifeMesh():blasterMesh(key);loadouts[key]=mesh;mesh.visible=false;loadout.add(mesh);}
  let hand;model.traverse(object=>{if(object.isBone&&object.name.replace(/[^a-zA-Z0-9]/g,'')==='Index1R')hand=object;});
  return {group,model,mixer,actions,loadout,loadouts,hand,clip:'Idle_Shoot',active:null};
 }

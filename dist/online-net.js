@@ -1,9 +1,9 @@
 import { Peer } from './vendor/peerjs.js';
+import { isPrimaryWeapon } from './balance.js';
 
-const PROTOCOL = 2;
-const PREFIX = 'dockline-v2-';
+const PROTOCOL = 3;
+const PREFIX = `dockline-v${PROTOCOL}-`;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-const PRIMARY = new Set(['rifle', 'shotgun', 'sniper']);
 const ACTIONS = new Set(['ready', 'team', 'weapon', 'start', 'lobby', 'input']);
 const CLOSED = '방 연결이 종료됐습니다.';
 const CONNECT_FAILED = '방에 연결하지 못했습니다. 코드를 확인하고, 학교 Wi-Fi에서 안 되면 다른 네트워크로 시도해 주세요.';
@@ -89,7 +89,7 @@ export class OnlineRoomClient {
     return peer;
   }
 
-  async create({ name, size, weapon = 'rifle' }) {
+  async create({ name, size, weapon = 'rifle', mapId = 'summit' }) {
     const epoch = this.begin();
     this.isHost = true;
     try {
@@ -118,7 +118,7 @@ export class OnlineRoomClient {
       worker.onerror = () => {
         if (this.worker === worker && !this.closed) this.lost('방장 경기 처리가 중단됐습니다. 새 방을 만들어 주세요.');
       };
-      const room = await this.workerRequest('init', { fields: { code, size, hostId: this.id, name, weapon } });
+      const room = await this.workerRequest('init', { fields: { code, size, hostId: this.id, name, weapon, mapId } });
       this.assertActive(epoch);
       this.entered = true;
       this.receiveState('room', room);
@@ -325,7 +325,7 @@ export class OnlineRoomClient {
   input(input) {
     if (this.closed || !this.entered || this.room?.phase !== 'playing') return;
     const next = { ...input };
-    if (!PRIMARY.has(next.weapon)) delete next.weapon;
+    if (!isPrimaryWeapon(next.weapon)) delete next.weapon;
     for (const key of ['fire', 'slide', 'jump', 'reload']) if (this.pendingInput?.[key]) next[key] = true;
     this.pendingInput = next;
   }

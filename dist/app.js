@@ -1,12 +1,15 @@
-import { MAP, createRange, stepGame, spawnYaw } from './sim.js';
-import { MAX_HP, WEAPONS } from './balance.js';
-import { ArenaRenderer } from './render.js';
+import { createRange, stepGame, spawnYaw } from './sim.js';
+import { ARENAS, getArena } from './arena-map.js';
+import { MAX_HP, WEAPONS, PRIMARY_WEAPONS as primary } from './balance.js';
 import { LiteRenderer } from './lite.js';
 import { RoomClient, supportsLAN } from './net.js';
 import { ArenaSound } from './match-audio.js';
+import { CombatFeedback } from './combat-feedback.js';
+import { canAim } from './weapon-view.js';
 
 const $ = id => document.getElementById(id);
 const panel = $('panel'), body = $('panelBody'), audio = new ArenaSound();
+const feedback = new CombatFeedback($('hud'));
 const icons = {
  play:'<path d="m7 4 12 8-12 8z" fill="currentColor" stroke="none"/>',
  users:'<circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 5"/>',
@@ -25,30 +28,27 @@ function save(key,value){try{localStorage.setItem('dockline.'+key,JSON.stringify
 const esc=v=>String(v??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const clamp=(x,lo,hi)=>Math.max(lo,Math.min(hi,x));
 const teamName=t=>t===0?'블루':'오렌지';
-const primary=['rifle','shotgun','sniper'];
+let chosenArena=getArena(read('mapId','summit'));
 let size=read('size',2)===3?3:2, selected=primary.includes(read('weapon','rifle'))?read('weapon','rifle'):'rifle';
 let sensitivity=clamp(Number(read('sensitivity',1))||1,.1,3),quality=read('quality','auto'),nickname=String(read('name','')).slice(0,16);
 audio.enabled=read('sound',true);
 let canvas=$('arena'),renderer,game=null,client=null,selfId='local',room=null,screen='home',modal='',lan=false;
 let yaw=0,pitch=0,slot=1,firstFrame=true,lastEvent=0,pointerMode=false,dragX=null,dragY=null;
-let roundKey='',eventFeed=[],hitTime=0,damageTime=0,pendingFire=false,heldFire=false,ads=false,paused=false;
+let roundKey='',eventFeed=[],pendingFire=false,heldFire=false,ads=false,paused=false;
 let lastResult='',spectatorIndex=0,frameTime=performance.now(),hudStamp=0,roundFlash=0,clockStamp=0;
 let prevNet=null,netAt=0,lastNotice='',noticeTimer;
 let joining=false,joinAttempt=0;
-let damageUntil=0,fragUntil=0;
 const keys=new Set(), pressed=new Set();
 function notify(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>$('toast').classList.remove('show'),2800);}
 function drawSound(){const el=$('soundBtn');el.innerHTML=svg(audio.enabled?'sound':'mute');el.title=el.ariaLabel=audio.enabled?'소리 끄기':'소리 켜기';}
 function setSound(){audio.enabled=!audio.enabled;save('sound',audio.enabled);drawSound();if(audio.enabled)audio.unlock();}
 $('soundBtn').onclick=setSound;drawSound();
-function sizeUI(){document.querySelectorAll('[data-size]').forEach(el=>el.setAttribute('aria-pressed',String(Number(el.dataset.size)===size)));}
-document.querySelectorAll('[data-size]').forEach(el=>el.onclick=()=>{size=Number(el.dataset.size);save('size',size);sizeUI();});sizeUI();
 function setLoadout(type){
   if(!primary.includes(type))return;
   selected=type;save('weapon',type);
   document.querySelectorAll('[data-weapon]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.weapon===type)));
   const gun=WEAPONS[type], pellets=gun.pellets?'×'+gun.pellets:'';
-  $('gunDesc').textContent='탄창 '+gun.mag+'발 · 근거리 몸통 '+gun.damage+pellets+' / 머리 '+gun.head+pellets;
+  $('gunDesc').textContent=gun.callsign+' · '+gun.role+' · 탄창 '+gun.mag+'발 · 몸통 '+gun.damage+pellets+' / 머리 '+gun.head+pellets;
 }
 document.querySelectorAll('[data-weapon]').forEach(b=>b.onclick=()=>setLoadout(b.dataset.weapon));
 setLoadout(selected);
@@ -109,7 +109,7 @@ function settings(){
   const sound=$('soundToggle');sound.textContent=audio.enabled?'켜짐':'꺼짐';sound.onclick=()=>{setSound();sound.textContent=audio.enabled?'켜짐':'꺼짐';};$('settingsDone').onclick=returnFromPanel;
   const credits=document.createElement('button');credits.className='credits-link';credits.textContent='제작 자료 · 라이선스';body.append(credits);
   credits.onclick=()=>showPanel('credits','제작 자료',
-    '<p>총기와 플레이어 모델은 <a href="https://quaternius.com/packs/toonshootergamekit.html" target="_blank" rel="noopener">Quaternius · Toon Shooter Game Kit</a>(CC0)를 수정했습니다. 1인칭 칼과 사격장 더미는 게임용으로 제작했습니다.</p>'+
+    '<p>기본 총기와 선수 모델은 <a href="https://quaternius.com/packs/toonshootergamekit.html" target="_blank" rel="noopener">Quaternius · Toon Shooter Game Kit</a>(CC0)를 수정했습니다. 스키퍼·트라이던트·글라스핀·캐프스턴은 Kenney Blaster Kit(CC0)를 바탕으로 제작했습니다. 칼과 전자 표적 더미는 도크라인 전용 모델입니다.</p>'+
     '<p>맵의 컨테이너·금속 화물 케이스·공장·급수탑·설비는 Kenney의 <a href="https://kenney.nl/assets/city-kit-industrial" target="_blank" rel="noopener">City Kit Industrial</a>, <a href="https://kenney.nl/assets/factory-kit" target="_blank" rel="noopener">Factory Kit</a>, <a href="https://kenney.nl/assets/blaster-kit" target="_blank" rel="noopener">Blaster Kit</a>(모두 CC0)를 수정했습니다.</p>'+
     '<p>봇의 표적 선택과 측면 회피는 <a href="https://github.com/Mugen87/dive/tree/7176136cf6c29eddfd620df2bf0d09a532680763" target="_blank" rel="noopener">Michael Herzog · Dive</a>(MIT)의 코드를 수정했습니다.</p>'+
     '<p>온라인 연결은 <a href="https://peerjs.com/" target="_blank" rel="noopener">PeerJS</a> 1.5.5(MIT)를 사용합니다. 방장의 브라우저에서 경기를 진행하며, 공용 연결 서비스와 네트워크 상태에 영향을 받습니다.</p>'+
@@ -117,19 +117,19 @@ function settings(){
     '<p class="note">자료별 저자와 라이선스는 소스 묶음에 있습니다. 현재 모델은 art-source/toon-shooter에서 편집할 수 있고, 이전 Kenney 모델도 art-source/blasters에 보관했습니다.</p>');
 }
 function enterGame(state,id){
+  displayArena(getArena(state.mapId));
   audio.clear();
   closePanel();screen='game';document.body.dataset.scene='game';$('hud').hidden=false;
   const inRange=state.phase==='range';
   $('rangeStats').hidden=!inRange;
   for(const id of ['scoreboard','living','health','feed'])$(id).hidden=inRange;
-  $('combatDamage').textContent=$('fragConfirm').textContent='';
-  damageUntil=fragUntil=0;
-  game=state;selfId=id;paused=false;lastEvent=0;lastResult=roundKey='';eventFeed=[];hitTime=damageTime=0;slot=1;lastNotice='';spectatorIndex=0;clearInput();
+  feedback.reset();
+  game=state;selfId=id;paused=false;lastEvent=0;lastResult=roundKey='';eventFeed=[];slot=1;lastNotice='';spectatorIndex=0;clearInput();
   const me=state.players.find(p=>p.id===id);yaw=me?.yaw||0;pitch=me?.pitch||0;
   audio.unlock();firstFrame=true;roundFlash=0;frameTime=performance.now();hudStamp=0;canvas.focus();
 }
 function openRange(){
-  enterGame(createRange({name:nickname||'나',weapon:selected}),'local');
+  enterGame(createRange({name:nickname||'나',weapon:selected,mapId:chosenArena.id}),'local');
   attemptLock();
 }
 $('rangeBtn').onclick=openRange;
@@ -141,6 +141,7 @@ function showPause(){if(screen!=='game'||game?.phase==='end')return;paused=true;
 }
 function leaveConfirm(){const hosting=client?.online&&room?.hostId===client.id;showPanel('leave','방을 나갈까요?','<p>'+(hosting?'방장이 나가면 이 방의 경기가 종료됩니다.':'친구들과 다시 플레이하려면 방 코드로 참가하세요.')+'</p><div class="row"><button id="stay" class="secondary">돌아가기</button><button id="quitNow" class="primary">방 나가기</button></div>');$('stay').onclick=returnFromPanel;$('quitNow').onclick=goHome;}
 function goHome(){
+  displayArena(chosenArena);
   audio.clear();
   const old=client;client=null;old?.leave().catch(()=>{});room=null;game=null;prevNet=null;screen='home';paused=false;closePanel();release();
   $('hud').hidden=true;document.body.dataset.scene='lobby';lastResult='';$('rangeBtn').focus({preventScroll:true});
@@ -148,7 +149,7 @@ function goHome(){
 function roomError(error){const node=$('netError');if(node)node.textContent=error.message||error;else notify(error.message||error);}
 function spin(btn,job){const old=btn.disabled;btn.disabled=true;Promise.resolve().then(job).catch(roomError).finally(()=>{if(btn.isConnected)btn.disabled=old;});}
 function newClient(Client=RoomClient){
-  const c=new Client({onRoom(r){if(c!==client)return;room=r;if(r.phase==='lobby'){game=null;screen='home';release();$('hud').hidden=true;document.body.dataset.scene='lobby';if(modal!=='leave')showRoom(r);}},
+  const c=new Client({onRoom(r){if(c!==client)return;room=r;if(r.phase==='lobby'){displayArena(getArena(r.mapId));game=null;screen='home';release();$('hud').hidden=true;document.body.dataset.scene='lobby';if(modal!=='leave')showRoom(r);}},
     onGame(next){if(c!==client)return;if(screen!=='game'||!game){prevNet=null;enterGame(next,c.id);}else{prevNet=game;game=next;}netAt=performance.now();},
     onError:m=>roomError(m),onClose:m=>{if(c!==client)return;goHome();notify(m);}});
   return c;
@@ -159,7 +160,36 @@ async function openNetwork(invite=''){
   }
   const button=$('teamBtn');button.disabled=true;await canLAN;button.disabled=false;
   const digits=lan?4:6;
-  showPanel('network','친구와 대전','<form id="roomForm"><label class="field">내 이름<input type="text" maxlength="16" id="nick" placeholder="플레이어" autocomplete="nickname"></label><label class="field code-field">방 코드<input type="text" id="joinCode" placeholder="'+(lan?'ABCD':'ABC234')+'" maxlength="'+digits+'" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="codeHint"></label><p id="codeHint" class="note">친구에게 받은 '+digits+'자리 코드를 입력하세요.</p><div class="row"><button class="primary" id="joinRoom">참가하기</button></div><div class="room-create"><span>내가 친구를 초대하려면</span><button type="button" class="secondary" id="createRoom">'+size+'v'+size+' 방 만들기</button></div><p class="bad" id="netError" role="alert"></p><p id="netStatus" class="note" role="status"></p></form>'+(lan?'<p class="note">현재 행사장 서버에 연결되어 있어요.</p>':'<p class="note room-host-note">설치 없이 플레이 · 방장은 게임 탭을 열어두세요.</p><details class="network-help"><summary>연결이 안 되나요?</summary><p>학교·게스트 Wi-Fi에서 기기 간 연결을 막으면 참가할 수 없어요. 방장이 접속 중인지 먼저 확인하세요.</p><p>행사장 전용 서버가 필요하면 <a href="./dockline-lan.zip" download>서버 묶음</a>의 PLAY-KO.txt를 따라 연결할 수 있어요.</p></details>'));
+  showPanel('network', '친구와 대전', `
+    <form id="roomForm">
+      <label class="field" for="nick">내 이름</label>
+      <input type="text" maxlength="16" id="nick" placeholder="플레이어" autocomplete="nickname">
+      <label class="field code-field" for="joinCode">방 코드</label>
+      <input type="text" id="joinCode" placeholder="${lan ? 'ABCD' : 'ABC234'}" maxlength="${digits}"
+        autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="codeHint">
+      <p id="codeHint" class="note">친구에게 받은 ${digits}자리 코드를 입력하세요.</p>
+      <button class="primary join-action" id="joinRoom">코드로 참가</button>
+      <p class="bad" id="netError" role="alert"></p>
+      <p id="netStatus" class="note" role="status"></p>
+      <div class="room-create">
+        <label for="roomSize">새 방 인원</label>
+        <div class="create-actions">
+          <select id="roomSize">
+            <option value="2">2 vs 2</option>
+            <option value="3">3 vs 3</option>
+          </select>
+          <button type="button" class="secondary" id="createRoom">방 만들기</button>
+        </div>
+      </div>
+    </form>
+    ${lan ? '<p class="note">행사장 서버에 연결되어 있어요.</p>' :
+      '<p class="note room-host-note">방장은 경기 중 게임 탭을 열어 두세요.</p><details class="network-help"><summary>연결이 안 되나요?</summary><p>방장이 접속 중인지 확인하세요. 학교·게스트 Wi-Fi는 기기 간 연결을 막을 수 있어요.</p><p>행사장 전용 서버는 <a href="./dockline-lan.zip" download>서버 묶음</a>의 PLAY-KO.txt를 따라 연결할 수 있어요.</p></details>'}`);
+  const roomSize = $('roomSize');
+  roomSize.value = String(size);
+  roomSize.onchange = () => {
+    size = Number(roomSize.value) === 3 ? 3 : 2;
+    save('size', size);
+  };
   $('nick').value=nickname;$('joinCode').value=invite.slice(0,digits);
   $('joinCode').oninput=e=>{e.target.value=e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'');$('netError').textContent='';};
   const enter=async create=>{
@@ -169,19 +199,19 @@ async function openNetwork(invite=''){
     nickname=$('nick').value.trim()||'플레이어';save('name',nickname);
     const attempt=++joinAttempt;joining=true;
     const form=$('roomForm'),status=$('netStatus');
-    for(const el of form.querySelectorAll('button,input'))el.disabled=true;
+    for(const el of form.querySelectorAll('button,input,select'))el.disabled=true;
     $('netError').textContent='';status.textContent=create?'방을 만드는 중…':'방에 연결하는 중…';
     let c;
     try{
       const Client=lan?RoomClient:(await import('./online-net.js')).OnlineRoomClient;
       if(attempt!==joinAttempt)return;
       const old=client;client=null;await old?.leave();c=client=newClient(Client);c.online=!lan;
-      if(create)await c.create({name:nickname,size,weapon:selected});else await c.join({name:nickname,code,weapon:selected});
+      if(create)await c.create({name:nickname,size,weapon:selected,mapId:chosenArena.id});else await c.join({name:nickname,code,weapon:selected});
     }catch(e){
       await c?.leave().catch(()=>{});if(client===c)client=null;
       if(attempt===joinAttempt&&modal==='network')roomError(e);
     }finally{
-      if(attempt===joinAttempt){joining=false;if(form.isConnected){for(const el of form.querySelectorAll('button,input'))el.disabled=false;status.textContent='';}}
+      if(attempt===joinAttempt){joining=false;if(form.isConnected){for(const el of form.querySelectorAll('button,input,select'))el.disabled=false;status.textContent='';}}
     }
   };
   $('createRoom').onclick=()=>enter(true);$('roomForm').onsubmit=e=>{e.preventDefault();enter(false);};
@@ -198,6 +228,8 @@ function showRoom(r){
   const full=r.players.length===r.needed,ready=r.players.every(p=>p.ready),startLabel=full?'경기 시작':'빈자리 봇으로 시작';
   showPanel('room','대전 대기실','<div class="choice-line"><span>방 코드</span><b class="room-code">'+esc(r.code)+'</b></div><div class="row invite-actions"><button id="copyCode" class="secondary">코드 복사</button><button id="copyLink" class="secondary">초대 링크 복사</button></div><input id="inviteFallback" type="text" aria-label="복사할 초대 내용" readonly hidden><p class="room-count" role="status">'+r.size+'v'+r.size+' · '+r.players.length+' / '+r.needed+'명 참가</p><div class="room-teams">'+teams+'</div><div class="row">'+(host?'<button class="primary" id="roomStart" '+(!ready?'disabled':'')+'>'+startLabel+'</button>':'<button class="primary" id="ready">'+(me?.ready?'준비 취소':'준비 완료')+'</button>')+'<button class="secondary" id="switchTeam">팀 변경</button></div><p class="note">'+(host?(ready?'코드나 초대 링크를 친구에게 보내세요.':'모든 참가자가 준비하면 시작할 수 있어요.'):'시작되면 경기 화면을 클릭해 마우스 조작을 켜세요.')+(host&&client.online?' 방장 탭을 닫으면 방이 종료돼요.':'')+'</p><p id="netError" class="bad" role="alert"></p>');
   $('copyCode').onclick=()=>copyInvite(r.code,'코드를');
+  const roomCount=body.querySelector('.room-count');
+  roomCount.prepend(getArena(r.mapId).label+' · ');
   $('copyLink').onclick=()=>{if(lan&&['localhost','127.0.0.1','[::1]'].includes(location.hostname)){notify('친구에게 서버 창의 LAN 주소와 방 코드를 보내세요.');return;}const url=new URL(location.href);url.search='';url.hash='room='+r.code;copyInvite(url.href,'초대 링크를');};
   if($('roomStart'))$('roomStart').onclick=e=>{audio.unlock();spin(e.currentTarget,()=>client.start(!full));};
   if($('ready'))$('ready').onclick=e=>{audio.unlock();spin(e.currentTarget,()=>client.ready(!me.ready));};
@@ -219,22 +251,21 @@ function results(){
   release();audio.chime(w===me?.team);if(host)$('again').onclick=e=>spin(e.currentTarget,()=>client.lobby());$('finish').onclick=goHome;
 }
 function receiveEvents(now){
-  for(const ev of game.events){if(ev.seq<=lastEvent)continue;lastEvent=ev.seq;const me=game.players.find(p=>p.id===selfId);audio.event(ev,game,watchPlayer());
-    if(ev.type==='hit'&&ev.actor===selfId){
-      hitTime=now+.14;
-      if(ev.damage){$('combatDamage').textContent=String(Math.round(ev.damage*10)/10);$('combatDamage').classList.toggle('head',!!ev.headshot);damageUntil=now+.4;}
-    }
-    if(ev.type==='hit'&&ev.target===selfId)damageTime=now+.32;
+  const me=game.players.find(p=>p.id===selfId), watch=watchPlayer();
+  for(const ev of game.events){if(ev.seq<=lastEvent)continue;lastEvent=ev.seq;audio.event(ev,game,watch);
+    if(ev.type==='shot'&&ev.actor===watch?.id)feedback.shot(ev.weapon,now);
+    if(ev.type==='hit'&&ev.actor===selfId)feedback.hit(ev,now);
+    if(ev.type==='hit'&&ev.target===selfId)feedback.hurt(me,game.players.find(p=>p.id===ev.actor),now);
     if(ev.type==='kill'){
       const inRange=game.phase==='range';
       const victim=(inRange?game.targets:game.players).find(p=>p.id===ev.target);
-      if(ev.actor===selfId){$('fragConfirm').textContent=(ev.headshot?'헤드샷 · ':'처치 · ')+(victim?.name||'');fragUntil=now+1.5;}
+      if(ev.actor===selfId)feedback.kill(ev,victim?.name,now);
       if(!inRange){
         const shooter=game.players.find(p=>p.id===ev.actor);
         eventFeed.unshift({text:(shooter?.name||'')+'  ›  '+(victim?.name||''),at:now});eventFeed=eventFeed.slice(0,3);
       }
     }
-    if(ev.type==='round'&&me){yaw=spawnYaw(me);pitch=0;slot=1;clearInput();roundFlash=now+1.0;}
+    if(ev.type==='round'&&me){yaw=spawnYaw(me,game.mapId);pitch=0;slot=1;clearInput();feedback.reset();roundFlash=now+1.0;}
     if(ev.type==='roundEnd')audio.chime(ev.team===me?.team);
   }
 }
@@ -255,14 +286,14 @@ function showHUD(now){
     $('hpBar').style.width=clamp(100*p.hp/maxHp,0,100)+'%';
     $('health').style.setProperty('--team-color',p.team===0?'var(--blue)':'var(--red)');
   }
-  if(now>damageUntil)$('combatDamage').textContent='';if(now>fragUntil)$('fragConfirm').textContent='';
   const gun=WEAPONS[p.active];
-  $('gun').textContent=(gun.melee?'3 · ':'')+gun.label+(p.reload>0?' · 재장전 중':'');
+  const equippedSlot=gun.melee?3:p.active==='pistol'?2:1;
+  $('gun').textContent=equippedSlot+' · '+gun.label;
   $('weaponHud').classList.toggle('melee',!!gun.melee);
   $('ammo').textContent=gun.melee?'근접':p.ammo;
   $('rounds').textContent=gun.melee?'좌클릭 공격':'/ '+(game.phase==='range'?'∞':p.reserve??gun.reserve);
   const spectating=!me.alive&&game.phase!=='between'&&game.phase!=='end';$('spectator').hidden=!spectating;$('spectator').textContent=p.alive?'관전 · '+p.name+'   [Tab]':'다음 라운드 대기 중';
-  $('sight').classList.toggle('scope',p.active==='sniper'&&(spectating?p.ads:ads));$('sight').hidden=!p.alive||game.phase==='between';
+  feedback.updateWeapon(p,spectating);
   let text='',sub='',hint='';
   if(game.phase==='range'){hint=gun.melee?'좌클릭  칼 공격 · 1  주무기 · 2  권총':'3  칼 · C  슬라이딩 · Q  주무기 변경 · R  재장전';}
   else if(game.phase==='warmup'){text='준비 사격';sub=teamName(me.team)+' 팀 · '+sizeText(game.size);hint='Q  주무기 변경 · '+WEAPONS[selected].label;}
@@ -274,11 +305,11 @@ function showHUD(now){
   $('contextHint').textContent=hint;$('feed').innerHTML=eventFeed.filter(f=>now-f.at<4).map(f=>'<div>'+esc(f.text)+'</div>').join('');
 }
 function sizeText(n){return n+' vs '+n;}
-function aiming(){return ads&&slot!==3&&!WEAPONS[watchPlayer()?.active]?.melee;}
+function aiming(){return canAim(watchPlayer(),ads&&slot!==3);}
 function currentInput(){
   const blocked=paused||!!modal;
   return {yaw,pitch,forward:blocked?0:Number(keys.has('KeyW'))-Number(keys.has('KeyS')),strafe:blocked?0:Number(keys.has('KeyD'))-Number(keys.has('KeyA')),
-    fire:!blocked&&(heldFire||pendingFire),ads:!blocked&&aiming(),jump:!blocked&&(pressed.has('Space')||keys.has('Space')),slide:!blocked&&(pressed.has('KeyC')||keys.has('KeyC')),
+    fire:!blocked&&(heldFire||pendingFire),ads:!blocked&&ads&&slot!==3,jump:!blocked&&(pressed.has('Space')||keys.has('Space')),slide:!blocked&&(pressed.has('KeyC')||keys.has('KeyC')),
     reload:!blocked&&(pressed.has('KeyR')||keys.has('KeyR')),slot,weapon:selected};
 }
 function aim(dx,dy){
@@ -313,7 +344,7 @@ document.addEventListener('keydown',e=>{
   if(e.code==='Escape'){showPause();return;}
   if(['Digit1','Digit2','Digit3'].includes(e.code)){slot=Number(e.code.slice(-1));if(slot===3)ads=false;}
   if(e.code==='Tab')spectatorIndex++;
-  if(e.code==='KeyQ'&&['range','warmup','between'].includes(game.phase)){setLoadout(primary[(primary.indexOf(selected)+1)%3]);slot=1;}
+  if(e.code==='KeyQ'&&['range','warmup','between'].includes(game.phase)){setLoadout(primary[(primary.indexOf(selected)+1)%primary.length]);slot=1;}
 });
 document.addEventListener('keyup',e=>keys.delete(e.code));
 window.addEventListener('blur',()=>{clearInput();if(screen==='game'&&!modal&&game?.phase!=='end')showPause();});
@@ -324,31 +355,80 @@ function visualState(now){
     const delta=Math.atan2(Math.sin(p.yaw-prev.yaw),Math.cos(p.yaw-prev.yaw));
     return {...p,x:prev.x+(p.x-prev.x)*mix,y:prev.y+(p.y-prev.y)*mix,z:prev.z+(p.z-prev.z)*mix,yaw:prev.yaw+delta*mix};})};
 }
-function switchToLite(){
-  const fresh=canvas.cloneNode(false);canvas.replaceWith(fresh);canvas=fresh;renderer=new LiteRenderer(canvas,MAP);bindCanvas();
+function switchToLite(map=renderer?.map||chosenArena){
+  const fresh=canvas.cloneNode(false);canvas.replaceWith(fresh);canvas=fresh;renderer=new LiteRenderer(canvas,map);bindCanvas();
+}
+const reduceMotion=matchMedia('(prefers-reduced-motion: reduce)');
+let lobbyFrameKey='';
+function displayArena(map){
+  if(renderer&&renderer.map!==map){
+    try{renderer.setMap(map);}
+    catch(error){if(renderer instanceof LiteRenderer)throw error;switchToLite(map);}
+  }
+  $('arenaTitle').textContent=map.id.toUpperCase();
+  $('arenaBlurb').textContent=map.description;
+  $('arenaPick').value=map.id;
+  canvas.setAttribute('aria-label','도크라인 '+map.label);
+  lobbyFrameKey='';
+}
+for(const map of ARENAS)$('arenaPick').add(new Option(map.label,map.id));
+$('arenaPick').onchange=e=>{
+  chosenArena=getArena(e.target.value);save('mapId',chosenArena.id);displayArena(chosenArena);
+};
+function drawLobby(ms,dt){
+  if(document.hidden)return;
+  const key=[canvas.clientWidth,canvas.clientHeight,devicePixelRatio,quality,reduceMotion.matches].join('/');
+  const still=Boolean(modal)||reduceMotion.matches;
+  if(key===lobbyFrameKey&&(still||ms-clockStamp<(quality==='low'?160:66)))return;
+  try{
+    renderer.draw(null,null,{lobby:true,quality,t:reduceMotion.matches?0:ms/1000,dt});
+  }catch(error){
+    if(renderer instanceof LiteRenderer)throw error;
+    switchToLite();
+    renderer.draw(null,null,{lobby:true,quality,t:0,dt});
+  }
+  lobbyFrameKey=key;clockStamp=ms;
 }
 function frame(ms){
   const dt=clamp((ms-frameTime)/1000,.001,.1),t=ms/1000;frameTime=ms;
   if(screen==='game'&&game){
+    lobbyFrameKey='';
     const input=currentInput();
     if(!client){if(!paused)stepGame(game,{[selfId]:input},dt);}else client.input(input);
     pendingFire=false;pressed.clear();receiveEvents(t);audio.reconcile(game);const p=watchPlayer();if(!paused)audio.steps(game,p,t);
     const visual=visualState(ms),watch=p?.id!==selfId;
     try{renderer.draw(visual,selfId,{lobby:false,ads:watch?!!p?.ads:aiming(),quality,yaw:watch?p?.yaw:yaw,pitch:watch?p?.pitch:pitch,spectatorId:watch?p?.id:undefined,t,dt});}
     catch(err){console.error(err);if(!(renderer instanceof LiteRenderer))switchToLite();else throw err;}
-    $('hitMark').style.opacity=String(clamp((hitTime-t)/.09,0,1));$('damage').style.opacity=String(clamp((damageTime-t)*2,0,.64));
+    feedback.sight.hidden=!p?.alive||game.phase==='between';
+    if(p)feedback.updateSight(p,canAim(p,watch?p.ads:ads&&slot!==3),renderer.viewFov);
+    feedback.frame(t,watch?p?.yaw:yaw);
     if(ms-hudStamp>70||firstFrame){showHUD(t);hudStamp=ms;firstFrame=false;}
     if(game.phase==='end'&&!lastResult)results();
-  }else if(!document.hidden&&ms-clockStamp>48){
-    renderer.draw(null,null,{lobby:true,quality,t,dt});clockStamp=ms;
-  }
+  }else drawLobby(ms,dt);
   requestAnimationFrame(frame);
 }
-try{
-  if(new URLSearchParams(location.search).has('lite'))throw Error('경량 모드');
-  renderer=new ArenaRenderer(canvas,MAP);bindCanvas();
-}catch(error){console.info('도크라인 경량 렌더링',error.message);switchToLite();}
-$('rangeBtn').disabled=$('teamBtn').disabled=false;$('boot').textContent='';requestAnimationFrame(frame);
-const invite=new URLSearchParams(location.hash.slice(1)).get('room');
-if(invite&&/^[A-Z0-9]{4,6}$/i.test(invite))openNetwork(invite.toUpperCase());
+async function startArena(){
+  const forceLite=new URLSearchParams(location.search).has('lite');
+  try{
+    if(!forceLite){
+      const attributes={antialias:true,alpha:false,powerPreference:'low-power',stencil:false};
+      const context=canvas.getContext('webgl2',attributes)||canvas.getContext('webgl',attributes);
+      if(context){
+        const {ArenaRenderer}=await import('./render.js');
+        renderer=new ArenaRenderer(canvas,chosenArena,context);
+        bindCanvas();
+      }
+    }
+  }catch(error){console.info('3D 경기장을 경량 모드로 전환합니다.',error);}
+  if(!renderer)switchToLite();
+  displayArena(chosenArena);
+  $('arenaPick').disabled=$('rangeBtn').disabled=$('teamBtn').disabled=false;$('boot').textContent='';
+  requestAnimationFrame(frame);
+  const invite=new URLSearchParams(location.hash.slice(1)).get('room');
+  if(invite&&/^[A-Z0-9]{4,6}$/i.test(invite))openNetwork(invite.toUpperCase());
+}
+startArena().catch(error=>{
+  $('boot').textContent='경기장을 열지 못했어요. 페이지를 새로고침해 주세요.';
+  console.error(error);
+});
 

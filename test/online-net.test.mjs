@@ -5,9 +5,10 @@ import { webcrypto } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import vm from 'node:vm';
 import { OnlineHost } from '../dist/online-host.js';
+import { isPrimaryWeapon } from '../dist/balance.js';
 
 const sourceURL = new URL('../dist/online-net.js', import.meta.url);
-const source = (await readFile(sourceURL, 'utf8')).replace(/^import .*\n/, '')
+const source = (await readFile(sourceURL, 'utf8')).replace(/^import .*\n/gm, '')
   .replace('export class OnlineRoomClient', 'class OnlineRoomClient')
   .replaceAll('import.meta.url', JSON.stringify(sourceURL.href));
 
@@ -75,7 +76,7 @@ function harness() {
     }
     terminate() { this.terminated = true; workers.delete(this); this.host?.destroy(); }
   }
-  const context = vm.createContext({ Peer: FakePeer, Worker: FakeWorker, crypto: webcrypto, performance, URL, structuredClone,
+  const context = vm.createContext({ Peer: FakePeer, Worker: FakeWorker, isPrimaryWeapon, crypto: webcrypto, performance, URL, structuredClone,
     setTimeout, clearTimeout, setInterval, clearInterval, addEventListener() {}, removeEventListener() {} });
   vm.runInContext(source + '\nglobalThis.Client = OnlineRoomClient;', context);
   return { Client: context.Client, peers, workers };
@@ -88,13 +89,15 @@ test('online transport joins by code, binds identity, gates host actions, and cl
   const games = [], closes = [];
   const host = new Client(), guest = new Client({ onGame: game => games.push(game), onClose: message => closes.push(message) });
   try {
-    const room = await host.create({ name: '방장', size: 2 });
+    const room = await host.create({ name: '방장', size: 2, weapon:'smg' });
     assert.match(room.code, /^[A-HJ-NP-Z2-9]{6}$/);
-    await guest.join({ name: '친구', code: room.code.toLowerCase() });
+    await guest.join({ name: '친구', code: room.code.toLowerCase(), weapon:'marksman' });
     await settled();
     assert.equal(host.room.players.length, 2);
     assert.equal(guest.room.players.length, 2);
     assert.notEqual(guest.id, host.id);
+    assert.deepEqual(Array.from(guest.room.players,p=>p.weapon),['smg','marksman']);
+    await guest.weapon('burst');
     await assert.rejects(guest.start(true), /방장만/);
     await assert.rejects(host.start(true), /준비/);
     await guest.ready();
@@ -102,10 +105,14 @@ test('online transport joins by code, binds identity, gates host actions, and cl
     await settled();
     assert.equal(guest.room.phase, 'playing');
     assert.equal(games.at(-1).players.length, 4);
-    guest.input({ slot: 3, yaw: .3, pitch: 0, forward: 1, fire: true });
+    assert.equal(games.at(-1).players.find(p=>p.id===guest.id).active,'burst');
+    guest.input({ slot: 3, yaw: .3, pitch: 0, forward: 1, fire: true, weapon:'lmg' });
     guest.flush(); await settled();
     const engine = [...workers][0].host;
     assert.equal(engine.members.get(guest.id).lastInput.slot, 3);
+    assert.equal(engine.members.get(guest.id).lastInput.weapon,'lmg');
+    engine.tick(.05);
+    assert.equal(engine.game.players.find(p=>p.id===guest.id).weapon,'lmg');
     assert.equal(engine.members.get(host.id).lastInput.slot, undefined);
     await host.leave(); await settled();
     assert.equal(closes.length, 1);

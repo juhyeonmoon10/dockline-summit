@@ -11,38 +11,38 @@ export function slopeAt(r,x,z,radius=0) {
 }
 
 // Floors below the deck and on top of it coexist at the same horizontal position.
-export function surfacesAt(x,z,radius=BODY_RADIUS){
+export function surfacesAt(x,z,radius=BODY_RADIUS,map=MAP){
   const levels=[0];
-  for(const b of MAP.boxes)if(nearRect(x,z,radius,b))levels.push(b.h);
-  for(const r of MAP.ramps)if(nearRect(x,z,radius,r))levels.push(slopeAt(r,x,z,radius));
+  for(const b of map.boxes)if(nearRect(x,z,radius,b))levels.push(b.h);
+  for(const r of map.ramps)if(nearRect(x,z,radius,r))levels.push(slopeAt(r,x,z,radius));
   return levels;
 }
 
-export function support(x,z,ceiling,radius=BODY_RADIUS) {
+export function support(x,z,ceiling,radius=BODY_RADIUS,map=MAP) {
   let y=0;
-  for(const b of MAP.boxes)if(b.h<=ceiling+EPS && b.h>y && nearRect(x,z,radius,b))y=b.h;
-  for(const r of MAP.ramps)if(nearRect(x,z,radius,r)){
+  for(const b of map.boxes)if(b.h<=ceiling+EPS && b.h>y && nearRect(x,z,radius,b))y=b.h;
+  for(const r of map.ramps)if(nearRect(x,z,radius,r)){
     const h=slopeAt(r,x,z,radius);
     if(h<=ceiling+EPS && h>y)y=h;
   }
   return y;
 }
-export function clearPosition(x,z,feet=0,radius=BODY_RADIUS,height=1.8) {
-  if(Math.abs(x)+radius>MAP.width/2 || Math.abs(z)+radius>MAP.depth/2)return false;
-  for(const b of MAP.boxes){
+export function clearPosition(x,z,feet=0,radius=BODY_RADIUS,height=1.8,map=MAP) {
+  if(Math.abs(x)+radius>map.width/2 || Math.abs(z)+radius>map.depth/2)return false;
+  for(const b of map.boxes){
     if(nearRect(x,z,radius,b)&&feet<b.h-.012&&feet+height>(b.base||0)+.012)return false;
   }
-  for(const r of MAP.ramps)if(nearRect(x,z,radius,r)&&feet<slopeAt(r,x,z,radius)-.012)return false;
+  for(const r of map.ramps)if(nearRect(x,z,radius,r)&&feet<slopeAt(r,x,z,radius)-.012)return false;
   return true;
 }
-export function ceilingAt(x,z,head,radius=BODY_RADIUS) {
+export function ceilingAt(x,z,head,radius=BODY_RADIUS,map=MAP) {
   let cap=Infinity;
-  for(const b of MAP.boxes)if(b.base && b.base>=head-.03 && nearRect(x,z,radius,b))cap=Math.min(cap,b.base);
+  for(const b of map.boxes)if(b.base && b.base>=head-.03 && nearRect(x,z,radius,b))cap=Math.min(cap,b.base);
   return cap;
 }
-export function walkHeight(x,z,feet,step,radius=BODY_RADIUS,height=1.8){
-  const y=Math.max(feet,support(x,z,feet+step,radius));
-  return clearPosition(x,z,y,radius,height)?y:null;
+export function walkHeight(x,z,feet,step,radius=BODY_RADIUS,height=1.8,map=MAP){
+  const y=Math.max(feet,support(x,z,feet+step,radius,map));
+  return clearPosition(x,z,y,radius,height,map)?y:null;
 }
 
 // Ray vs a convex volume. A ramp is a box clipped below its inclined top plane.
@@ -64,12 +64,12 @@ function rampHit(r,x,y,z,dx,dy,dz){
   if(change>=-1e-8)return Infinity;
   const t=-excess/change;return t<=range[1]+EPS?t:Infinity;
 }
-export function worldHit(x,y,z,dx,dy,dz,limit=100){
+export function worldHit(x,y,z,dx,dy,dz,limit=100,map=MAP){
   let d=limit;
   if(dy<-.00001)d=Math.min(d,-y/dy);
-  if(Math.abs(dx)>.00001)d=Math.min(d,((dx>0?1:-1)*MAP.width/2-x)/dx);
-  if(Math.abs(dz)>.00001)d=Math.min(d,((dz>0?1:-1)*MAP.depth/2-z)/dz);
-  for(const b of MAP.boxes)d=Math.min(d,intersect(x,y,z,dx,dy,dz,b.x-b.w/2,b.base||0,b.z-b.d/2,b.x+b.w/2,b.h,b.z+b.d/2));
-  for(const r of MAP.ramps)d=Math.min(d,rampHit(r,x,y,z,dx,dy,dz));
+  if(Math.abs(dx)>.00001)d=Math.min(d,((dx>0?1:-1)*map.width/2-x)/dx);
+  if(Math.abs(dz)>.00001)d=Math.min(d,((dz>0?1:-1)*map.depth/2-z)/dz);
+  for(const b of map.boxes)d=Math.min(d,intersect(x,y,z,dx,dy,dz,b.x-b.w/2,b.base||0,b.z-b.d/2,b.x+b.w/2,b.h,b.z+b.d/2));
+  for(const r of map.ramps)d=Math.min(d,rampHit(r,x,y,z,dx,dy,dz));
   return d;
 }
