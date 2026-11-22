@@ -4,6 +4,8 @@ import { BODY_RADIUS, walkHeight, support, ceilingAt, intersect, worldHit } from
 import { nextWaypoint } from './arena-routes.js';
 import { tacticalBotInput } from './tactics.js';
 import { MAX_HP, WEAPONS, impactDamage, isPrimaryWeapon, botLoadouts } from './balance.js';
+import { gunFit } from './gun-fit.js';
+import { boundTracerOrigin } from './shot-path.js';
 export { MAP, MAX_HP, WEAPONS };
 export const TEAM_SIZES = Object.freeze([1,2,3]);
 
@@ -202,10 +204,9 @@ function bodyHit(t, x,y,z, dx,dy,dz) {
   return [body,head];
 }
 
-function trace(g, p, yaw, pitch, map) {
-  const x = p.x, y = p.y + eyeHeight(p), z = p.z;
-  const cp = Math.cos(pitch), dx = Math.sin(yaw) * cp, dz = -Math.cos(yaw) * cp, dy = Math.sin(pitch);
-  let distance = worldHit(x,y,z,dx,dy,dz,100,map), target = null, headshot = false;
+function trace(g,p,start,dx,dy,dz,map,limit=100) {
+  const {x,y,z}=start;
+  let distance = worldHit(x,y,z,dx,dy,dz,limit,map), target = null, headshot = false;
   if (g.phase==='warmup' && Math.abs(dz)>=.0001) {
     for (const plate of g.targets) {
       const t=(plate.z-z)/dz;
@@ -222,6 +223,47 @@ function trace(g, p, yaw, pitch, map) {
   return { x,y,z, ex:x+dx*distance, ey:y+dy*distance, ez:z+dz*distance, target, headshot, distance };
 }
 
+// The host uses the front cap of the equipped model and a neutral shoulder pose.
+// Recoil and camera bob stay visual, so host and guest resolve the same shot.
+export function firingMuzzle(p){
+  const fit=gunFit[p.active],right=(p.ads ? .018 : .125)+.86*fit.muzzleX;
+  const up=(p.ads ? -.13 : -.26)+.86*fit.muzzleY,forward=.22-.86*fit.muzzle;
+  const sy=Math.sin(p.yaw),cy=Math.cos(p.yaw),sp=Math.sin(p.pitch),cp=Math.cos(p.pitch);
+  const horizontal=forward*cp-up*sp;
+  return {x:p.x+right*cy+horizontal*sy,y:p.y+eyeHeight(p)+forward*sp+up*cp,z:p.z+right*sy-horizontal*cy};
+}
+
+function traceVolley(g,p,w,map){
+  const eye={x:p.x,y:p.y+eyeHeight(p),z:p.z};
+  let start=firingMuzzle(p);
+  const ax=start.x-eye.x,ay=start.y-eye.y,az=start.z-eye.z,reach=Math.hypot(ax,ay,az);
+  // A barrel pressed through a wall or opponent must hit its near side.
+  const obstruction=trace(g,p,eye,ax/reach,ay/reach,az/reach,map,reach);
+  const blocked=obstruction.distance<reach-1e-6;
+  if(blocked){
+    const fraction=Math.max(0,obstruction.distance-.004)/reach;
+    start={x:eye.x+ax*fraction,y:eye.y+ay*fraction,z:eye.z+az*fraction};
+  }
+  const sights=[],spread=p.ads ? w.aimSpread : w.spread;
+  for(let i=0;i<(w.pellets||1);i++){
+    const angle=Math.random()*Math.PI*2,radius=Math.sqrt(Math.random())*spread;
+    if(blocked){sights.push(obstruction);continue;}
+    const yaw=p.yaw+Math.cos(angle)*radius,pitch=p.pitch+Math.sin(angle)*radius,cp=Math.cos(pitch);
+    const aim=trace(g,p,eye,Math.sin(yaw)*cp,Math.sin(pitch),-Math.cos(yaw)*cp,map);
+    sights.push(aim);
+    if(aim.distance<=reach+.025)start=boundTracerOrigin(start,{x:aim.ex,y:aim.ey,z:aim.ez},eye);
+  }
+  const hits=sights.map(aim=>{
+    const dx=aim.ex-start.x,dy=aim.ey-start.y,dz=aim.ez-start.z,length=Math.hypot(dx,dy,dz);
+    if(blocked||length<1e-6)return {...aim,...start,distance:length};
+    // Pick the reticle point with the eye, then resolve every intervening
+    // surface and target again from the muzzle. The tiny margin includes the
+    // shared endpoint even when the two floating-point rays round differently.
+    return trace(g,p,start,dx/length,dy/length,dz/length,map,length+.00001);
+  });
+  return {hits,blocked};
+}
+
 function shoot(g, p, map) {
   if (!p.ammo) { beginReload(g,p); return; }
   const w = WEAPONS[p.active], m = memory(p);
@@ -233,19 +275,19 @@ function shoot(g, p, map) {
   m.cooldown = (m.burstLeft ? w.burstInterval : w.interval) + Math.min(0,m.cooldown);
   const total = new Map(), pellets = p.active==='shotgun' ? [] : null;
   let central;
-  for (let i=0; i < (w.pellets || 1); i++) {
-    const spread = p.ads ? w.aimSpread : w.spread;
-    const angle = Math.random() * Math.PI * 2, radius = Math.sqrt(Math.random()) * spread;
-    const hit = trace(g, p, p.yaw + Math.cos(angle)*radius, p.pitch + Math.sin(angle)*radius, map);
+  const {hits,blocked}=traceVolley(g,p,w,map);
+  for (const hit of hits) {
     if(pellets)pellets.push({ex:hit.ex,ey:hit.ey,ez:hit.ez,target:hit.target?.id||null});
     if (!central || (hit.target && !central.target)) central = hit;
     if (!hit.target) continue;
     const old = total.get(hit.target) || { damage: 0, headshot: false };
-    old.damage += impactDamage(w,hit.distance,hit.headshot); old.headshot ||= hit.headshot;
+    // Range balance is measured from the player, independent of barrel length.
+    const range=Math.hypot(hit.ex-p.x,hit.ey-p.y-eyeHeight(p),hit.ez-p.z);
+    old.damage += impactDamage(w,range,hit.headshot); old.headshot ||= hit.headshot;
     total.set(hit.target, old);
   }
   const {x,y,z,ex,ey,ez} = central;
-  emit(g,'shot',p.id,{ weapon:p.active,x,y,z,ex,ey,ez,...(pellets?{pellets,at:g.elapsed}:{}) });
+  emit(g,'shot',p.id,{weapon:p.active,x,y,z,ex,ey,ez,...(blocked?{blocked:true}:{}),...(pellets?{pellets,at:g.elapsed}:{})});
   if (g.phase==='range') {
     g.range.shots++;
     if (total.size) g.range.hits++;

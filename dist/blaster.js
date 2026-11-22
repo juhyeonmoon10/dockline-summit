@@ -3,20 +3,11 @@ import * as T from './assets/three.module.min.js';
 import { guns } from './assets/toon-guns.js';
 import { blasters } from './assets/blaster-geometry.js';
 import { Parts } from './arena-parts.js';
+export { gunFit } from './gun-fit.js';
 
 const cache=new Map();
 // Surface contacts in the sniper's authored local frame, with the bolt at rest.
 export const sniperContacts={support:[-.036,-.052,-.400],grip:[.024,-.070,.004],bolt:[.097,.095,-.084]};
-export const gunFit={
- rifle:{muzzle:-.616,muzzleY:.075,support:-.335,grip:-.074,sight:.175,flash:.9},
- shotgun:{muzzle:-.738,muzzleY:.017,support:-.565,grip:-.068,sight:.067,flash:1.34},
- sniper:{muzzle:-.937,muzzleY:.064,support:-.397,grip:-.077,sight:.143,flash:1.17},
- smg:{muzzle:-.394,muzzleY:.034,support:-.205,grip:-.066,sight:.111,flash:.64},
- burst:{muzzle:-.579,muzzleY:.048,support:-.320,grip:-.072,sight:.162,flash:.82},
- marksman:{muzzle:-.896,muzzleY:.020,support:-.409,grip:-.072,sight:.152,flash:1.02},
- lmg:{muzzle:-.621,muzzleY:.048,support:-.387,grip:-.070,sight:.188,flash:1.05},
- pistol:{muzzle:-.327,muzzleY:.057,support:-.045,grip:-.068,sight:.103,flash:.65}
-};
 const bytes=str=>Uint8Array.from(atob(str),char=>char.charCodeAt(0));
 function geometry(packed){
  const raw=bytes(packed[0]),view=new DataView(raw.buffer),count=raw.length/12;
@@ -177,19 +168,40 @@ function propSurface(geo,kind,isMagazine){
  const steel=new T.Color(style.steel),dark=new T.Color(style.dark),coat=new T.Color(style.coat);
  for(let i=0;i<color.count;i++){
   const r=color.getX(i),g=color.getY(i),b=color.getZ(i),y=position.getY(i),z=position.getZ(i);
-  if(kind==='sniper'&&!isMagazine&&r<.020&&g===r&&b===r){
-   // Only the authored optic has this swatch. Shorten its silhouette above the receiver.
-   position.setXYZ(i,.006+(position.getX(i)-.006)*.94,.145+(y-.145)*.94,-.164+(z+.180)*.84);
+  // The relief on the imported body was hidden by the new fore-end when seen
+  // from the side, but it filled the sight picture when looking along the top.
+  if(!isMagazine&&(kind==='burst'||kind==='lmg')&&y>.042){
+   const amount=Math.max(0,Math.min(1,(-z-.035)/.095));
+   position.setY(i,y-(y-.042)*.60*amount);
   }
   const colored=r>g*1.35||b>g*1.68;
   if(isMagazine)tone.copy(dark).lerp(steel,.16+Math.min(.50,g));
-  else if(colored||(kind==='sniper'&&z>.010&&y<.11))tone.copy(coat);
+  else if(colored)tone.copy(coat);
   else tone.copy(dark).lerp(steel,Math.min(.95,(g+.03)*2.8));
   tone.multiplyScalar(1+.11*Math.max(0,normal.getY(i))+.035*Math.cos(z*57+y*17));
   color.setXYZ(i,tone.r,tone.g,tone.b);
  }
- if(kind==='sniper')geo.computeBoundingSphere();
+ if(!isMagazine&&(kind==='burst'||kind==='lmg')){geo.computeVertexNormals();geo.computeBoundingSphere();}
  breakerUV(geo);
+}
+
+// Profiled, hollow-ended exterior shells. The last two rings form the inset on the end cap.
+// Rings share one indexed mesh with the rest of the fixture.
+function turnedTrim(parts,x,y,sections,steps=24){
+ const tint=new T.Color();
+ for(let k=0;k<sections.length-1;k++){
+  const [z0,r0,paint]=sections[k],[z1,r1]=sections[k+1];
+  const slope=Math.atan2(r0-r1,z1-z0),nxy=Math.cos(slope),nz=Math.sin(slope);
+  const start=parts.points.length/3;
+  for(const [z,r] of [[z0,r0],[z1,r1]])for(let j=0;j<steps;j++){
+   const a=j*Math.PI*2/steps,c=Math.cos(a),s=Math.sin(a);tint.set(paint);
+   parts.points.push(x+c*r,y+s*r,z);parts.normals.push(c*nxy,s*nxy,nz);
+   parts.colors.push(tint.r,tint.g,tint.b);
+  }
+  for(let j=0;j<steps;j++){
+   const a=start+j,b=start+(j+1)%steps;parts.indices.push(a,b,b+steps,a,b+steps,a+steps);
+  }
+ }
 }
 
 function sniperEyepiece(){
@@ -255,41 +267,81 @@ function serviceDetails(model,kind){
   for(let i=0;i<3;i++)parts.cube(0,.044,-.321+i*.027,.036,.002,.004,ink);
   parts.cube(-.018,.044,-.198,.007,.002,.012,p.mark);
  }else if(kind==='sniper'){
-  // A continuous handguard bridges the old open span between the receiver and barrel.
-  // The widened lower section meets the support palm and curls up around the barrel.
+  // One molded spine runs through both hand contacts and narrows into the raised comb.
   const furniture=new Parts();
-  breakerShell(furniture,[[-.536,.022,-.004,.058],[-.514,.028,-.024,.064],[-.468,.034,-.046,.064],
+  breakerShell(furniture,[[-.565,.018,.015,.055],[-.535,.024,-.008,.062],[-.468,.034,-.046,.064],
    [-.435,.037,-.057,.066],[-.393,.038,-.059,.067],[-.345,.036,-.053,.070],
-   [-.306,.035,-.045,.078],[-.268,.033,-.039,.084]],p.coat,p.edge);
+   [-.306,.035,-.044,.070],[-.268,.033,-.039,.069],[-.193,.030,-.038,.066],[-.125,.029,-.022,.064],
+   [-.060,.027,-.003,.065],[.008,.024,.004,.064],[.052,.019,.016,.058],
+   [.084,.017,.021,.060],[.132,.020,.025,.075],[.199,.022,.018,.082],[.269,.021,-.010,.080]],'#56614e','#707967');
   sidePanel(furniture,[[-.038,-.013],[.020,-.021],[.061,-.112],[.052,-.128],
    [.014,-.122],[-.018,-.075]],.018,.026,p.coat);
+  // The shallow saddle joins the angled palm swell to the spine in every view.
+  breakerShell(furniture,[[-.045,.018,-.016,.012],[-.032,.022,-.031,.018],
+   [.007,.021,-.039,.023],[.032,.017,-.020,.023]],p.coat,p.edge);
+  furniture.beam([-.001,.001,-.013],[-.001,-.103,.037],.035,.048,'#4f594a');
+  furniture.beam([0,-.106,.036],[0,-.120,.040],.032,.041,'#455042');
+  // A second slender sweep under the cheek creates a small, open negative space.
+  breakerShell(furniture,[[.039,.013,-.082,-.061],[.065,.016,-.074,-.049],[.112,.016,-.052,-.029],
+   [.180,.017,-.027,-.007],[.233,.018,-.027,.018],[.269,.022,-.046,.042]],'#455043','#65705e');
+  breakerShell(furniture,[[.257,.022,-.049,.079],[.267,.026,-.055,.081],[.280,.024,-.056,.079],[.286,.020,-.051,.073]],'#343b37','#566055');
   for(const side of [-1,1]){
    furniture.beam([side*.035,-.024,-.456],[side*.038,-.031,-.395],.0032,.005,p.edge);
    furniture.beam([side*.038,-.031,-.395],[side*.035,-.026,-.347],.0032,.005,p.edge);
    for(let i=0;i<3;i++)furniture.cube(side*.037,-.015,-.429+i*.024,.0028,.013,.005,p.dark,-.32);
    for(let i=0;i<3;i++)furniture.cube(side*.026,-.094+i*.014,.026-i*.008,.0025,.004,.026,p.edge,-.22);
+   furniture.beam([side*.035,-.016,-.315],[side*.030,-.020,-.199],.003,.002,'#808574');
+   furniture.beam([side*.021,.048,.159],[side*.022,.054,.234],.0025,.0025,'#747c69');
+   for(let i=0;i<4;i++)furniture.cube(side*.025,-.040+i*.018,.274,.0022,.005,.014,'#454e45');
   }
-  // The narrow cheek pad follows the existing comb and stops short of the buttplate.
-  breakerShell(furniture,[[.084,.018,.101,.104],[.103,.022,.102,.108],[.162,.024,.107,.115],
-   [.211,.021,.105,.113],[.217,.018,.105,.111]],'#525d50','#718071');
-  furniture.beam([.022,.106,.116],[.024,.112,.160],.0022,.002,'#849183');
-  furniture.beam([.024,.112,.160],[.021,.110,.205],.0022,.002,'#747f70');
+  // A raised graphite cheek cushion carries the soft highlight nearest the camera.
+  breakerShell(furniture,[[.092,.013,.057,.067],[.111,.019,.062,.080],[.153,.023,.070,.090],
+   [.216,.024,.073,.093],[.245,.020,.074,.088],[.251,.016,.072,.082]],'#47524b','#6e796c');
+  furniture.beam([.020,.079,.126],[.022,.087,.157],.0020,.0018,'#919989');
+  furniture.beam([.022,.087,.157],[.023,.089,.208],.0020,.0018,'#798675');
   model.add(propMesh(furniture,'forearm-and-grip',2));
-  breakerShell(parts,[[.043,.020,.043,.088],[.062,.025,.037,.099],[.168,.027,.042,.113],[.230,.023,.051,.110],[.258,.020,.052,.102]],p.coat,p.edge);
-  for(const side of [-1,1]){
-   parts.beam([side*.024,.070,.068],[side*.027,.083,.162],.003,.003,p.dark);
-   for(let i=0;i<4;i++)parts.cube(side*.027,.071,.112+i*.018,.002,.011,.004,p.edge,-.35);
+
+  // The full-length front taper and recessed end face share the same center as gunFit.
+  turnedTrim(parts,.006,.064,[[-1.140,0,'#252c2e'],[-1.142,.012,'#303c3e'],[-1.143,.015,'#78817d'],
+   [-1.141,.019,'#555e5d'],[-1.130,.020,'#515b5a'],[-1.097,.020,'#3c4545'],[-1.090,.016,'#596464'],
+   [-.770,.0165,'#515e60'],[-.636,.019,'#3c494a'],[-.612,.023,'#596260'],[-.551,.023,'#475351'],
+   [-.529,.027,'#596260'],[-.467,.027,'#47504e']],24);
+  // A rounded receiver and a shallow rail give the long centerline distinct levels.
+  turnedTrim(parts,.006,.065,[[-.510,.023,'#505c5c'],[-.481,.027,'#5f6c6c'],[-.458,.029,'#525e60'],
+   [-.292,.029,'#495657'],[-.266,.031,'#596565'],[-.018,.031,'#4d585b'],[.002,.024,'#45504d']],20);
+  breakerShell(parts,[[-.357,.020,.080,.091],[-.339,.026,.084,.101],[-.099,.026,.085,.101],[-.081,.019,.082,.093]],'#454e4f','#697572');
+  for(const z of [-.309,-.258,-.156,-.104])parts.cube(.005,.101,z,.048,.002,.004,'#303b3b');
+  parts.beam([0,-.025,-.142],[0,-.067,-.117],.014,.014,'#3b4543');
+  parts.beam([0,-.067,-.117],[0,-.068,-.057],.014,.010,'#48534e');
+  parts.beam([0,-.068,-.057],[0,-.049,-.019],.014,.011,'#404945');
+  // An independently contoured optic replaces the original squared scope mesh.
+  const optics=new Parts();
+  turnedTrim(optics,.006,.145,[[-.427,.005,'#3b5557'],[-.428,.042,'#3e5759'],[-.435,.047,'#88918a'],[-.435,.053,'#535e5d'],
+   [-.432,.055,'#3a4343'],[-.424,.054,'#5c6766'],[-.389,.053,'#495455'],[-.351,.042,'#505c5b'],
+   [-.317,.028,'#606b68'],[-.304,.026,'#424d4d'],[-.123,.026,'#4f5a59'],[-.106,.028,'#68716d'],
+   [-.079,.034,'#414c4c'],[-.055,.041,'#424e4d'],[-.029,.042,'#384344'],[-.023,.044,'#535f5c'],
+   [-.014,.044,'#667470'],[-.010,.041,'#303c3c'],[-.010,.034,'#455352']],32);
+  for(const z of [-.277,-.146]){
+   optics.cube(.006,.103,z,.032,.029,.031,'#384342');
+   optics.cube(.006,.095,z,.049,.008,.045,'#63706c');
+   turnedTrim(optics,.006,.145,[[z-.012,.026,'#586260'],[z-.010,.030,'#394543'],[z+.008,.030,'#69736d'],[z+.012,.026,'#45504d']],24);
+   optics.cube(.031,.145,z,.009,.014,.027,'#525b58');
   }
-  breakerShell(parts,[[-.280,.026,.048,.074],[-.254,.034,.046,.086],[-.074,.035,.051,.089],[-.012,.030,.052,.083]],p.steel,'#647170');
-  for(const z of [-.241,-.110]){
-   parts.cube(.004,.098,z,.036,.036,.034,p.dark);
-   parts.cube(.004,.084,z,.066,.009,.046,p.steel);
-  }
-  for(const z of [-.294,-.279,-.098,-.082])parts.tube(.006,.147,z,.079,.0055,.079,p.dark,halfTurn);
+  optics.tube(.006,.170,-.212,.027,.020,.027,'#525c58');
+  optics.tube(.006,.181,-.212,.032,.006,.032,'#757e73');
+  model.add(propMesh(optics,'scope-housing',1));
+
+  const magazine=new Parts();
+  breakerShell(magazine,[[-.258,.015,-.103,-.024],[-.249,.022,-.127,-.022],[-.193,.023,-.131,-.023],[-.170,.018,-.116,-.028]],'#4b5350','#66726b');
+  breakerShell(magazine,[[-.255,.016,-.122,-.112],[-.245,.023,-.134,-.122],[-.190,.024,-.138,-.125],[-.172,.019,-.120,-.111]],'#333c3a','#5f6b63');
+  for(const side of [-1,1])for(let i=0;i<2;i++)magazine.cube(side*.0228,-.086,-.233+i*.027,.003,.044,.004,'#37413c',-.13);
+  model.add(propMesh(magazine,'magazine',0));
   model.add(sniperEyepiece());
   // A fixed dark backing keeps the moving thumb lever legible against the receiver.
-  parts.cube(.034,.074,-.051,.012,.022,.205,p.dark);
-  parts.beam([.024,.064,.032],[.037,.072,.042],.016,.024,p.steel);
+  // The backing ends on the metal receiver. Its previous long rear lip overhung
+  // the narrow neck of the stock and lifted clear of it when seen from above.
+  parts.cube(.032,.072,-.077,.016,.021,.151,p.dark);
+  parts.beam([.018,.061,-.031],[.032,.069,-.015],.017,.024,p.steel);
   const tab=new Parts();
   tab.cube(.040,.077,-.117,.021,.023,.046,p.steel,.08);
   tab.beam([.041,.077,-.117],[.076,.080,-.097],.017,.018,'#657271');
@@ -367,21 +419,21 @@ function arcadeDetails(kind,model){
   model.add(propMesh(pack,'magazine',2));
  }else if(kind==='burst'){
   // Three coral ribs repeat the three-beat firing rhythm on both surfaces.
-  sidePanel(parts,[[-.525,.068],[-.436,.110],[-.170,.096],[-.086,.058],[-.161,-.006],[-.451,.003]],.048,.082,accent);
+  sidePanel(parts,[[-.525,.063],[-.436,.084],[-.170,.085],[-.086,.058],[-.161,-.006],[-.451,.003]],.048,.071,accent);
   for(const side of [-1,1]){
-   for(let i=0;i<3;i++)parts.cube(side*.083,.054,-.417+i*.052,.009,.046,.021,ink,-.36);
+   for(let i=0;i<3;i++)parts.cube(side*.071,.041,-.417+i*.052,.008,.036,.018,ink,-.36);
    parts.beam([side*.046,.092,-.05],[side*.046,.145,-.115],.017,.022,silver);
    parts.beam([side*.046,.145,-.115],[side*.046,.103,-.181],.017,.022,silver);
   }
-  parts.cube(0,.147,-.119,.106,.019,.068,ink);
-  parts.six(0,.048,-.533,.117,.092,.111,shell,halfTurn);
-  parts.six(0,.048,-.553,.120,.023,.114,accent,halfTurn);
-  parts.six(0,.048,-.580,.070,.004,.070,ink,halfTurn);
+  parts.cube(0,.153,-.119,.106,.009,.055,ink);
+  parts.six(0,.048,-.533,.083,.092,.062,shell,halfTurn);
+  parts.six(0,.048,-.553,.085,.023,.066,accent,halfTurn);
+  turnedTrim(parts,0,.048,[[-.697,0,ink],[-.700,.013,silver],[-.700,.019,edge],[-.690,.019,shell],[-.678,.017,shell],[-.568,.019,shell]],16);
   breakerShell(parts,[[-.075,.035,.051,.077],[.004,.040,.051,.092],[.149,.037,.053,.089],[.180,.029,.056,.082]],'#55544e','#67685d');
   for(const side of [-1,1]){
-   parts.beam([side*.082,.081,-.406],[side*.082,.071,-.187],.0025,.004,edge);
-   for(let i=0;i<3;i++)parts.cube(side*.083,.039,-.237+i*.018,.003,.009,.005,mark,-.28);
-   parts.six(side*.080,.054,-.140,.011,.006,.011,silver,0,0,halfTurn);
+   parts.beam([side*.071,.067,-.406],[side*.071,.066,-.187],.0025,.004,edge);
+   for(let i=0;i<3;i++)parts.cube(side*.072,.036,-.237+i*.018,.003,.009,.005,mark,-.28);
+   parts.six(side*.070,.046,-.140,.011,.006,.011,silver,0,0,halfTurn);
   }
  }else if(kind==='marksman'){
   sidePanel(parts,[[-.608,.023],[-.436,.062],[-.145,.052],[-.226,-.016],[-.553,-.028]],.047,.065,accent);
@@ -392,8 +444,9 @@ function arcadeDetails(kind,model){
    parts.cube(side*.065,.010,-.266,.009,.013,.084,ink);
   }
   parts.cube(0,.151,-.150,.092,.014,.061,accent);
-  parts.six(0,.020,-.857,.093,.078,.088,shell,halfTurn);
-  parts.six(0,.020,-.878,.097,.016,.093,accent,halfTurn);
+  parts.six(0,.020,-.857,.067,.078,.064,shell,halfTurn);
+  parts.six(0,.020,-.878,.070,.016,.067,accent,halfTurn);
+  turnedTrim(parts,0,.020,[[-1.001,0,ink],[-1.004,.010,silver],[-1.004,.015,edge],[-.997,.016,shell],[-.986,.015,shell],[-.884,.014,shell]],16);
   breakerShell(parts,[[.030,.024,.035,.053],[.070,.035,.038,.069],[.173,.035,.038,.075],[.213,.026,.039,.066]],'#48565a',edge);
   for(const side of [-1,1]){
    parts.beam([side*.0655,.032,-.485],[side*.0655,.030,-.292],.0024,.004,edge);
@@ -401,15 +454,16 @@ function arcadeDetails(kind,model){
    parts.cube(side*.043,.137,-.157,.0025,.006,.025,mark);
   }
  }else{
-  sidePanel(parts,[[-.551,.069],[-.492,.120],[-.185,.143],[-.106,.109],[-.178,.012],[-.456,-.008]],.062,.100,accent);
+  sidePanel(parts,[[-.551,.061],[-.492,.084],[-.185,.116],[-.106,.103],[-.178,.012],[-.456,-.008]],.058,.080,accent);
   for(const side of [-1,1]){
-   for(let i=0;i<4;i++)parts.cube(side*.101,.065,-.438+i*.051,.012,.044,.020,ink,-.34);
+   for(let i=0;i<4;i++)parts.cube(side*.080,.049,-.438+i*.051,.010,.035,.018,ink,-.34);
    parts.beam([side*.045,.115,-.010],[side*.045,.183,-.053],.017,.030,shell);
    parts.beam([side*.045,.183,-.053],[side*.045,.121,-.204],.017,.024,shell);
   }
   parts.cube(0,.186,-.068,.108,.019,.087,shell);
-  parts.six(0,.048,-.563,.155,.116,.142,ink,halfTurn);
-  parts.six(0,.048,-.595,.161,.025,.148,accent,halfTurn);
+  parts.six(0,.048,-.563,.095,.116,.074,ink,halfTurn);
+  parts.six(0,.048,-.595,.099,.025,.077,accent,halfTurn);
+  turnedTrim(parts,0,.048,[[-.769,0,ink],[-.773,.015,silver],[-.773,.023,edge],[-.755,.024,shell],[-.740,.020,shell],[-.611,.022,shell]],20);
   const spool=new Parts();
   spool.tube(0,-.114,-.179,.222,.203,.222,shell,0,0,halfTurn);
   for(const side of [-1,1]){
@@ -422,8 +476,8 @@ function arcadeDetails(kind,model){
     const angle=i*Math.PI/3;
     spool.cube(side*.115,-.114+Math.sin(angle)*.088,-.179+Math.cos(angle)*.088,.007,.011,.022,edge,-angle);
    }
-   parts.beam([side*.100,.100,-.402],[side*.100,.108,-.234],.003,.003,edge);
-   parts.cube(side*.102,.053,-.200,.004,.009,.027,mark);
+   parts.beam([side*.080,.073,-.402],[side*.080,.090,-.234],.003,.003,edge);
+   parts.cube(side*.081,.053,-.200,.004,.009,.027,mark);
   }
   breakerShell(parts,[[-.016,.048,.072,.112],[.012,.055,.068,.125],[.077,.055,.060,.120],[.104,.045,.059,.108]],'#4c514a','#63685b');
   model.add(propMesh(spool,'magazine',1));
@@ -436,7 +490,8 @@ export function blasterMesh(kind='rifle'){
  if(!cache.has(kind)){
   const model=new T.Group();
   model.name=kind;
-  const base=arcadeBodies[kind],sourceParts=base?blasters[base]:guns[kind];
+  // The Lookout is built entirely from its own exterior profiles below.
+  const base=arcadeBodies[kind],sourceParts=kind==='sniper'?{}:base?blasters[base]:guns[kind];
   for(const [name,source] of Object.entries(sourceParts)){
    if(base&&(name==='scope'||(name==='magazine'&&kind==='lmg')))continue;
    const geo=geometry(source);

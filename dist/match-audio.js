@@ -4,7 +4,7 @@ const guns={
   rifle:{length:.34,hold:.018,decay:.064,body:.11,frequency:158,volume:.71,echo:.055,tail:.11,rate:1,foley:1},
   pistol:{length:.23,hold:.012,decay:.040,body:.075,frequency:205,volume:.61,echo:.025,tail:.07,rate:1,foley:1.25},
   shotgun:{length:.64,hold:.015,decay:.044,body:.22,frequency:96,volume:.78,echo:.15,tail:.18,rate:.96,foley:.90,onset:.12},
-  sniper:{length:1.12,hold:.016,decay:.090,body:.15,frequency:128,volume:.75,echo:.24,tail:.36,rate:.97,foley:.90},
+  sniper:{sniperReport:true,volume:.75,foley:.90},
   smg:{source:'pistol',length:.17,hold:.006,decay:.024,body:.055,frequency:278,volume:.48,echo:.018,tail:.05,rate:1.29,foley:1.38},
   burst:{source:'rifle',length:.26,hold:.010,decay:.040,body:.12,frequency:205,volume:.59,echo:.045,tail:.085,rate:1.12,foley:1.12},
   marksman:{source:'sniper',length:.48,hold:.011,decay:.062,body:.12,frequency:177,volume:.66,echo:.12,tail:.16,rate:1.14,foley:1.04},
@@ -22,6 +22,7 @@ function mono(buffer){
 // Bake once at load time. Direct report and diffuse reflections share one mono
 // voice; distant players retain the same weapon identity without a sample swap.
 function gunBuffer(ctx,source,profile){
+  if(profile.sniperReport)return sniperReport(ctx,source);
   const input=mono(source),rate=source.sampleRate;
   let peak=0;for(const v of input)peak=Math.max(peak,Math.abs(v));
   let start=input.findIndex(v=>Math.abs(v)>=peak*(profile.onset||.04));
@@ -62,6 +63,47 @@ function gunBuffer(ctx,source,profile){
   if(peak>.86)for(let i=0;i<out.length;i++)out[i]*=.86/peak;
   return buffer;
 }
+
+// The licensed bolt-action recording supplies the crack. Original filtered
+// pressure/noise and close, uneven reflections supply weight without adding a
+// long ringing tone or replaying the report as several separate bangs.
+function sniperReport(ctx,source){
+  const input=mono(source),rate=source.sampleRate,length=Math.ceil(.92*rate);
+  const buffer=ctx.createBuffer(1,length,rate),out=buffer.getChannelData(0);
+  let peak=0;for(const v of input)peak=Math.max(peak,Math.abs(v));
+  const onset=Math.max(0,input.findIndex(v=>Math.abs(v)>=peak*.04)-Math.round(rate*.0006));
+  const gain=.68/(peak||1),hp=Math.exp(-2*Math.PI*48/rate);
+  const bodyLow=1-Math.exp(-2*Math.PI*420/rate),bodyHigh=1-Math.exp(-2*Math.PI*55/rate);
+  let previous=0,filtered=0,low=0,sub=0,phase=0,seed=137321;
+  for(let i=0;i<length;i++){
+    const t=i/rate,index=onset+i*.93,whole=Math.floor(index),mix=index-whole;
+    const raw=((input[whole]||0)*(1-mix)+(input[whole+1]||0)*mix)*gain;
+    filtered=hp*(filtered+raw-previous);previous=raw;
+    seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+    low+=(seed/2147483648-1-low)*bodyLow;sub+=(low-sub)*bodyHigh;
+    phase+=2*Math.PI*(92+32*Math.exp(-t/.032))/rate;
+    const attack=1-Math.exp(-t/.0007),pressure=Math.exp(-t/.071)*attack;
+    const body=(Math.sin(phase)*.24+Math.sin(phase*1.93)*.075+(low-sub)*.28)*pressure;
+    out[i]=(filtered*Math.exp(-Math.max(0,t-.012)/.052)+body)*Math.min(1,t/.0005,(length-1-i)/(rate*.025));
+  }
+  const dry=out.slice();
+  for(const [delay,level,cutoff] of [[.026,.18,3400],[.049,.13,2700],[.083,.085,2100],[.131,.045,1500]]){
+    const at=Math.round(delay*rate),smooth=1-Math.exp(-2*Math.PI*cutoff/rate);let reflection=0;
+    for(let i=at;i<length;i++){reflection+=(dry[i-at]-reflection)*smooth;out[i]+=reflection*level;}
+  }
+  let air=0,airLow=0;
+  for(let i=0;i<length;i++){
+    const t=i/rate;
+    seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+    air+=(seed/2147483648-1-air)*.12;airLow+=(air-airLow)*.022;
+    const tail=t<.028?0:(1-Math.exp(-(t-.028)/.012))*Math.exp(-(t-.028)/.18);
+    out[i]+=(air-airLow)*.047*tail;
+    out[i]*=Math.min(1,(length-1-i)/(rate*.04));
+  }
+  peak=0;for(const v of out)peak=Math.max(peak,Math.abs(v));
+  if(peak>.86)for(let i=0;i<length;i++)out[i]*=.86/peak;
+  return buffer;
+}
 function clip(ctx,source,from=0,duration=source.duration,level=.65){
   const input=mono(source),rate=source.sampleRate,start=Math.floor(from*rate);
   const count=Math.max(1,Math.min(input.length-start,Math.ceil(duration*rate)));
@@ -77,8 +119,8 @@ function clip(ctx,source,from=0,duration=source.duration,level=.65){
 const mechanisms={
   pumpOpen:{duration:.16,frequency:520,grit:.42,decay:.032,drag:.12,seed:3101},
   pumpClose:{duration:.12,frequency:178,grit:.23,decay:.025,drag:.035,seed:4102},
-  boltOpen:{duration:.13,frequency:1020,grit:.28,decay:.019,drag:.095,seed:5123},
-  boltClose:{duration:.12,frequency:322,grit:.20,decay:.022,drag:.028,seed:6124},
+  boltOpen:{duration:.15,frequency:438,grit:.34,decay:.013,drag:.062,seed:5123,bolt:true,latch:.055},
+  boltClose:{duration:.13,frequency:248,grit:.25,decay:.015,drag:.034,seed:6124,bolt:true,latch:.035},
   magOut:{duration:.12,frequency:470,grit:.16,decay:.021,drag:.065,seed:7125},
   magSeat:{duration:.10,frequency:210,grit:.20,decay:.019,drag:.025,seed:8126},
   settle:{duration:.075,frequency:680,grit:.13,decay:.012,drag:.020,seed:9127},
@@ -99,10 +141,13 @@ function mechanismBuffer(ctx,kind,recording){
     seed=(Math.imul(seed,1664525)+1013904223)>>>0;
     const noise=seed/2147483648-1;low+=(noise-low)*.18;
     const attack=1-Math.exp(-t/.00045),impact=Math.exp(-t/p.decay);
-    const metal=Math.sin(2*Math.PI*p.frequency*t)*.30+Math.sin(2*Math.PI*p.frequency*2.71*t)*.09;
+    const metal=p.bolt
+      ?Math.sin(2*Math.PI*p.frequency*t)*.13+Math.sin(2*Math.PI*p.frequency*1.73*t)*.055+Math.sin(2*Math.PI*p.frequency*3.91*t)*.035
+      :Math.sin(2*Math.PI*p.frequency*t)*.30+Math.sin(2*Math.PI*p.frequency*2.71*t)*.09;
     const scrape=(noise-low)*p.grit*Math.exp(-t/p.drag)*(.45+.55*Math.sin(Math.PI*u));
-    const real=(recorded?.[onset+i]||0)/(recordedPeak||1)*.21*Math.exp(-t/.035);
-    out[i]=(metal*impact+scrape+real)*attack*Math.min(1,(p.duration-t)/.014);
+    const real=(recorded?.[onset+i]||0)/(recordedPeak||1)*(p.bolt?.50:.21)*Math.exp(-t/.035);
+    const latch=p.bolt&&t>=p.latch?((noise-low)*.45+Math.sin(2*Math.PI*1400*(t-p.latch))*.10)*.18*Math.exp(-(t-p.latch)/.008):0;
+    out[i]=(metal*impact+scrape+real+latch)*attack*Math.min(1,(p.duration-t)/.014);
     peak=Math.max(peak,Math.abs(out[i]));
   }
   if(peak)for(let i=0;i<length;i++)out[i]*=.60/peak;

@@ -1,5 +1,5 @@
 import * as T from './assets/three.module.min.js';
-import { pelletTrails,pelletSpan,PELLET_LIFE,PELLET_CAPACITY } from './shot-path.js';
+import { pelletTrails,pelletSpan,visibleTraceEnd,PELLET_LIFE,PELLET_CAPACITY } from './shot-path.js';
 
 // All pellet ribbons and contact glints share one draw call and a fixed buffer.
 export class PelletRenderer {
@@ -34,8 +34,17 @@ export class PelletRenderer {
     this.a=new T.Vector3();this.b=new T.Vector3();this.side=new T.Vector3();this.view=new T.Vector3();
     this.right=new T.Vector3();this.up=new T.Vector3();this.cursor=0;
   }
-  add(event,own,ads){
-    const added=pelletTrails(event,own,ads);this.trails.push(...added);
+  add(event,own,origin,map){
+    const added=pelletTrails(event,own,false,origin);
+    for(const trail of added){
+      const end={x:trail.ex,y:trail.ey,z:trail.ez};
+      const clipped=visibleTraceEnd(origin,end,map);
+      if(clipped===end)continue;
+      trail.ex=clipped.x;trail.ey=clipped.y;trail.ez=clipped.z;
+      trail.dx=clipped.x-origin.x;trail.dy=clipped.y-origin.y;trail.dz=clipped.z-origin.z;
+      trail.length=Math.hypot(trail.dx,trail.dy,trail.dz);trail.target=null;
+    }
+    this.trails.push(...added);
     if(this.trails.length>PELLET_CAPACITY)this.trails.splice(0,this.trails.length-PELLET_CAPACITY);
     return added;
   }
@@ -52,20 +61,11 @@ export class PelletRenderer {
       this.shape.setXYZW(i,edge,end,alpha,contact?1:0);
     }
   }
-  draw(camera,height,muzzle){
+  draw(camera,height){
     this.cursor=0;
     const scale=2*Math.tan(camera.fov*Math.PI/360)/height;
     this.right.setFromMatrixColumn(camera.matrixWorld,0);this.up.setFromMatrixColumn(camera.matrixWorld,1);
     for(const trail of this.trails){
-      if(trail.own&&!trail.placed&&muzzle){
-        this.a.set(trail.ex,trail.ey,trail.ez);
-        if(camera.position.distanceTo(this.a)>camera.position.distanceTo(muzzle)+.08){
-          trail.x=muzzle.x;trail.y=muzzle.y;trail.z=muzzle.z;
-          trail.dx=trail.ex-trail.x;trail.dy=trail.ey-trail.y;trail.dz=trail.ez-trail.z;
-          trail.length=Math.hypot(trail.dx,trail.dy,trail.dz);
-        }
-        trail.placed=true;
-      }
       if(trail.length<.04)continue;
       const {tail,head,alpha,contactAlpha}=pelletSpan(trail);
       this.a.set(trail.x+trail.dx*tail,trail.y+trail.dy*tail,trail.z+trail.dz*tail);

@@ -2,7 +2,7 @@
 #sight {
   --gap: calc(max(3px, var(--cone, 6px)) + var(--kick, 0px));
   --tick: 6px;
-  --optic: min(76vmin, 660px);
+  --optic: 93vmin;
 }
 #sight::before {
   content: "";
@@ -37,13 +37,17 @@
 #sight i:nth-child(4) { top: var(--gap); }
 #sight[data-equipped="shotgun"] { --tick: 9px; }
 #sight[data-equipped="knife"] i { display: none; }
-#sight.scope { --gap: 5px; --tick: calc(var(--optic) / 2 - 5px); }
-#sight.scope::before { background: #f05942; box-shadow: 0 0 0 1px #492d2c; }
-#sight.scope i { --line: 1px; background: #1d272a; box-shadow: 0 0 1px #e3e8dfaa; }
+#sight[data-equipped="sniper"]:not(.scope) { visibility: hidden; }
+#sight.scope { --gap: 0px; --tick: calc(var(--optic) / 2); }
+#sight.scope::before { width: 1px; height: 1px; background: #111715; box-shadow: none; }
+#sight.scope i { --line: 1px; background: #101614; border-radius: 0; box-shadow: 0 0 1px #edf1d980; }
+#sight.scope i:nth-child(-n+2) { top: -.5px; }
+#sight.scope i:nth-child(n+3) { left: -.5px; }
 #sight.scope::after {
   width: var(--optic);
-  border: 3px solid #1a242b;
-  box-shadow: 0 0 0 150vmax #081017ed, inset 0 0 0 1px #e2e8e4a1, inset 0 0 20px #111e293d;
+  border: 2px solid #111817;
+  background: radial-gradient(circle closest-side, transparent 74%, #14201d0a 90%, #0c141199 100%);
+  box-shadow: 0 0 0 150vmax #070a09, inset 0 0 0 1px #85958b8c;
 }
 
 #hitMark {
@@ -135,7 +139,6 @@
 }
 @media (prefers-reduced-motion: reduce) {
   #sight { --gap: max(3px, var(--cone, 6px)); }
-  #sight.scope { --gap: 5px; }
   #hitMark { transform: translate(-50%, -50%) rotate(45deg); }
   #weaponHud.reloading::after { transition: none; }
 }

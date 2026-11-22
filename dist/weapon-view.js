@@ -30,6 +30,10 @@ export function scopeAfterShot(weapon, held, age) {
   return Boolean(held && (weapon !== 'sniper' || age >= SNIPER_SCOPE_RETURN));
 }
 
+export function sniperScopeVisible(weapon,aim,held){
+  return weapon==='sniper' && Boolean(held) && aim>=.72;
+}
+
 function ease(start, end, time) {
   const u = Math.max(0, Math.min(1, (time - start) / (end - start)));
   return u * u * (3 - 2 * u);

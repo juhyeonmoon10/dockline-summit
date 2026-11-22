@@ -2,12 +2,13 @@ import * as T from './assets/three.module.min.js';
 import { blasterMesh, gunFit, sniperContacts } from './blaster.js';
 import { PRIMARY_WEAPONS } from './balance.js';
 import { eyeHeight, WEAPONS } from './sim.js';
-import { approachAim, canAim, weaponFov, reloadPose, shotResponse, shotCycle, shotFlashDuration, scopeAfterShot, emptySniperBolt, emptySniperGrasp, RELOAD_CONTACT } from './weapon-view.js';
+import { approachAim, canAim, weaponFov, reloadPose, shotResponse, shotCycle, shotFlashDuration, scopeAfterShot, sniperScopeVisible, emptySniperBolt, emptySniperGrasp, RELOAD_CONTACT } from './weapon-view.js';
 import { makeYard, sky, Parts, glowMaterial } from './yard-art.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { PelletRenderer } from './pellet-render.js';
+import { clipBarrelOrigin,boundTracerOrigin,nearestShotEnd,visibleTraceEnd,singleShotSpan,SHOT_TRAIL_LIFE } from './shot-path.js';
 import { knifeMesh,knifeFit,knifePose } from './knife.js';
-import { loadOperators,operatorAvailable,createOperator,updateOperator,disposeOperator } from './operator.js';
+import { loadOperators,operatorAvailable,createOperator,updateOperator,disposeOperator,heldMuzzleWorld } from './operator.js';
 
 const PI=Math.PI;
 const clamp=(n,min,max)=>Math.min(max,Math.max(min,n));
@@ -429,11 +430,27 @@ export class ArenaRenderer {
     sleeve.tube(0,-.477,0,.113,.018,.113,'#ffbf43');
     this.knifeArm=sleeve.mesh();this.knifeArm.visible=false;this.gunScene.add(this.knifeArm);
     this.flash=new T.Group();
-    const flare=new Parts();
-    flare.six(0,0,0,.037,.155,.037,'#fff2b9',PI/2);
-    flare.six(0,0,.007,.065,.085,.029,'#ffb25d',PI/2,0,.78);
+    const flare=new Parts(),tongue=new T.ConeGeometry(.5,1,6);
+    // Local zero stays on the cap. All of the luminous geometry extends forward.
+    flare.piece(tongue,0,0,-.085,.047,.17,.047,'#ffd992',-PI/2);
+    flare.piece(tongue,-.015,.008,-.053,.036,.107,.025,'#ec9e48',-1.38,-.31);
+    flare.piece(tongue,.014,-.007,-.038,.031,.078,.027,'#ffb660',-1.72,.32);
+    flare.six(0,0,-.024,.041,.047,.041,'#fff7ce',PI/2);tongue.dispose();
     this.flash.add(flare.mesh(glowMaterial));this.gunRig.add(this.flash);
     this.flash.visible=false;
+    // Remote flashes share the prop geometry, but have independent visibility,
+    // materials and lifetime; they are depth-tested in the world pass.
+    this.remoteFlashPoint=new T.Vector3();this.remoteFlashRotation=new T.Quaternion();
+    this.remoteFlashIndex=0;this.remoteFlashFocus=null;
+    this.remoteFlashes=Array.from({length:12},()=>{
+      const mesh=this.flash.clone(true);
+      mesh.traverse(part=>{if(part.isMesh){
+        const material=part.material.clone();material.depthTest=true;material.depthWrite=false;
+        part.material=material;part.castShadow=false;part.receiveShadow=false;
+      }});
+      mesh.visible=false;this.scene.add(mesh);
+      return {mesh,ttl:0,actor:null,weapon:null};
+    });
     this.templates=[operatorTemplate(0),operatorTemplate(1)];
     this.shadowMat=shadowStamp();this.shadowGeo=new T.PlaneGeometry(1.12,1.05);
     this.models=new Map();this.lastSeq=0;this.lastElapsed=-1;this.lastShotFrame=null;
@@ -442,12 +459,13 @@ export class ArenaRenderer {
     this.plates=new Map();
     this.aim=0;this.bob=0;this.eye=1.55;this.roll=0;this.lastFocus=null;
     this.lookSwayX=0;this.lookSwayY=0;this.lastYaw=null;this.lastPitch=null;this.equip=0;this.active=null;
-    this.tracers=[];this.spark=[];this.marks=new ImpactMarks(this.scene);this.res={w:0,h:0};this.performanceScale=1;
+    this.tracers=[];this.shotsThisFrame=[];this.viewMuzzle=new T.Vector3();this.actorMuzzle=new T.Vector3();
+    this.spark=[];this.marks=new ImpactMarks(this.scene);this.res={w:0,h:0};this.performanceScale=1;
     this.shotTrails=new PelletRenderer(this.scene);
     const beamGeo=new T.CylinderGeometry(1,1,1,5,1,true);
     for(let i=0;i<16;i++){
       const mesh=new T.Mesh(beamGeo,new T.MeshBasicMaterial({color:0xffdd91,transparent:true,depthWrite:false}));
-      mesh.visible=false;this.scene.add(mesh);this.tracers.push({mesh,ttl:0});
+      mesh.visible=false;this.scene.add(mesh);this.tracers.push({mesh,ttl:0,start:new T.Vector3(),delta:new T.Vector3()});
     }
     const sparkGeo=new T.OctahedronGeometry(1);
     for(let i=0;i<14;i++){
@@ -468,7 +486,7 @@ export class ArenaRenderer {
     this.map=map;this.ring=yard.ring;
     this.gl.shadowMap.needsUpdate=true;
     this.marks?.clear();
-    this.shotTrails?.clear();
+    if(this.shotsThisFrame)this.clearShotEffects();
     this.lastFocus=null;this.lastSeq=0;this.lastElapsed=-1;
   }
   resize(view) {
@@ -497,6 +515,42 @@ export class ArenaRenderer {
     this.models.set(player.id,a);this.scene.add(group,shadow);
     return a;
   }
+  remoteMuzzle(actorId,weapon,out,rotation){
+    const avatar=this.models.get(actorId);
+    if(!avatar?.wasAlive||!avatar.group.visible)return false;
+    const active=avatar.rig?avatar.rig.active:avatar.active;
+    if(active!==weapon)return false;
+    const held=avatar.rig?avatar.rig.loadouts[weapon]:avatar.loadout?.children[0];
+    return heldMuzzleWorld(held,weapon,out,rotation);
+  }
+  flashRemote(actorId,weapon,seq,validatedOrigin){
+    if(actorId===this.remoteFlashFocus)return false;
+    if(!this.remoteMuzzle(actorId,weapon,this.remoteFlashPoint,this.remoteFlashRotation))return false;
+    // The caller may supply the same wall-checked origin used by its shot path.
+    // An absent/invalid displayed muzzle never creates a flash at world zero.
+    if(validatedOrigin){
+      if(![validatedOrigin.x,validatedOrigin.y,validatedOrigin.z].every(Number.isFinite))return false;
+      this.remoteFlashPoint.copy(validatedOrigin);
+    }
+    const flash=this.remoteFlashes.find(item=>item.ttl<=0)||this.remoteFlashes[this.remoteFlashIndex++%this.remoteFlashes.length];
+    flash.actor=actorId;flash.weapon=weapon;flash.ttl=shotFlashDuration(weapon);
+    flash.mesh.position.copy(this.remoteFlashPoint);flash.mesh.quaternion.copy(this.remoteFlashRotation);
+    flash.mesh.rotateZ((Number.isFinite(seq)?seq:0)*1.9);flash.mesh.scale.setScalar((gunFit[weapon]?.flash||1)*.86);
+    flash.mesh.visible=true;return true;
+  }
+  stepRemoteFlashes(dt,focusId){
+    this.remoteFlashFocus=focusId;
+    for(const flash of this.remoteFlashes){
+      if(flash.ttl<=0)continue;
+      const avatar=this.models.get(flash.actor),active=avatar?.rig?avatar.rig.active:avatar?.active;
+      flash.ttl=Math.max(0,flash.ttl-dt);
+      if(flash.actor===focusId||!avatar?.wasAlive||!avatar.group.visible||active!==flash.weapon)flash.ttl=0;
+      flash.mesh.visible=flash.ttl>0;
+    }
+  }
+  clearRemoteFlashes(){
+    for(const flash of this.remoteFlashes){flash.ttl=0;flash.actor=null;flash.weapon=null;flash.mesh.visible=false;}
+  }
   targetModel(target) {
     let model=this.plates.get(target.id);
     if(model)return model;
@@ -513,7 +567,8 @@ export class ArenaRenderer {
   burst(x,y,z,color,life,size,vx=0,vy=0,vz=0) {
     const p=this.spark[this.sparkIndex++%this.spark.length];
     p.mesh.position.set(x,y,z);p.mesh.material.color.setHex(color);p.mesh.rotation.set(0,this.sparkIndex*.85,.42);
-    p.velocity.set(vx,vy,vz);p.ttl=p.life=life;p.size=size;p.mesh.visible=true;
+    p.velocity.set(vx,vy,vz);p.ttl=p.life=life;p.size=size;
+    p.mesh.scale.setScalar(size);p.mesh.visible=true;
   }
   resetShot() {
     this.shotAge=Infinity;this.shotWeapon=null;this.shotStrength=0;
@@ -521,6 +576,7 @@ export class ArenaRenderer {
   }
 
   effects(game,focus,dt,shotDt) {
+    this.shotsThisFrame.length=0;this.stepRemoteFlashes(shotDt,focus.id);
     this.meleeAge=Math.min(.55,this.meleeAge+dt);
     if(!focus?.alive||focus.active!=='knife')this.meleeAge=.55;
     for(const [id,swing] of this.meleeSwings){
@@ -530,14 +586,14 @@ export class ArenaRenderer {
     this.shotTrails.step(dt);
     this.shotAge+=shotDt;this.recoil=this.shotStrength*shotResponse(this.shotAge,this.shotWeapon);
     this.flashTime=Math.max(0,this.flashTime-shotDt);
-    if(game.seq<this.lastSeq || game.elapsed<this.lastElapsed){this.lastSeq=0;this.marks.clear();this.shotTrails.clear();this.meleeAge=.55;this.meleeSwings.clear();this.resetShot();}
+    if(game.seq<this.lastSeq || game.elapsed<this.lastElapsed){this.lastSeq=0;this.marks.clear();this.clearShotEffects();this.meleeAge=.55;this.meleeSwings.clear();this.resetShot();}
     this.lastElapsed=game.elapsed;
     const events=game.events||[];
     for(let i=0;i<events.length;i++){
       const e=events[i];
       if(e.seq<=this.lastSeq)continue;
       this.lastSeq=e.seq;
-      if(e.type==='round'){this.marks.clear();this.shotTrails.clear();this.meleeAge=.55;this.meleeSwings.clear();this.resetShot();}
+      if(e.type==='round'){this.marks.clear();this.clearShotEffects();this.meleeAge=.55;this.meleeSwings.clear();this.resetShot();}
       if(e.type==='melee'){
         const actor=game.players.find(player=>player.id===e.actor);
         if(actor?.alive&&actor.active==='knife'){
@@ -560,45 +616,73 @@ export class ArenaRenderer {
       const mine=e.actor===focus?.id;
       if(mine && focus.alive && e.weapon===focus.active){
         this.shotStrength=(gunFit[e.weapon]?.flash||1)+Math.min(.18,Math.max(0,.13-this.shotAge));
-        this.shotAge=0;this.shotWeapon=e.weapon;this.recoil=this.shotStrength;this.flashTime=shotFlashDuration(e.weapon);
+        this.shotAge=0;this.shotWeapon=e.weapon;this.recoil=this.shotStrength;this.flashTime=e.blocked?0:shotFlashDuration(e.weapon);
       }
-      if(e.weapon==='shotgun'){
-        const trails=this.shotTrails.add(e,mine,focus?.ads);
-        trails.forEach((trail,index)=>{
-          direction.set(trail.dx,trail.dy,trail.dz).normalize();
-          trail.contact=!!trail.target||this.marks.add(this.map,{...trail,weapon:'shotgun',seq:e.seq*10+index},direction);
-        });
-        this.traceIndex++;continue;
-      }
-      const trace=this.tracers[this.traceIndex++%this.tracers.length], line=trace.mesh;
-      pose.set(e.x,e.y,e.z);endpoint.set(e.ex,e.ey,e.ez);
-      direction.copy(endpoint).sub(pose);
-      const len=direction.length();
       const hit=events[i+1]?.type==='hit'&&events[i+1].actor===e.actor?events[i+1]:null;
-      const target=hit&&game.players.find(p=>p.id===hit.target);
-      const landed=!hit&&len>.02&&this.marks.add(this.map,e,direction.clone().normalize());
-      if(len>.38){
-        direction.multiplyScalar(1/len);
-        pose.addScaledVector(direction,Math.min(mine?1.3:.57,len*.35));
-        if(mine)pose.y-=.105;
-        line.position.copy(pose).lerp(endpoint,.5);
-        direction.copy(endpoint).sub(pose);const length=direction.length();
-        line.quaternion.setFromUnitVectors(vertical,direction.normalize());
-        const radius=e.weapon==='sniper'?.021:.013;line.scale.set(radius,length,radius);
-        line.material.color.setHex(mine?0xffeba4:0xffa77a);
-        trace.ttl=.085;line.visible=true;
-      }
-      if(landed||hit)this.burst(e.ex,e.ey,e.ez,target?teamLights[target.team]:0xffe5af,hit?.14:.092,hit?.16:.085);
+      this.shotsThisFrame.push({event:e,mine,hit});
     }
     this.marks.step(dt);
     for(const tracer of this.tracers)if(tracer.ttl>0) {
-      tracer.ttl=Math.max(0,tracer.ttl-dt*.85);tracer.mesh.visible=tracer.ttl>0;tracer.mesh.material.opacity=tracer.ttl/.085*.8;
+      tracer.ttl=Math.max(0,tracer.ttl-shotDt);tracer.mesh.visible=tracer.ttl>0;
     }
     for(const particle of this.spark)if(particle.ttl>0) {
       particle.ttl=Math.max(0,particle.ttl-dt);particle.mesh.visible=particle.ttl>0;
       particle.mesh.position.addScaledVector(particle.velocity,dt);
       if(particle.velocity.lengthSq()>.00001)particle.velocity.y-=4.2*dt;
       particle.mesh.scale.setScalar(particle.size*(particle.ttl/particle.life));
+    }
+  }
+  clearShotEffects(){
+    this.clearRemoteFlashes();this.shotTrails.clear();this.shotsThisFrame.length=0;
+    for(const t of this.tracers){t.ttl=0;t.mesh.visible=false;}
+  }
+
+  renderShots(game,focus,cam){
+    for(const {event:e,mine,hit} of this.shotsThisFrame){
+      const actor=game.players.find(p=>p.id===e.actor);
+      const held=mine ? focus.alive&&focus.active===e.weapon : this.remoteMuzzle(e.actor,e.weapon,this.actorMuzzle);
+      let origin=e;
+      endpoint.set(e.ex,e.ey,e.ez);
+      if(held&&!e.blocked){
+        const eye=mine?cam.position:{x:actor.x,y:actor.y+eyeHeight(actor),z:actor.z};
+        const tip=mine?this.viewMuzzle:this.actorMuzzle;
+        const clipped=clipBarrelOrigin(eye,tip,this.map);
+        if(mine){
+          const point=nearestShotEnd(e,eye);
+          origin=boundTracerOrigin(clipped,{x:point.ex,y:point.ey,z:point.ez},eye);
+        }else origin=clipped;
+        if(mine&&clipped.blocked){this.flash.visible=false;this.flashTime=0;}
+        if(!mine&&!clipped.blocked)this.flashRemote(e.actor,e.weapon,e.seq,clipped);
+      }
+      if(e.weapon==='shotgun'&&!e.blocked){
+        const trails=this.shotTrails.add(e,mine,origin,this.map);
+        trails.forEach((trail,index)=>{
+          direction.set(trail.dx,trail.dy,trail.dz).normalize();
+          trail.contact=!!trail.target||this.marks.add(this.map,{...trail,weapon:'shotgun',seq:e.seq*10+index},direction);
+        });
+        this.traceIndex++;continue;
+      }
+      direction.set(e.ex-e.x,e.ey-e.y,e.ez-e.z).normalize();
+      const landed=!hit&&this.marks.add(this.map,e,direction);
+      if(!e.blocked){
+        const end=visibleTraceEnd(origin,endpoint,this.map);
+        const t=this.tracers[this.traceIndex++%this.tracers.length];
+        t.start.set(origin.x,origin.y,origin.z);t.delta.set(end.x,end.y,end.z).sub(t.start);
+        t.length=t.delta.length();t.weapon=e.weapon;t.ttl=t.length>.012?SHOT_TRAIL_LIFE:0;
+        t.mesh.visible=t.ttl>0;t.mesh.material.color.setHex(mine?0xffdf9e:0xffad7b);
+        if(t.ttl)t.mesh.quaternion.setFromUnitVectors(vertical,direction.copy(t.delta).normalize());
+      }
+      const target=hit&&game.players.find(p=>p.id===hit.target);
+      if(landed||hit)this.burst(e.ex,e.ey,e.ez,target?teamLights[target.team]:0xffe5af,hit?.14:.092,hit?.16:.085);
+    }
+    const pixel=2*Math.tan(cam.fov*PI/360)/this.res.h;
+    for(const t of this.tracers){
+      if(t.ttl<=0)continue;
+      const span=singleShotSpan(t.length,SHOT_TRAIL_LIFE-t.ttl,t.weapon);
+      t.mesh.position.copy(t.start).addScaledVector(t.delta,(span.tail+span.head)*.5);
+      const radius=Math.max(t.weapon==='sniper'?.008:.005,cam.position.distanceTo(t.mesh.position)*pixel*.55);
+      t.mesh.scale.set(radius,(span.head-span.tail)*t.length,radius);
+      t.mesh.material.opacity=span.alpha;
     }
   }
   updateModels(players,focusId,dt) {
@@ -648,7 +732,7 @@ export class ArenaRenderer {
   }
   lobby(t) {
     this.meleeAge=.55;this.meleeSwings.clear();
-    this.shotTrails.clear();
+    this.clearShotEffects();
     if(this.marks.mesh.visible)this.marks.clear();
     for(const plate of this.plates.values())plate.visible=false;
     for(const a of this.models.values()){a.group.visible=false;a.shadow.visible=false;a.wasAlive=false;}
@@ -705,8 +789,8 @@ export class ArenaRenderer {
     const held=canAim(focus,playerView?view.ads??focus.ads:focus.ads);
     const age=this.shotWeapon===focus.active ? this.shotAge : Infinity;
     const ads=scopeAfterShot(focus.active,held,age);
-    this.scopeActive=ads && focus.active==='sniper';
     this.aim=first?Number(ads):approachAim(this.aim,ads,dt);
+    this.scopeActive=sniperScopeVisible(focus.active,this.aim,ads);
     const height=eyeHeight(focus);
     this.eye=first||playerView?height:damp(this.eye,height,19,dt);
     const move=Math.min((focus.speed||0)/5.4,1),slide=focus.slide>0;
@@ -755,11 +839,11 @@ export class ArenaRenderer {
       this.gunRig.rotation.z+=.32*reloadWeight-.09*cycle.stroke;
     }else if(sniper){
       // Roll the long receiver toward the viewer during the bolt cycle.
-      this.gunRig.position.x+=.012*hip-.060*cycle.grasp-.084*reloadWeight;
+      this.gunRig.position.x+=.035*hip-.074*cycle.grasp-.084*reloadWeight;
       this.gunRig.position.y+=.061*reloadWeight-.025*cycle.grasp;
-      this.gunRig.position.z+=.088*cycle.grasp+.063*this.recoil;
-      this.gunRig.rotation.x+=.066*this.recoil-.085*cycle.stroke;
-      this.gunRig.rotation.y+=.10*hip-.18*cycle.grasp-.11*reloadWeight;
+      this.gunRig.position.z+=.066*cycle.grasp+.092*this.recoil;
+      this.gunRig.rotation.x+=.082*this.recoil-.060*cycle.stroke;
+      this.gunRig.rotation.y+=.13*hip-.20*cycle.grasp-.11*reloadWeight+.020*this.recoil;
       this.gunRig.rotation.z-=.33*cycle.grasp+.73*reloadWeight;
       // Shoulders stay below the camera when the rifle lifts for a reload.
       placeSleeve(weapon,weapon.userData.support,leftShoulder);
@@ -776,18 +860,19 @@ export class ArenaRenderer {
       this.knifeArm.quaternion.setFromUnitVectors(vertical,direction.normalize());this.knifeArm.scale.set(1,armLength,1);
     }
     this.knifeArm.visible=key==='knife';
-    this.flash.position.set(0,fit.muzzleY,fit.muzzle-.036);this.flash.scale.setScalar(fit.flash);this.flash.visible=key!=='knife'&&this.flashTime>0;
+    this.flash.position.set(fit.muzzleX??0,fit.muzzleY,fit.muzzle);this.flash.scale.setScalar(fit.flash);this.flash.visible=key!=='knife'&&this.flashTime>0;
     this.flash.rotation.z=this.traceIndex*1.9;
     this.ring.material.opacity=game.phase==='overtime'?.70+.19*Math.sin(t*5):.32;
     this.ring.material.color.setHex(game.phase==='overtime'&&game.capture?.team!==null?teamLights[game.capture?.team]||0xffdf78:0xffd77b);
-    cam.updateMatrixWorld();this.flash.getWorldPosition(pose);
+    cam.updateMatrixWorld();this.flash.getWorldPosition(this.viewMuzzle);
     // Match the viewmodel's lens so the fan leaves the visible barrel, even in ADS.
     const lens=Math.tan(cam.fov*PI/360)/Math.tan(this.gunCamera.fov*PI/360);
-    pose.x*=lens;pose.y*=lens;pose.applyQuaternion(cam.quaternion).add(cam.position);
-    this.shotTrails.draw(cam,this.res.h,pose);
+    this.viewMuzzle.x*=lens;this.viewMuzzle.y*=lens;this.viewMuzzle.applyQuaternion(cam.quaternion).add(cam.position);
+    this.renderShots(game,focus,cam);
+    this.shotTrails.draw(cam,this.res.h);
     this.gl.clear();this.gl.render(this.scene,cam);
     this.gl.clearDepth();
     // High magnification is a clear center view; the DOM crosshair remains visible.
-    if(!(sniper&&ads))this.gl.render(this.gunScene,this.gunCamera);
+    if(!this.scopeActive)this.gl.render(this.gunScene,this.gunCamera);
   }
 }

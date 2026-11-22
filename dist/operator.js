@@ -1,6 +1,6 @@
 import * as T from './assets/three.module.min.js';
 import { clone } from './assets/SkeletonUtils.js';
-import { blasterMesh } from './blaster.js';
+import { blasterMesh, gunFit } from './blaster.js';
 import { PRIMARY_WEAPONS } from './balance.js';
 import { knifeMesh,knifePose } from './knife.js';
 
@@ -22,6 +22,22 @@ export const operatorAvailable=(team)=>sources[team]!==null;
 const handPoint=new T.Vector3();
 const gripOffset=new T.Vector3(),aimAxis=new T.Vector3(1,0,0);
 const groupRotation=new T.Quaternion(),parentRotation=new T.Quaternion(),aimRotation=new T.Quaternion(),localAim=new T.Quaternion();
+const barrelForward=new T.Vector3(0,0,-1),barrelDirection=new T.Vector3();
+
+// Read the displayed prop, including its grip, animation, stance, and interpolated
+// actor transform. This helper never substitutes the network eye/shot position.
+export function heldMuzzleWorld(held,weapon,out,rotation){
+ const fit=gunFit[weapon];
+ if(!held?.visible||!held.parent||!fit)return false;
+ held.updateWorldMatrix(true,false);
+ out.set(fit.muzzleX||0,fit.muzzleY,fit.muzzle).applyMatrix4(held.matrixWorld);
+ if(!Number.isFinite(out.x+out.y+out.z))return false;
+ if(rotation){
+   barrelDirection.copy(barrelForward).transformDirection(held.matrixWorld);
+   rotation.setFromUnitVectors(barrelForward,barrelDirection);
+ }
+ return true;
+}
 export function createOperator(team){
  const source=sources[team];
  if(!source)return null;

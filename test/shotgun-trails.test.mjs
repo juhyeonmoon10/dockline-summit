@@ -38,7 +38,7 @@ test('one shotgun shell reports all ten resolved pellet endpoints and their actu
       assert.ok(Math.abs(pellet.ez-(target.z+.14))<1e-8,'trail ends on the dummy front face');
     }
     const expected=Math.round(landed.reduce((sum,pellet)=>sum+impactDamage(WEAPONS.shotgun,
-      Math.hypot(pellet.ex-shot.x,pellet.ey-shot.y,pellet.ez-shot.z),false),0)*100)/100;
+      Math.hypot(pellet.ex-player.x,pellet.ey-player.y-eyeHeight(player),pellet.ez-player.z),false),0)*100)/100;
     const hit=game.events.find(event=>event.type==='hit'&&event.target===target.id);
     assert.equal(hit.damage,expected,'visible pellet endpoints match the damage calculation');
     assert.equal(target.hp,Math.round((MAX_HP-expected)*100)/100);
