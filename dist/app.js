@@ -314,7 +314,9 @@ function currentInput(){
 }
 function aim(dx,dy){
   if(!Number.isFinite(dx)||Math.abs(dx)>450||!Number.isFinite(dy)||Math.abs(dy)>450)return;
-  const scale=.00225*sensitivity*(aiming()?(watchPlayer()?.active==='sniper'?.31:.58):1);
+  const sniper=watchPlayer()?.active==='sniper';
+  const zoomed=sniper ? aiming()&&renderer?.scopeActive : aiming();
+  const scale=.00225*sensitivity*(zoomed?(sniper?.31:.58):1);
   yaw+=dx*scale;pitch=clamp(pitch-dy*scale,-1.40,1.40);
 }
 function bindCanvas(){
@@ -400,7 +402,7 @@ function frame(ms){
     try{renderer.draw(visual,selfId,{lobby:false,ads:watch?!!p?.ads:aiming(),quality,yaw:watch?p?.yaw:yaw,pitch:watch?p?.pitch:pitch,spectatorId:watch?p?.id:undefined,t,dt});}
     catch(err){console.error(err);if(!(renderer instanceof LiteRenderer))switchToLite();else throw err;}
     feedback.sight.hidden=!p?.alive||game.phase==='between';
-    if(p)feedback.updateSight(p,canAim(p,watch?p.ads:ads&&slot!==3),renderer.viewFov);
+    if(p)feedback.updateSight(p,p.active==='sniper'?renderer.scopeActive:canAim(p,watch?p.ads:ads&&slot!==3),renderer.viewFov);
     feedback.frame(t,watch?p?.yaw:yaw);
     if(ms-hudStamp>70||firstFrame){showHUD(t);hudStamp=ms;firstFrame=false;}
     if(game.phase==='end'&&!lastResult)results();

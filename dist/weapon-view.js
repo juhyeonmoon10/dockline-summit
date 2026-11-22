@@ -19,6 +19,16 @@ export function approachAim(previous, aimed, dt) {
 
 // Contact times drive the hands and the foley in both renderers.
 export const RELOAD_CONTACT = Object.freeze({release:.20, seat:.67, settle:.84, shell:.54});
+export const SNIPER_RELOAD_CONTACT = Object.freeze({release:.19, seat:.63, settle:.86, empty:.93});
+export const SHOT_MECHANIC = Object.freeze({
+  shotgun:Object.freeze({open:.20, close:.40}),
+  sniper:Object.freeze({open:.29, close:.72}),
+});
+export const SNIPER_SCOPE_RETURN = .90;
+
+export function scopeAfterShot(weapon, held, age) {
+  return Boolean(held && (weapon !== 'sniper' || age >= SNIPER_SCOPE_RETURN));
+}
 
 function ease(start, end, time) {
   const u = Math.max(0, Math.min(1, (time - start) / (end - start)));
@@ -29,18 +39,54 @@ export function reloadPose(player, weapon) {
   const duration = player.reloadDuration || WEAPONS[weapon]?.reload;
   const t = player.reload > 0 && duration ? 1 - player.reload / duration : 0;
   const shell = WEAPONS[weapon]?.shellReload;
-  const tilt = ease(0, .20, t) * (1 - ease(.71, 1, t));
-  const reach = ease(.025, shell ? .31 : RELOAD_CONTACT.release, t) * (1 - ease(.72, .96, t));
+  const marks = weapon === 'sniper' ? SNIPER_RELOAD_CONTACT : RELOAD_CONTACT;
+  // Hold the gun across the chest between rounds of a continuous shell reload.
+  const stayUp = shell && player.reload>0 && player.ammo+1<WEAPONS.shotgun.mag && player.reserve!==1;
+  const raised = shell && player.reload>0 && player.shellLoop ? 1 : ease(0, shell ? .15 : .20, t);
+  const tilt = raised * (stayUp ? 1 : 1-ease(shell ? .76 : marks.settle-.13, 1, t));
+  const reach = ease(.025, shell ? .31 : marks.release, t) * (1 - ease(.72, .96, t));
   const travel = shell
     ? ease(.12, .32, t) * (1 - ease(.32, RELOAD_CONTACT.shell, t))
-    : ease(RELOAD_CONTACT.release, .41, t) * (1 - ease(.49, RELOAD_CONTACT.seat, t));
-  const contact = shell ? RELOAD_CONTACT.shell : RELOAD_CONTACT.seat;
+    : ease(marks.release, .41, t) * (1 - ease(.49, marks.seat, t));
+  const contact = shell ? RELOAD_CONTACT.shell : marks.seat;
   const bump = ease(contact - .025, contact, t) * (1 - ease(contact, contact + .10, t));
   return {tilt, reach, travel, bump};
 }
 
-// An immediate punch, a small follow-through, then rest. Independent of render FPS.
-export function shotResponse(age) {
-  if (age >= .28) return 0;
-  return Math.exp(-age * 18) * (Math.cos(age * 21) + .28 * Math.sin(age * 21));
+// Stroke peaks when the opening sound lands, then returns on the closing sound.
+const restingAction = Object.freeze({stroke:0, lift:0, grasp:0});
+export function shotCycle(weapon, age) {
+  const marks = SHOT_MECHANIC[weapon];
+  if (!marks || age >= marks.close+.13) return restingAction;
+  const sniper = weapon === 'sniper';
+  const stroke = ease(sniper ? .18 : .085, marks.open, age) * (1-ease(sniper ? .53 : .26, marks.close, age));
+  const lift = sniper ? ease(.09,.19,age)*(1-ease(.67,marks.close,age)) : 0;
+  const grasp = sniper ? ease(.025,.145,age)*(1-ease(marks.close,marks.close+.13,age)) : stroke;
+  return {stroke,lift,grasp};
+}
+
+export function emptySniperBolt(player) {
+  if (!player.reload || !(player.reloadDuration > WEAPONS.sniper.reload+.01)) return 0;
+  const t = 1-player.reload/player.reloadDuration;
+  return ease(.71,.81,t)*(1-ease(.86,SNIPER_RELOAD_CONTACT.empty,t));
+}
+
+// Envelope values are in seconds so recoil retains its shape on a slow display.
+const impulse = {
+  rifle:   {damping:18, frequency:21, follow:.28, end:.28, flash:.027},
+  smg:     {damping:25, frequency:29, follow:.18, end:.20, flash:.023},
+  burst:   {damping:22, frequency:26, follow:.22, end:.23, flash:.026},
+  marksman:{damping:16, frequency:22, follow:.18, end:.33, flash:.031},
+  lmg:     {damping:15, frequency:18, follow:.26, end:.35, flash:.031},
+  pistol:  {damping:21, frequency:32, follow:.20, end:.25, flash:.024},
+  shotgun: {damping:13, frequency:22, follow:.32, end:.44, flash:.049},
+  sniper:  {damping:11, frequency:17, follow:.24, end:.52, flash:.042},
+};
+export function shotResponse(age, weapon='rifle') {
+  const {damping,frequency,follow,end} = impulse[weapon] ?? impulse.rifle;
+  if (age >= end) return 0;
+  return Math.exp(-age*damping)*(Math.cos(age*frequency)+follow*Math.sin(age*frequency));
+}
+export function shotFlashDuration(weapon) {
+  return (impulse[weapon] ?? impulse.rifle).flash;
 }

@@ -1,14 +1,14 @@
-import { RELOAD_CONTACT } from './weapon-view.js';
+import { RELOAD_CONTACT, SHOT_MECHANIC, SNIPER_RELOAD_CONTACT } from './weapon-view.js';
 
 const guns={
-  rifle:{length:.36,hold:.025,decay:.080,body:.12,frequency:155,volume:.72,echo:.06},
-  pistol:{length:.26,hold:.016,decay:.045,body:.08,frequency:190,volume:.60,echo:.025},
-  shotgun:{length:.66,hold:.060,decay:.140,body:.18,frequency:105,volume:.76,echo:.10},
-  sniper:{length:.82,hold:.025,decay:.180,body:.14,frequency:125,volume:.72,echo:.14},
-  smg:{source:'pistol',length:.18,hold:.010,decay:.032,body:.075,frequency:245,volume:.48,echo:.018,rate:1.18},
-  burst:{source:'rifle',length:.27,hold:.018,decay:.047,body:.13,frequency:195,volume:.57,echo:.038,rate:1.09},
-  marksman:{source:'sniper',length:.54,hold:.014,decay:.103,body:.13,frequency:168,volume:.65,echo:.092,rate:1.12},
-  lmg:{source:'rifle',length:.36,hold:.036,decay:.070,body:.19,frequency:92,volume:.64,echo:.044,rate:.86}
+  rifle:{length:.34,hold:.018,decay:.064,body:.11,frequency:158,volume:.71,echo:.055,tail:.11,rate:1,foley:1},
+  pistol:{length:.23,hold:.012,decay:.040,body:.075,frequency:205,volume:.61,echo:.025,tail:.07,rate:1,foley:1.25},
+  shotgun:{length:.64,hold:.015,decay:.044,body:.22,frequency:96,volume:.78,echo:.15,tail:.18,rate:.96,foley:.90,onset:.12},
+  sniper:{length:1.12,hold:.016,decay:.090,body:.15,frequency:128,volume:.75,echo:.24,tail:.36,rate:.97,foley:.90},
+  smg:{source:'pistol',length:.17,hold:.006,decay:.024,body:.055,frequency:278,volume:.48,echo:.018,tail:.05,rate:1.29,foley:1.38},
+  burst:{source:'rifle',length:.26,hold:.010,decay:.040,body:.12,frequency:205,volume:.59,echo:.045,tail:.085,rate:1.12,foley:1.12},
+  marksman:{source:'sniper',length:.48,hold:.011,decay:.062,body:.12,frequency:177,volume:.66,echo:.12,tail:.16,rate:1.14,foley:1.04},
+  lmg:{source:'rifle',length:.38,hold:.025,decay:.080,body:.20,frequency:87,volume:.65,echo:.06,tail:.12,rate:.81,foley:.78}
 };
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 function mono(buffer){
@@ -19,17 +19,19 @@ function mono(buffer){
   }
   return data;
 }
-// Bake each report once: immediate attack, a short body, and quiet outdoor reflections.
+// Bake once at load time. Direct report and diffuse reflections share one mono
+// voice; distant players retain the same weapon identity without a sample swap.
 function gunBuffer(ctx,source,profile){
   const input=mono(source),rate=source.sampleRate;
   let peak=0;for(const v of input)peak=Math.max(peak,Math.abs(v));
-  let start=input.findIndex(v=>Math.abs(v)>=peak*.04);
+  let start=input.findIndex(v=>Math.abs(v)>=peak*(profile.onset||.04));
   start=Math.max(0,start-Math.round(rate*.001));
   const buffer=ctx.createBuffer(1,Math.ceil(profile.length*rate),rate),out=buffer.getChannelData(0);
   const gain=.70/(peak||1),hp=Math.exp(-2*Math.PI*38/rate);
   let previous=0,filtered=0,phase=0;
   for(let i=0;i<out.length;i++){
-    const t=i/rate,raw=(input[start+i]||0)*gain;
+    const t=i/rate,index=start+i*profile.rate,whole=Math.floor(index),mix=index-whole;
+    const raw=((input[whole]||0)*(1-mix)+(input[whole+1]||0)*mix)*gain;
     filtered=hp*(filtered+raw-previous);previous=raw;
     const envelope=Math.exp(-Math.max(0,t-profile.hold)/profile.decay);
     phase+=2*Math.PI*profile.frequency*(.45+.55*Math.exp(-t/.025))/rate;
@@ -37,10 +39,24 @@ function gunBuffer(ctx,source,profile){
     const fade=Math.min(1,t/.0008,(out.length-1-i)/(rate*.012));
     out[i]=(filtered*envelope+body)*Math.max(0,fade);
   }
-  const dry=out.slice();
-  for(const [seconds,level] of [[.075,profile.echo],[.137,profile.echo*.45]]){
-    const offset=Math.round(seconds*rate);
-    for(let i=offset;i<out.length;i++)out[i]+=dry[i-offset]*level;
+  const dry=out.slice(),reflection=new Float32Array(out.length);
+  // Unequal delays and low-pass diffusion avoid a repeated gunshot/slapback.
+  for(const [seconds,level] of [[.047,1],[.083,.71],[.139,.49],[.223,.28],[.347,.13]]){
+    const offset=Math.round(seconds*rate);let low=0;
+    const smoothing=1-Math.exp(-2*Math.PI*2400/rate);
+    for(let i=offset;i<out.length;i++){
+      low+=(dry[i-offset]-low)*smoothing;
+      reflection[i]+=low*level*profile.echo;
+    }
+  }
+  let seed=83621,tailLow=0,tailHigh=0;
+  const tailStart=.035;
+  for(let i=0;i<out.length;i++){
+    const t=i/rate;
+    seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+    tailLow+=(seed/2147483648-1-tailLow)*.13;tailHigh+=(tailLow-tailHigh)*.018;
+    const envelope=t<tailStart?0:(1-Math.exp(-(t-tailStart)/.012))*Math.exp(-(t-tailStart)/profile.tail);
+    out[i]+=(reflection[i]+(tailLow-tailHigh)*profile.echo*.28*envelope)*Math.min(1,(out.length-1-i)/(rate*.03));
   }
   peak=0;for(const v of out)peak=Math.max(peak,Math.abs(v));
   if(peak>.86)for(let i=0;i<out.length;i++)out[i]*=.86/peak;
@@ -53,6 +69,43 @@ function clip(ctx,source,from=0,duration=source.duration,level=.65){
   let peak=0;for(let i=0;i<count;i++)peak=Math.max(peak,Math.abs(input[start+i]||0));
   const gain=Math.min(2,level/(peak||1));
   for(let i=0;i<count;i++)out[i]=(input[start+i]||0)*gain*Math.min(1,i/(rate*.002),(count-1-i)/(rate*.012));
+  return buffer;
+}
+
+// Original, deterministic mechanical foley layered with a short CC0 reload
+// contact. The click is at buffer start, so it follows the visible contact.
+const mechanisms={
+  pumpOpen:{duration:.16,frequency:520,grit:.42,decay:.032,drag:.12,seed:3101},
+  pumpClose:{duration:.12,frequency:178,grit:.23,decay:.025,drag:.035,seed:4102},
+  boltOpen:{duration:.13,frequency:1020,grit:.28,decay:.019,drag:.095,seed:5123},
+  boltClose:{duration:.12,frequency:322,grit:.20,decay:.022,drag:.028,seed:6124},
+  magOut:{duration:.12,frequency:470,grit:.16,decay:.021,drag:.065,seed:7125},
+  magSeat:{duration:.10,frequency:210,grit:.20,decay:.019,drag:.025,seed:8126},
+  settle:{duration:.075,frequency:680,grit:.13,decay:.012,drag:.020,seed:9127},
+  shell:{duration:.11,frequency:760,grit:.17,decay:.018,drag:.045,seed:1128}
+};
+function mechanismBuffer(ctx,kind,recording){
+  const p=mechanisms[kind],rate=ctx.sampleRate,length=Math.ceil(p.duration*rate);
+  const buffer=ctx.createBuffer(1,length,rate),out=buffer.getChannelData(0);
+  const recorded=recording?mono(recording):null;
+  let onset=0,recordedPeak=0;
+  if(recorded){
+    for(const v of recorded)recordedPeak=Math.max(recordedPeak,Math.abs(v));
+    onset=Math.max(0,recorded.findIndex(v=>Math.abs(v)>=recordedPeak*.12)-Math.round(rate*.0005));
+  }
+  let seed=p.seed,low=0,peak=0;
+  for(let i=0;i<length;i++){
+    const t=i/rate,u=t/p.duration;
+    seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+    const noise=seed/2147483648-1;low+=(noise-low)*.18;
+    const attack=1-Math.exp(-t/.00045),impact=Math.exp(-t/p.decay);
+    const metal=Math.sin(2*Math.PI*p.frequency*t)*.30+Math.sin(2*Math.PI*p.frequency*2.71*t)*.09;
+    const scrape=(noise-low)*p.grit*Math.exp(-t/p.drag)*(.45+.55*Math.sin(Math.PI*u));
+    const real=(recorded?.[onset+i]||0)/(recordedPeak||1)*.21*Math.exp(-t/.035);
+    out[i]=(metal*impact+scrape+real)*attack*Math.min(1,(p.duration-t)/.014);
+    peak=Math.max(peak,Math.abs(out[i]));
+  }
+  if(peak)for(let i=0;i<length;i++)out[i]*=.60/peak;
   return buffer;
 }
 
@@ -114,7 +167,7 @@ export class ArenaSound {
           const queued=this.pending.splice(0);
           if(this.enabled)for(const cue of queued)if(performance.now()-cue.at<350)this.playEvent(cue.event,cue.actor,cue.view);
         });
-      }else if(this.ctx.state==='suspended')this.ctx.resume().catch(()=>{});
+      }else if(this.ctx.state==='suspended')return Promise.all([this.ready,this.ctx.resume().catch(()=>{})]);
       return this.ready;
     }catch{return Promise.resolve();}
   }
@@ -130,10 +183,11 @@ export class ArenaSound {
             if(profile.source===id)this.buffers.set(variant,gunBuffer(ctx,decoded,profile));
           }
           if(id==='reload'){
-            this.buffers.set('magOut',clip(ctx,decoded,.100,.34,.48));
-            this.buffers.set('magSeat',clip(ctx,decoded,.603,.21,.60));
-            this.buffers.set('rack',clip(ctx,decoded,1.012,.39,.58));
-            this.buffers.set('shell',clip(ctx,decoded,.100,.20,.42));
+            const release=clip(ctx,decoded,.100,.25,.48),seat=clip(ctx,decoded,.603,.21,.60),rack=clip(ctx,decoded,1.012,.39,.58);
+            for(const kind of Object.keys(mechanisms)){
+              const recording=kind==='magOut'||kind==='shell'?release:kind==='magSeat'?seat:rack;
+              this.buffers.set(kind,mechanismBuffer(ctx,kind,recording));
+            }
           }
         }catch(error){console.warn('효과음 해석 실패',id,error);}
       }));
@@ -166,10 +220,11 @@ export class ArenaSound {
       tail.connect(stereo);tail=stereo;nodes.push(stereo);
     }
     tail.connect(this.bus);
-    const voice={source,gain,priority,actor:options.actor,weapon:options.weapon,reload:options.reload,mechanic:options.mechanic};
+    const at=ctx.currentTime+delay;
+    const voice={source,gain,priority,actor:options.actor,weapon:options.weapon,reload:options.reload,mechanic:options.mechanic,reloadEnd:options.reloadEnd,at};
     this.voices.add(voice);
     source.onended=()=>{this.voices.delete(voice);for(const node of nodes)node.disconnect();};
-    source.start(ctx.currentTime+delay);return gain;
+    source.start(at);return gain;
   }
   sample(id,volume=.5,pan=0,speed=1,delay=0,options={}){
     const ctx=this.ctx,buffer=this.buffers.get(id);
@@ -206,32 +261,50 @@ export class ArenaSound {
     if(event.type==='meleeImpact')this.sample(event.target?'bladeHit':'bladeWall',.44*attenuation,position,.98+(event.seq%3)*.025,0,options);
     if(event.type==='shot'&&guns[event.weapon]){
       const profile=guns[event.weapon],delay=own?0:Math.min(.12,dist/343);
-      this.sample(event.weapon,profile.volume*attenuation,position,(profile.rate??1)*(.985+Math.random()*.030),delay,options);
-      if(event.weapon==='shotgun'||event.weapon==='sniper')this.sample('rack',.20*attenuation,position,event.weapon==='shotgun'?1.18:.82,delay+.22,{...options,priority:1,mechanic:true,actor:actor.id,weapon:event.weapon});
+      this.sample(event.weapon,profile.volume*attenuation,position,.988+Math.random()*.024,delay,options);
+      // Do not leave a queued reload or previous cycle behind a new shot.
+      for(const voice of this.voices)if(voice.actor===actor.id&&(voice.reload||voice.mechanic))this.stop(voice);
+      const cycle=SHOT_MECHANIC[event.weapon];
+      if(cycle&&actor.alive&&actor.active===event.weapon){
+        const mechanicOptions={...options,priority:own?2:1,mechanic:true,actor:actor.id,weapon:event.weapon};
+        const pump=event.weapon==='shotgun';
+        this.sample(pump?'pumpOpen':'boltOpen',(pump?.29:.24)*attenuation,position,1,delay+cycle.open,mechanicOptions);
+        this.sample(pump?'pumpClose':'boltClose',(pump?.35:.29)*attenuation,position,1,delay+cycle.close,mechanicOptions);
+      }
     }
     if(event.type==='hit'&&own)this.note(event.headshot?1350:840,event.headshot?1760:1060,.035,.07);
     if(event.type==='kill'&&own){this.note(540,810,.09,.07);this.note(830,1010,.11,.09,.07);}
     if(event.type==='reload'){
-      for(const voice of this.voices)if(voice.reload&&voice.actor===actor.id)this.stop(voice);
+      for(const voice of this.voices)if((voice.reload||voice.mechanic)&&voice.actor===actor.id)this.stop(voice);
       if(!actor.alive||actor.active!==event.weapon||!(actor.reload>0))return;
-      const reloadOptions={...options,priority:own?2:1,reload:true,actor:actor.id,weapon:event.weapon};
+      const reloadOptions={...options,priority:own?2:1,reload:true,actor:actor.id,weapon:event.weapon,reloadEnd:this.ctx.currentTime+actor.reload};
       const duration=actor.reloadDuration||actor.reload;
-      const cue=(sample,phase,level)=>{
+      const speed=guns[event.weapon]?.foley||1;
+      const cue=(sample,phase,level,rate=speed)=>{
         const when=actor.reload-duration*(1-phase);
-        if(when>=-.035)this.sample(sample,level*attenuation,position,1,Math.max(0,when),reloadOptions);
+        if(when>=-.035)this.sample(sample,level*attenuation,position,rate,Math.max(0,when),reloadOptions);
       };
-      if(event.weapon==='shotgun')cue('shell',RELOAD_CONTACT.shell,.36);
+      if(event.weapon==='shotgun')cue('shell',RELOAD_CONTACT.shell,.39,1);
+      else if(event.weapon==='sniper'){
+        cue('magOut',SNIPER_RELOAD_CONTACT.release,.31);
+        cue('magSeat',SNIPER_RELOAD_CONTACT.seat,.42);
+        cue('settle',SNIPER_RELOAD_CONTACT.settle,.22);
+        if(actor.ammo===0)cue('boltClose',SNIPER_RELOAD_CONTACT.empty,.31,1);
+      }
       else{
         cue('magOut',RELOAD_CONTACT.release,.32);
         cue('magSeat',RELOAD_CONTACT.seat,.43);
-        cue('rack',RELOAD_CONTACT.settle,.22);
+        cue('settle',RELOAD_CONTACT.settle,event.weapon==='lmg'?.32:.22);
       }
     }
   }
   reconcile(game){
     for(const voice of this.voices)if(voice.reload||voice.mechanic){
       const actor=game.players.find(p=>p.id===voice.actor);
-      if(!actor?.alive||actor.active!==voice.weapon||(voice.reload&&actor.reload<=0))this.stop(voice);
+      // Natural completion may leave a few milliseconds of contact decay.
+      // Early cancellation, death or an equip change must silence it instead.
+      const canceled=voice.reload&&actor?.reload<=0&&this.ctx.currentTime<voice.reloadEnd-.08;
+      if(!actor?.alive||actor.active!==voice.weapon||canceled)this.stop(voice);
     }
   }
   steps(game,view,t){

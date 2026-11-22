@@ -119,12 +119,13 @@ function changeSlot(p, slot, now) {
   equipWeapon(p,next,now);
 }
 
-function beginReload(g, p) {
+function beginReload(g, p, continuingShells=false) {
   const w = WEAPONS[p.active];
   if (w.melee || p.reload > 0 || p.ammo >= w.mag || p.reserve === 0) return;
   memory(p).burstLeft = 0;
   p.reloadDuration = p.ammo===0 ? (w.emptyReload ?? w.reload) : w.reload;
   p.reload = p.reloadDuration;
+  if(w.shellReload)p.shellLoop=continuingShells;
   emit(g, 'reload', p.id, { weapon: p.active });
 }
 
@@ -143,7 +144,7 @@ function advanceReload(g, p, dt, firing) {
   if (p.reserve!==null) p.reserve -= count;
   p.reload = 0; p.reloadDuration = 0;
   if (w.shellReload && !firing && p.ammo<w.mag && p.reserve!==0) {
-    beginReload(g,p);
+    beginReload(g,p,true);
     p.reload += remaining; // Carry the unused part of this tick into the next shell.
   }
 }
