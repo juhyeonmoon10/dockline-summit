@@ -1,8 +1,8 @@
 import * as T from './assets/three.module.min.js';
-import { blasterMesh, gunFit } from './blaster.js';
+import { blasterMesh, gunFit, sniperContacts } from './blaster.js';
 import { PRIMARY_WEAPONS } from './balance.js';
 import { eyeHeight, WEAPONS } from './sim.js';
-import { approachAim, canAim, weaponFov, reloadPose, shotResponse, shotCycle, shotFlashDuration, scopeAfterShot, emptySniperBolt, RELOAD_CONTACT } from './weapon-view.js';
+import { approachAim, canAim, weaponFov, reloadPose, shotResponse, shotCycle, shotFlashDuration, scopeAfterShot, emptySniperBolt, emptySniperGrasp, RELOAD_CONTACT } from './weapon-view.js';
 import { makeYard, sky, Parts, glowMaterial } from './yard-art.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { PelletRenderer } from './pellet-render.js';
@@ -27,7 +27,7 @@ const magazineHandling={
   marksman:{drop:.21, side:-.075, turn:.21, roll:.47, center:-.008},
   lmg:     {drop:.17, side:-.158, turn:.49, roll:.55, center:-.025},
   pistol:  {drop:.14, side:-.032, turn:.09, roll:.51, center:-.068},
-  sniper:  {drop:.246,side:-.102, turn:.24, roll:.39, center:.042},
+  sniper:  {drop:.15, side:-.083, turn:.20, roll:.39, center:.042},
 };
 
 // Only place decals on the rendered area of a plane. The map's enclosing hit boundary
@@ -167,15 +167,85 @@ function glove(support,fit,handOnly=false) {
   group.add(parts.mesh());return group;
 }
 
+// The origin of each glove is a point on the surface it holds. Wrist and
+// sleeve are separate so reaching for the magazine never translates an elbow.
+function sniperGlove(front) {
+  const parts=new Parts(),hand=new T.Group(),side=front ? -1 : 1;
+  const cloth='#383d39',pads='#4a5048',seam='#282e2c';
+  pod(parts,side*.016,.001,.009,.049,.066,.098,cloth,-.17,0,side*.17);
+  pod(parts,side*.034,.005,.017,.018,.049,.064,pads,-.20,0,side*.14);
+  if(front){
+    // Four fingers curl under the fore-end. The thumb rests on the near face.
+    for(let i=0;i<4;i++){
+      const z=-.031+i*.021,short=i===3 ? .008 : 0;
+      pod(parts,-.010,-.015,z,.032,.035,.021,cloth,0,0,.42);
+      pod(parts,.014,-.017,z,.053-short,.021,.022,pads,0,0,.08);
+      pod(parts,.047-short,-.011,z,.026,.019,.020,cloth,0,0,.4);
+    }
+    pod(parts,-.013,.024,.010,.031,.039,.060,pads,-.50,-.12,.12);
+    pod(parts,-.004,.035,-.015,.021,.030,.048,cloth,-.28,-.15,.14);
+  }else{
+    // The rear glove wraps the upright grip, with a raised thumb and a
+    // separated top finger so its silhouette remains readable at the bolt.
+    for(let i=0;i<4;i++){
+      const y=.022-i*.016,z=-.026+i*.006;
+      pod(parts,.006,y,z,.045,.019,.031,cloth,-.15,-.30,0);
+      pod(parts,-.017,y-.004,z-.006,.026,.017,.023,pads,-.12,.30,0);
+    }
+    pod(parts,.007,.030,.026,.032,.034,.055,pads,-.51,.16,0);
+    pod(parts,-.004,.035,.014,.028,.023,.037,cloth,-.30,.33,0);
+  }
+  const wrist=new T.Vector3(side*.019,-.029,.056);
+  pod(parts,wrist.x,wrist.y,wrist.z,.070,.066,.077,seam,-.45,0,side*.13);
+  hand.add(parts.mesh());
+  const fabric=new Parts();
+  limb(fabric,[0,0,0],[0,.65,0],.068,.052,'#38433e');
+  limb(fabric,[0,.62,0],[0,.89,0],.054,.045,'#404a43');
+  limb(fabric,[0,.87,0],[0,1,0],.047,.035,'#313a34');
+  limb(fabric,[0,.79,0],[0,.82,0],.049,.048,'#51594d');
+  const sleeve=fabric.mesh();
+  hand.userData={wrist,sleeve,elbow:new T.Vector3()};
+  return hand;
+}
+
+const gripTarget=new T.Vector3(),wristAxis=new T.Vector3();
+const leftShoulder=new T.Vector3(-.25,-.43,.015),rightShoulder=new T.Vector3(.33,-.42,.015);
+function placeSleeve(gun,hand,shoulder) {
+  const {sleeve,elbow,wrist}=hand.userData;
+  gun.worldToLocal(elbow.copy(shoulder));
+  wristAxis.copy(wrist).applyQuaternion(hand.quaternion).add(hand.position).sub(elbow);
+  sleeve.position.copy(elbow);
+  sleeve.scale.y=wristAxis.length();
+  sleeve.quaternion.setFromUnitVectors(vertical,wristAxis.normalize());
+}
+
+function placeSniperHands(data,reach,grasp) {
+  const {support,strong,magazine,bolt,magGrip}=data;
+  // Both moving props are authored in the gun's local space. Transform their
+  // contact points after posing them, including their rotation on removal.
+  magazine.updateMatrix();bolt.updateMatrix();
+  gripTarget.copy(magGrip).applyMatrix4(magazine.matrix);
+  support.position.fromArray(sniperContacts.support).lerp(gripTarget,reach);
+  support.rotation.set(-.17*reach,-.12*reach,(.48+magazine.rotation.z)*reach);
+  gripTarget.fromArray(sniperContacts.bolt).applyMatrix4(bolt.matrix);
+  strong.position.fromArray(sniperContacts.grip).lerp(gripTarget,grasp);
+  // Move around the outside of the receiver while the right hand is in transit.
+  strong.position.x+=.042*4*grasp*(1-grasp);
+  strong.rotation.set(-.37*grasp,.20*grasp,-.46*grasp);
+}
+
 export function gunModel(type) {
   if(type==='knife'){
     const group=new T.Group(),body=knifeMesh(),strong=glove(false,knifeFit,true),support=new T.Group();
     group.add(body,strong,support);group.userData={fit:knifeFit,body,support};return group;
   }
   const group=new T.Group(),body=blasterMesh(type),fit=gunFit[type];
-  const strong=glove(false,fit),support=glove(true,fit);
+  const sniper=type==='sniper';
+  const strong=sniper ? sniperGlove(false) : glove(false,fit);
+  const support=sniper ? sniperGlove(true) : glove(true,fit);
   const magazine=body.getObjectByName('magazine');
-  const contact=magazine ? new T.Box3().setFromObject(magazine).getCenter(new T.Vector3()) : new T.Vector3(-.03,-.11,fit.support+.11);
+  const magBounds=magazine ? new T.Box3().setFromObject(magazine) : null;
+  const contact=magBounds ? magBounds.getCenter(new T.Vector3()) : new T.Vector3(-.03,-.11,fit.support+.11);
   let shell;
   if(type==='shotgun'){
     const prop=new Parts();
@@ -186,10 +256,17 @@ export function gunModel(type) {
   group.add(body,strong,support);
   group.userData={fit,body,strong,support,magazine,contact,shell,handling:magazineHandling[type],
     pump:body.getObjectByName('pump'),bolt:body.getObjectByName('bolt')};
+  if(sniper){
+    group.add(support.userData.sleeve,strong.userData.sleeve);
+    group.userData.magGrip=contact.clone();
+    group.userData.magGrip.x=magBounds.min.x+.002;
+    placeSniperHands(group.userData,0,0);
+    placeSleeve(group,support,leftShoulder);placeSleeve(group,strong,rightShoulder);
+  }
   return group;
 }
 
-function animateHands(gun,player,reload,cycle) {
+export function animateHands(gun,player,reload,cycle) {
   const {fit,strong,support,magazine,contact,shell,pump,bolt}=gun.userData;
   if(!strong)return;
   const pull=reload.travel,reach=reload.reach;
@@ -211,17 +288,17 @@ function animateHands(gun,player,reload,cycle) {
     magazine.position.set(side*pull,-drop*pull,.056*pull);
     magazine.rotation.z=pull*turn;
   }
+  if(bolt){
+    const empty=emptySniperBolt(player);
+    const lift=Math.max(cycle.lift,empty),stroke=Math.max(cycle.stroke,empty);
+    bolt.position.set(.006*lift,.025*lift,.115*stroke);
+    bolt.rotation.z=.14*lift;
+    placeSniperHands(gun.userData,reach,Math.max(cycle.grasp,emptySniperGrasp(player)));
+    return;
+  }
   support.position.set((contact.x+.025)*reach+side*pull,(contact.y+.042)*reach-drop*pull,
     (contact.z-fit.support)*reach+.056*pull);
   support.rotation.x=-.09*pull;
-  if(bolt){
-    const empty=emptySniperBolt(player);
-    const lift=Math.max(cycle.lift,empty),stroke=Math.max(cycle.stroke,empty),grasp=Math.max(cycle.grasp,empty);
-    bolt.position.set(.006*lift,.025*lift,.115*stroke);
-    bolt.rotation.z=.14*lift;
-    strong.position.set(.027*grasp,.137*grasp+.015*lift,-.14*grasp+.115*stroke);
-    strong.rotation.set(-.18*grasp,.11*lift,-.18*grasp);
-  }
 }
 
 function operatorTemplate(team) {
@@ -678,12 +755,15 @@ export class ArenaRenderer {
       this.gunRig.rotation.z+=.32*reloadWeight-.09*cycle.stroke;
     }else if(sniper){
       // Roll the long receiver toward the viewer during the bolt cycle.
-      this.gunRig.position.x-=.060*cycle.grasp+.084*reloadWeight;
-      this.gunRig.position.y-=.025*cycle.grasp;
-      this.gunRig.position.z+=.088*cycle.grasp+.063*this.recoil+.045*reloadWeight;
+      this.gunRig.position.x+=.012*hip-.060*cycle.grasp-.084*reloadWeight;
+      this.gunRig.position.y+=.061*reloadWeight-.025*cycle.grasp;
+      this.gunRig.position.z+=.088*cycle.grasp+.063*this.recoil;
       this.gunRig.rotation.x+=.066*this.recoil-.085*cycle.stroke;
-      this.gunRig.rotation.y-=.18*cycle.grasp+.11*reloadWeight;
+      this.gunRig.rotation.y+=.10*hip-.18*cycle.grasp-.11*reloadWeight;
       this.gunRig.rotation.z-=.33*cycle.grasp+.73*reloadWeight;
+      // Shoulders stay below the camera when the rifle lifts for a reload.
+      placeSleeve(weapon,weapon.userData.support,leftShoulder);
+      placeSleeve(weapon,weapon.userData.strong,rightShoulder);
     }
     if(key==='knife'){
       const cut=knifePose(this.meleeAge,this.meleeSide);

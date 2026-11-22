@@ -50,7 +50,7 @@ export async function bakeFieldViews(kind,options={}){
       sequences.fireADS=shots;
       sequences.loopStart=loads.filter(t=>t<.15);
       sequences.loopEnd=loads.filter(t=>t>.76);
-    }else if(kind==='sniper')sequences.empty=loads.filter(t=>t>.71&&t<.93);
+    }else if(kind==='sniper')sequences.empty=loads.filter(t=>t>=options.emptyStart&&t<1);
     const frameCount=Object.values(sequences).reduce((count,times)=>count+times.length,0);
     const [cx,cy,cw,ch]=options.crop,n=options.columns;
     const strideX=cw+4,strideY=ch+4;

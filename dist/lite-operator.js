@@ -16,7 +16,17 @@ export function decodeLiteOperator(buffer){
     clips[CLIPS[i]]={first:frames,length,seconds};frames+=length;
   }
   const positionsAt=(28+9*triangles+1)&~1,stride=(count+1)*3;
-  if(buffer.byteLength!==positionsAt+stride*frames*2)throw Error('Incomplete character atlas');
+  const positionsEnd=positionsAt+stride*frames*2;
+  if(buffer.byteLength<positionsEnd)throw Error('Incomplete character atlas');
+  let aimWeights=null,aimPivots=null;
+  if(buffer.byteLength>positionsEnd){
+    const extension=positionsEnd,weightsAt=extension+8,pivotsAt=(weightsAt+count+2)&~1;
+    if(buffer.byteLength<weightsAt||String.fromCharCode(...bytes.subarray(extension,extension+4))!=='ARM1'||
+      header.getUint16(extension+4,true)!==count+1||header.getUint16(extension+6,true)!==frames||
+      buffer.byteLength!==pivotsAt+frames*6)throw Error('Invalid character arm data');
+    aimWeights=new Uint8Array(buffer,weightsAt,count+1);
+    aimPivots=new Int16Array(buffer,pivotsAt,frames*3);
+  }
   const indices=new Uint16Array(buffer,28,triangles*3);
   for(const index of indices)if(index>=count)throw Error('Invalid character vertex');
   const colors=new Uint32Array(triangles*4),colorsAt=28+6*triangles;
@@ -25,7 +35,7 @@ export function decodeLiteOperator(buffer){
     const channel=n=>Math.min(255,Math.round((n*.96+8)*light));
     colors[t*4+shade]=((255<<24)|(channel(bytes[at+2])<<16)|(channel(bytes[at+1])<<8)|channel(bytes[at]))>>>0;
   }
-  return {count,indices,colors,clips,stride,positions:new Int16Array(buffer,positionsAt)};
+  return {count,indices,colors,clips,stride,positions:new Int16Array(buffer,positionsAt,stride*frames),aimWeights,aimPivots};
 }
 
 export function loadLiteOperators(){
@@ -41,6 +51,13 @@ export function loadLiteOperators(){
 }
 
 export function liteOperator(team){return teams[team===1?1:0];}
+
+export function operatorGrip(world,player){
+  const at=world.length-3,aim=player.active==='sniper';
+  const pitch=aim?Math.max(-.78,Math.min(.78,player.pitch||0)):0;
+  const offsetZ=.045*Math.sin(pitch),offsetY=.045*Math.cos(pitch);
+  return [world[at]-offsetZ*Math.sin(player.yaw),world[at+1]+offsetY,world[at+2]+offsetZ*Math.cos(player.yaw)];
+}
 
 export function posedOperator(model,player,clock,swing,state){
   const age=swing?clock-swing.at:Infinity;
@@ -58,12 +75,21 @@ export function posedOperator(model,player,clock,swing,state){
   const a=Math.floor(frame),b=loop?(a+1)%clip.length:Math.min(clip.length-1,a+1);
   const first=(clip.first+a)*model.stride,second=(clip.first+b)*model.stride;
   const weight=frame-a,positions=model.positions,cy=Math.cos(player.yaw),sy=Math.sin(player.yaw);
+  const aim=player.active==='sniper'&&model.aimWeights;
+  const pitch=aim?Math.max(-.78,Math.min(.78,player.pitch||0)):0,cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const pivotA=(clip.first+a)*3,pivotB=(clip.first+b)*3,pivots=model.aimPivots;
+  const pivotY=aim?(pivots[pivotA+1]+(pivots[pivotB+1]-pivots[pivotA+1])*weight)*.001:0;
+  const pivotZ=aim?(pivots[pivotA+2]+(pivots[pivotB+2]-pivots[pivotA+2])*weight)*.001:0;
   if(!state.world||state.world.length!==model.stride)state.world=new Float32Array(model.stride);
   const world=state.world;
   for(let i=0;i<model.stride;i+=3){
     const x=(positions[first+i]+(positions[second+i]-positions[first+i])*weight)*.001;
-    const y=(positions[first+i+1]+(positions[second+i+1]-positions[first+i+1])*weight)*.001;
-    const z=(positions[first+i+2]+(positions[second+i+2]-positions[first+i+2])*weight)*.001;
+    let y=(positions[first+i+1]+(positions[second+i+1]-positions[first+i+1])*weight)*.001;
+    let z=(positions[first+i+2]+(positions[second+i+2]-positions[first+i+2])*weight)*.001;
+    if(aim){
+      const influence=model.aimWeights[i/3]/255,dy=y-pivotY,dz=z-pivotZ;
+      y+=(dy*cp-dz*sp-dy)*influence;z+=(dy*sp+dz*cp-dz)*influence;
+    }
     world[i]=player.x+x*cy-z*sy;world[i+1]=player.y+y;world[i+2]=player.z+x*sy+z*cy;
   }
   return world;

@@ -1,7 +1,7 @@
 // Canvas software renderer for managed devices where Chrome cannot create a WebGL context.
 // Reciprocal-depth tests keep players, short cover and the aim point correctly aligned.
 import { eyeHeight, WEAPONS } from './sim.js';
-import { loadLiteOperators, liteOperator, posedOperator } from './lite-operator.js';
+import { loadLiteOperators, liteOperator, posedOperator, operatorGrip } from './lite-operator.js';
 import { approachAim, canAim, weaponFov, reloadPose, shotResponse, shotFlashDuration, scopeAfterShot } from './weapon-view.js';
 import { fieldViews } from './assets/field-frames.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
@@ -24,9 +24,9 @@ function closestFrame(times,time){
 }
 function fieldPose(p,t,aim,w,h,age,kick,atlas,motion){
   const entry=fieldViews[p.active];
-  if(!entry||!atlas?.naturalWidth)return null;
+  if(!entry||(!atlas?.naturalWidth&&!(entry.sheet&&motion?.naturalWidth)))return null;
   const loading=p.reload>0,cycle=!loading&&age>=0&&age<=entry.shotTimes?.at(-1),aimed=aim>=.5;
-  const animated=!!(motion?.naturalWidth&&(loading||cycle));
+  const animated=!!(motion?.naturalWidth&&(loading||cycle||!atlas?.naturalWidth));
   let sheet=atlas,sw=640,sh=360,sx=aimed?640:0,sy=entry.row*360,ox=0,oy=0;
   let muzzle=entry.muzzles[Number(aimed)];
   if(animated){
@@ -39,8 +39,9 @@ function fieldPose(p,t,aim,w,h,age,kick,atlas,motion){
       const endIndex=index-(times.length-entry.poses.loopEnd.length);
       if(endIndex>=0&&p.ammo+1<WEAPONS.shotgun.mag&&p.reserve!==1)frame=entry.poses.loopEnd[endIndex];
     }
-    if(loading&&p.active==='sniper'&&p.reloadDuration>WEAPONS.sniper.reload+.01&&times[index]>.71&&times[index]<.93){
-      frame=entry.poses.empty[index-times.indexOf(.71)-1];
+    if(loading&&p.active==='sniper'&&p.reloadDuration>WEAPONS.sniper.reload+.01){
+      const emptyIndex=index-times.indexOf(entry.emptyStart??.76);
+      frame=entry.poses.empty[emptyIndex]??frame;
     }
     [ox,oy,sw,sh]=entry.crop;
     sheet=motion;sx=frame[0]%entry.columns*(sw+4)+2;sy=Math.floor(frame[0]/entry.columns)*(sh+4)+2;
@@ -308,7 +309,7 @@ const carriedGuns={
 };
 
 function heldEquipment(dst,p,world,age){
-  const at=world.length-3,x=world[at],y=world[at+1]+.045,z=world[at+2];
+  const [x,y,z]=operatorGrip(world,p);
   const sy=Math.sin(p.yaw),cy=Math.cos(p.yaw);
   const knife=p.active==='knife',cut=knife?knifeMotion(age).cut:0;
   const angle=Math.max(-.78,Math.min(.78,p.pitch||0));
@@ -381,7 +382,7 @@ export class LiteRenderer {
     this.fieldAtlas=new Image();
     this.fieldAtlas.onerror=()=>{if(!this.arcadeAtlas.src)this.arcadeAtlas.src='./assets/arcade-views.png';};
     this.fieldAtlas.src='./assets/field-views.webp';
-    this.motionAtlas={};this.shotAge=Infinity;this.shotWeapon=null;this.scopeActive=false;
+    this.stillAtlases={};this.motionAtlas={};this.shotAge=Infinity;this.shotWeapon=null;this.scopeActive=false;
     this.trails=[];this.quality='auto';this.lastFrame=-1;this.lastGame=null;this.scale=1;
     this.pellets=Array.from({length:PELLET_CAPACITY},()=>({age:PELLET_LIFE}));this.pelletIndex=0;this.lastElapsed=-1;this.lastRound=null;
     this.dummyMeshes=new WeakMap();this.dummyHits=new Map();
@@ -423,13 +424,15 @@ export class LiteRenderer {
   }
   gunPose(p,t,kind=p.active){
     const aim=kind==='sniper'&&!this.scopeActive?0:this.aim,w=this.width,h=this.height;
-    if(fieldViews[kind]){
-      const motion=this.motionAtlas[fieldViews[kind].shotTimes?kind:'magazines'];
-      const pose=fieldPose(p,t,aim,w,h,this.shotWeapon===kind?this.shotAge:Infinity,this.recoil,this.fieldAtlas,motion);
+    const entry=fieldViews[kind];
+    if(entry){
+      const motion=this.motionAtlas[entry.shotTimes?kind:'magazines'],still=entry.sheet?this.stillAtlases[kind]:this.fieldAtlas;
+      const pose=fieldPose(p,t,aim,w,h,this.shotWeapon===kind?this.shotAge:Infinity,this.recoil,still,motion);
       if(pose)return pose;
+      if(entry.sheet&&(!still?.complete||!motion?.complete))return null;
     }
     const atlas=arcadeFrames[kind]?this.arcadeAtlas:this.blasterAtlas;
-    if(atlas.complete&&atlas.naturalWidth)return blasterPose(p,t,aim,w,h,this.recoil,kind,arcadeFrames[kind]||blasterFrames[kind]||blasterFrames.rifle,atlas);
+    if(!entry?.sheet&&atlas.complete&&atlas.naturalWidth)return blasterPose(p,t,aim,w,h,this.recoil,kind,arcadeFrames[kind]||blasterFrames[kind]||blasterFrames.rifle,atlas);
     const bob=p.speed>1?Math.sin(t*10)*.006*(1-.83*aim):0;
     return {x:w*(.57-.07*aim)+h*bob,y:h*(.64-.08*aim+this.recoil*.045+(p.reload>0?.17:0))};
   }
@@ -671,7 +674,10 @@ export class LiteRenderer {
     else this.shotAge+=frameTime;
     if(mode){
       if(fieldViews[p.active]&&p.active!==this.activeGun){
-        const special=Boolean(fieldViews[p.active].shotTimes),key=special?p.active:'magazines';
+        const entry=fieldViews[p.active],special=Boolean(entry.shotTimes),key=special?p.active:'magazines';
+        if(entry.sheet&&!this.stillAtlases[p.active]){
+          const image=new Image();image.src='./assets/'+entry.sheet;this.stillAtlases[p.active]=image;
+        }
         if(!this.motionAtlas[key]){
           const image=new Image();image.src='./assets/'+(special?p.active+'-motion':'field-reloads')+'.webp';this.motionAtlas[key]=image;
         }

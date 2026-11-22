@@ -44,7 +44,10 @@ export function reloadPose(player, weapon) {
   const stayUp = shell && player.reload>0 && player.ammo+1<WEAPONS.shotgun.mag && player.reserve!==1;
   const raised = shell && player.reload>0 && player.shellLoop ? 1 : ease(0, shell ? .15 : .20, t);
   const tilt = raised * (stayUp ? 1 : 1-ease(shell ? .76 : marks.settle-.13, 1, t));
-  const reach = ease(.025, shell ? .31 : marks.release, t) * (1 - ease(.72, .96, t));
+  const emptySniper = weapon==='sniper' && duration>WEAPONS.sniper.reload+.01;
+  // Plant the supporting hand before the other one leaves the rear grip.
+  const giveBack = emptySniper ? ease(.64,.755,t) : ease(.72,.96,t);
+  const reach = ease(.025, shell ? .31 : marks.release, t) * (1-giveBack);
   const travel = shell
     ? ease(.12, .32, t) * (1 - ease(.32, RELOAD_CONTACT.shell, t))
     : ease(marks.release, .41, t) * (1 - ease(.49, marks.seat, t));
@@ -68,7 +71,13 @@ export function shotCycle(weapon, age) {
 export function emptySniperBolt(player) {
   if (!player.reload || !(player.reloadDuration > WEAPONS.sniper.reload+.01)) return 0;
   const t = 1-player.reload/player.reloadDuration;
-  return ease(.71,.81,t)*(1-ease(.86,SNIPER_RELOAD_CONTACT.empty,t));
+  return ease(.795,.818,t)*(1-ease(.86,SNIPER_RELOAD_CONTACT.empty,t));
+}
+
+export function emptySniperGrasp(player) {
+  if (!player.reload || !(player.reloadDuration > WEAPONS.sniper.reload+.01)) return 0;
+  const t = 1-player.reload/player.reloadDuration;
+  return ease(.755,.795,t)*(1-ease(SNIPER_RELOAD_CONTACT.empty,.995,t));
 }
 
 // Envelope values are in seconds so recoil retains its shape on a slow display.

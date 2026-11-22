@@ -5,6 +5,8 @@ import { blasters } from './assets/blaster-geometry.js';
 import { Parts } from './arena-parts.js';
 
 const cache=new Map();
+// Surface contacts in the sniper's authored local frame, with the bolt at rest.
+export const sniperContacts={support:[-.036,-.052,-.400],grip:[.024,-.070,.004],bolt:[.097,.095,-.084]};
 export const gunFit={
  rifle:{muzzle:-.616,muzzleY:.075,support:-.335,grip:-.074,sight:.175,flash:.9},
  shotgun:{muzzle:-.738,muzzleY:.017,support:-.565,grip:-.068,sight:.067,flash:1.34},
@@ -175,6 +177,10 @@ function propSurface(geo,kind,isMagazine){
  const steel=new T.Color(style.steel),dark=new T.Color(style.dark),coat=new T.Color(style.coat);
  for(let i=0;i<color.count;i++){
   const r=color.getX(i),g=color.getY(i),b=color.getZ(i),y=position.getY(i),z=position.getZ(i);
+  if(kind==='sniper'&&!isMagazine&&r<.020&&g===r&&b===r){
+   // Only the authored optic has this swatch. Shorten its silhouette above the receiver.
+   position.setXYZ(i,.006+(position.getX(i)-.006)*.94,.145+(y-.145)*.94,-.164+(z+.180)*.84);
+  }
   const colored=r>g*1.35||b>g*1.68;
   if(isMagazine)tone.copy(dark).lerp(steel,.16+Math.min(.50,g));
   else if(colored||(kind==='sniper'&&z>.010&&y<.11))tone.copy(coat);
@@ -182,7 +188,51 @@ function propSurface(geo,kind,isMagazine){
   tone.multiplyScalar(1+.11*Math.max(0,normal.getY(i))+.035*Math.cos(z*57+y*17));
   color.setXYZ(i,tone.r,tone.g,tone.b);
  }
+ if(kind==='sniper')geo.computeBoundingSphere();
  breakerUV(geo);
+}
+
+function sniperEyepiece(){
+ const positions=[],colors=[],indices=[],tint=new T.Color(),steps=32;
+ const shade=new T.Color('#24474b'),reflection=new T.Color('#7b9a92');
+ function vertex(radius,angle,depth,color){
+  positions.push(.006+radius*Math.cos(angle),.145+radius*Math.sin(angle),depth);
+  colors.push(color.r,color.g,color.b);return positions.length/3-1;
+ }
+ // A shallow, opaque dome preserves a visible reflection without another camera or texture.
+ const center=vertex(0,0,-.0091,shade);
+ let previous=0;
+ const rings=[[.012,-.0095],[.024,-.0103],[.0305,-.0117],[.0315,-.0112],[.033,-.0109],[.0342,-.0122]];
+ for(const [row,[radius,depth]] of rings.entries()){
+  const start=positions.length/3;
+  for(let i=0;i<steps;i++){
+   const angle=i*2*Math.PI/steps;
+   if(row<3){
+    const u=Math.cos(angle)*radius/.0305,v=Math.sin(angle)*radius/.0305;
+    const sky=Math.max(0,.34+v*.54-u*.17);
+    tint.copy(shade).lerp(reflection,sky*(.52+.24*radius/.0305));
+   }else tint.set(row===3?'#243e40':row===4?'#667675':'#384545');
+   vertex(radius,angle,depth,tint);
+  }
+  for(let i=0;i<steps;i++){
+   const j=(i+1)%steps;
+   if(row===0)indices.push(center,start+i,start+j);
+   else indices.push(previous+i,start+i,start+j,previous+i,start+j,previous+j);
+  }
+  previous=start;
+ }
+ // Only the upper-left portion catches a glint. The tapered ends disappear into the glass.
+ const start=positions.length/3;
+ for(let i=0;i<=10;i++){
+  const u=i/10,angle=1.52+1.19*u,width=.0017*Math.sin(Math.PI*u);
+  tint.set('#78948d').lerp(reflection,Math.sin(Math.PI*u));
+  vertex(.0241-width,angle,-.0098,tint);vertex(.0241+width,angle,-.0098,tint);
+  if(i){const n=start+2*i;indices.push(n-2,n-1,n+1,n-2,n+1,n);}
+ }
+ const geo=new T.BufferGeometry();geo.setAttribute('position',new T.Float32BufferAttribute(positions,3));
+ geo.setAttribute('color',new T.Float32BufferAttribute(colors,3));geo.setIndex(indices);geo.computeVertexNormals();
+ const glass=new T.MeshStandardMaterial({vertexColors:true,roughness:.28,metalness:.12});
+ const lens=new T.Mesh(geo,glass);lens.name='ocular-glass';return lens;
 }
 
 function serviceDetails(model,kind){
@@ -205,20 +255,48 @@ function serviceDetails(model,kind){
   for(let i=0;i<3;i++)parts.cube(0,.044,-.321+i*.027,.036,.002,.004,ink);
   parts.cube(-.018,.044,-.198,.007,.002,.012,p.mark);
  }else if(kind==='sniper'){
+  // A continuous handguard bridges the old open span between the receiver and barrel.
+  // The widened lower section meets the support palm and curls up around the barrel.
+  const furniture=new Parts();
+  breakerShell(furniture,[[-.536,.022,-.004,.058],[-.514,.028,-.024,.064],[-.468,.034,-.046,.064],
+   [-.435,.037,-.057,.066],[-.393,.038,-.059,.067],[-.345,.036,-.053,.070],
+   [-.306,.035,-.045,.078],[-.268,.033,-.039,.084]],p.coat,p.edge);
+  sidePanel(furniture,[[-.038,-.013],[.020,-.021],[.061,-.112],[.052,-.128],
+   [.014,-.122],[-.018,-.075]],.018,.026,p.coat);
+  for(const side of [-1,1]){
+   furniture.beam([side*.035,-.024,-.456],[side*.038,-.031,-.395],.0032,.005,p.edge);
+   furniture.beam([side*.038,-.031,-.395],[side*.035,-.026,-.347],.0032,.005,p.edge);
+   for(let i=0;i<3;i++)furniture.cube(side*.037,-.015,-.429+i*.024,.0028,.013,.005,p.dark,-.32);
+   for(let i=0;i<3;i++)furniture.cube(side*.026,-.094+i*.014,.026-i*.008,.0025,.004,.026,p.edge,-.22);
+  }
+  // The narrow cheek pad follows the existing comb and stops short of the buttplate.
+  breakerShell(furniture,[[.084,.018,.101,.104],[.103,.022,.102,.108],[.162,.024,.107,.115],
+   [.211,.021,.105,.113],[.217,.018,.105,.111]],'#525d50','#718071');
+  furniture.beam([.022,.106,.116],[.024,.112,.160],.0022,.002,'#849183');
+  furniture.beam([.024,.112,.160],[.021,.110,.205],.0022,.002,'#747f70');
+  model.add(propMesh(furniture,'forearm-and-grip',2));
   breakerShell(parts,[[.043,.020,.043,.088],[.062,.025,.037,.099],[.168,.027,.042,.113],[.230,.023,.051,.110],[.258,.020,.052,.102]],p.coat,p.edge);
   for(const side of [-1,1]){
    parts.beam([side*.024,.070,.068],[side*.027,.083,.162],.003,.003,p.dark);
    for(let i=0;i<4;i++)parts.cube(side*.027,.071,.112+i*.018,.002,.011,.004,p.edge,-.35);
   }
-  for(const z of [-.335,-.317,-.101,-.082])parts.tube(.006,.148,z,.084,.006,.084,p.dark,halfTurn);
-  parts.six(.006,.145,-.007,.061,.006,.061,p.dark,halfTurn);
-  parts.six(.006,.145,-.003,.048,.002,.048,'#3a5156',halfTurn);
-  // This is an original external thumb pad. It travels on its own short inset.
-  parts.cube(.036,.067,-.101,.008,.012,.124,p.dark);
+  breakerShell(parts,[[-.280,.026,.048,.074],[-.254,.034,.046,.086],[-.074,.035,.051,.089],[-.012,.030,.052,.083]],p.steel,'#647170');
+  for(const z of [-.241,-.110]){
+   parts.cube(.004,.098,z,.036,.036,.034,p.dark);
+   parts.cube(.004,.084,z,.066,.009,.046,p.steel);
+  }
+  for(const z of [-.294,-.279,-.098,-.082])parts.tube(.006,.147,z,.079,.0055,.079,p.dark,halfTurn);
+  model.add(sniperEyepiece());
+  // A fixed dark backing keeps the moving thumb lever legible against the receiver.
+  parts.cube(.034,.074,-.051,.012,.022,.205,p.dark);
+  parts.beam([.024,.064,.032],[.037,.072,.042],.016,.024,p.steel);
   const tab=new Parts();
-  tab.cube(.045,.072,-.120,.023,.020,.056,p.steel,.10);
-  tab.six(.060,.072,-.110,.028,.013,.029,p.coat,0,0,halfTurn);
-  tab.cube(.067,.074,-.110,.003,.006,.013,p.mark);
+  tab.cube(.040,.077,-.117,.021,.023,.046,p.steel,.08);
+  tab.beam([.041,.077,-.117],[.076,.080,-.097],.017,.018,'#657271');
+  tab.beam([.074,.080,-.097],[.086,.093,-.086],.020,.021,p.dark);
+  tab.six(.088,.094,-.084,.038,.024,.042,p.steel,0,0,halfTurn);
+  tab.six(.099,.094,-.084,.031,.007,.033,p.dark,0,0,halfTurn);
+  tab.cube(.103,.095,-.084,.003,.005,.016,p.mark);
   model.add(propMesh(tab,'bolt',1));
  }else{
   // A short, stepped crown and checkered side inserts make the sidearm read in close-up.

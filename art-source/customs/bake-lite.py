@@ -1,7 +1,9 @@
-"""Blender background bake: blender -b -P bake-lite.py -- customs-guard.glb customs-guard.lite.bin
+"""Blender background bake: blender -b -P bake-lite.py -- customs-guard.glb customs-guard.lite.bin [existing.lite.bin]
 
 The output contains indexed triangles, one sampled sRGB colour per face and five
 clips of millimetre coordinates. The last vertex of every pose is the right grip.
+An ARM1 extension stores actual arm skin weights and the sampled shoulder pivot,
+so software-rendered sniper arms can follow aim without moving the torso/legs.
 Blender +Y here becomes local +Z after the arena's half turn; its +X becomes -X.
 """
 import math
@@ -14,7 +16,10 @@ import bmesh
 import numpy as np
 from mathutils.bvhtree import BVHTree
 
-src, dst = (Path(p).resolve() for p in sys.argv[sys.argv.index('--')+1:])
+arguments = [Path(p).resolve() for p in sys.argv[sys.argv.index('--')+1:]]
+if len(arguments) not in (2,3): raise RuntimeError('Expected source, destination and optional existing atlas')
+src,dst=arguments[:2]
+basis=arguments[2] if len(arguments)==3 else None
 clips = [('Idle_Shoot',4),('Run_Gun',10),('Jump_Idle',5),('Duck',4),('Punch',7)]
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=str(src))
@@ -22,6 +27,9 @@ scene = bpy.context.scene
 rig = next(o for o in scene.objects if o.type == 'ARMATURE')
 mesh = max((o for o in scene.objects if o.type == 'MESH'), key=lambda o: len(o.data.polygons))
 hand = next(b for b in rig.pose.bones if b.name.replace('.','').replace('_','') == 'Index1R')
+shoulders = [b for b in rig.pose.bones if b.name.replace('.','').replace('_','') in ('ShoulderL','ShoulderR')]
+if len(shoulders) != 2: raise RuntimeError('Missing aiming shoulder bones')
+arm_bones = {b.name for shoulder in shoulders for b in [shoulder, *shoulder.children_recursive]}
 anim = rig.animation_data
 actions = {}
 for track in anim.nla_tracks:
@@ -105,6 +113,11 @@ source_indices=np.array([t.vertices[:] for t in triangles],dtype=int)
 used,packed_indices=np.unique(source_indices,return_inverse=True)
 indices=packed_indices.reshape(-1,3).astype('<u2')
 vertices=list(mesh.data.vertices)
+arm_groups = {group.index for group in mesh.vertex_groups if group.name in arm_bones}
+if not arm_groups: raise RuntimeError('Missing arm skin weights')
+arm_weights = np.array([min(1.,sum(group.weight for group in vertices[int(i)].groups
+                                  if group.group in arm_groups)) for i in used] + [1.])
+arm_weights = np.rint(arm_weights*255).astype('u1')
 colours=[]
 samples=[(.33,.33,.34),(.65,.19,.16),(.16,.65,.19),(.19,.16,.65)]
 for t in triangles:
@@ -121,6 +134,7 @@ for t in triangles:
     colours.append(np.clip(np.rint(srgb*255),0,255))
 colors=np.asarray(colours,dtype='u1')
 poses=[]
+arm_pivots=[]
 descriptors=[]
 fps=scene.render.fps/scene.render.fps_base
 for name,count in clips:
@@ -141,28 +155,57 @@ for name,count in clips:
         points=[obj.matrix_world@obj.data.vertices[int(i)].co for i in used]
         eval_rig=rig.evaluated_get(deps)
         points.append(eval_rig.matrix_world@eval_rig.pose.bones[hand.name].matrix.translation)
+        pivot = sum((eval_rig.matrix_world@eval_rig.pose.bones[bone.name].matrix.translation
+                     for bone in shoulders), points[-1]*0)/2
+        arm_pivots.append((-pivot.x,pivot.z,pivot.y))
         coords=np.array([(-v.x,v.z,v.y) for v in points],dtype=float)
         poses.append(coords)
 all_poses=np.asarray(poses)
 idle=all_poses[0,:-1,:]
 height=float(idle[:,1].max()-idle[:,1].min())
 if not .8 < height < 3: raise RuntimeError(f'Unexpected source height {height}')
-all_poses[:,:,1]-=idle[:,1].min()
+ground = idle[:,1].min()
+all_poses[:,:,1]-=ground
 all_poses*=1.8/height
+arm_pivots=np.asarray(arm_pivots)
+arm_pivots[:,1]-=ground
+arm_pivots*=1.8/height
 # Physics already owns the player's vertical root, including jump height. The
 # donor clips supply limb motion but must not add a second jump or float a foot.
 offset=0
 for (name,_),(count,_) in zip(clips,descriptors):
-    for frame in all_poses[offset:offset+count]:
+    for index,frame in enumerate(all_poses[offset:offset+count],start=offset):
         if name in ('Run_Gun','Jump_Idle','Duck'):
-            frame[:,1]-=np.min(frame[:-1,1])
+            floor=np.min(frame[:-1,1])
+            frame[:,1]-=floor
+            arm_pivots[index,1]-=floor
     offset+=count
 if not np.isfinite(all_poses).all() or np.abs(all_poses).max()>8: raise RuntimeError('Invalid pose coordinates')
 data=bytearray(struct.pack('<4sHH',b'DLC1',len(used),len(triangles)))
 for n,ms in descriptors: data.extend(struct.pack('<HH',n,ms))
 data.extend(indices.tobytes());data.extend(colors.tobytes())
 if len(data)%2: data.append(0)
-data.extend(np.rint(all_poses*1000).astype('<i2').tobytes())
+packed_poses=np.rint(all_poses*1000).astype('<i2')
+data.extend(packed_poses.tobytes())
+if basis:
+    # Blender may reorder otherwise identical decimated vertices between runs.
+    # Keep every existing face/colour/pose byte, and remap only the new weights.
+    existing=basis.read_bytes()
+    positions_at=(28+9*len(triangles)+1)&~1
+    positions_end=positions_at+packed_poses.size*2
+    if existing[:28]!=data[:28] or len(existing)<positions_end:
+        raise RuntimeError('Existing atlas has different topology or clips')
+    old_poses=np.frombuffer(existing,dtype='<i2',count=packed_poses.size,offset=positions_at).reshape(packed_poses.shape)
+    signatures={np.ascontiguousarray(packed_poses[:,i,:]).tobytes():i for i in range(len(arm_weights))}
+    try: order=[signatures[np.ascontiguousarray(old_poses[:,i,:]).tobytes()] for i in range(len(arm_weights))]
+    except KeyError: raise RuntimeError('Existing atlas poses differ; refusing to replace the original animation')
+    if len(set(order))!=len(arm_weights): raise RuntimeError('Ambiguous vertex mapping')
+    arm_weights=arm_weights[order]
+    data=bytearray(existing[:positions_end])
+data.extend(struct.pack('<4sHH',b'ARM1',len(arm_weights),len(arm_pivots)))
+data.extend(arm_weights.tobytes())
+if len(data)%2: data.append(0)
+data.extend(np.rint(arm_pivots*1000).astype('<i2').tobytes())
 dst.write_bytes(data)
 print('LITE',dst.name,'vertices',len(used),'triangles',len(triangles),'bytes',len(data),
       'idle height',round(height,3),'mean sRGB',colors.mean(axis=0).round().astype(int).tolist(),
