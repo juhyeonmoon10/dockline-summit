@@ -21,7 +21,7 @@ await page.goto(origin+'/sim.js?bake=field');
 for(const [index,kind] of guns.entries()){
   if(only&&only!==kind&&!calibrate)continue;
   const bake=options[kind]||magazines;
-  const metadataOnly=kind==='rifle'||!!(only&&kind!==only);
+  const metadataOnly=!!(only&&kind!==only);
   const result=await page.evaluate(async({source,kind,options,index,metadataOnly})=>{
     const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));
     try{
@@ -40,9 +40,9 @@ for(const [index,kind] of guns.entries()){
         if(!window.fieldSheet){
           window.fieldSheet=document.createElement('canvas');window.fieldSheet.width=1280;window.fieldSheet.height=2520;
         }
-        window.fieldSheet.getContext('2d').drawImage(image,0,360*index);
+        window.fieldSheet.getContext('2d').drawImage(image,0,360*(kind==='rifle'?1:index));
       }
-      if(index>=2){
+      if(index>=2&&kind!=='rifle'){
         if(!window.magSheet)window.magSheet=document.createElement('canvas');
         const motion=new Image();motion.src=result.sequence;await motion.decode();
         if(index===2){window.magSheet.width=motion.width;window.magSheet.height=motion.height*5;}
@@ -52,10 +52,10 @@ for(const [index,kind] of guns.entries()){
       delete result.row;return result;
     }finally{URL.revokeObjectURL(url);}
   },{source,kind,index,options:bake,metadataOnly});
-  const asset=kind==='sniper'?{sheet:'sniper-views.webp',row:0}:kind==='rifle'?{legacy:true}:{row:index};
+  const asset=kind==='sniper'?{sheet:'sniper-views.webp',row:0}:{row:kind==='rifle'?1:index};
   manifest[kind]={...asset,muzzles:result.muzzles,...bake,poses:result.poses};
   if(result.still)staged.set('sniper-views.webp',decode(result.still));
-  if(result.card)staged.set('loadout-'+kind+'.png',decode(result.card));
+  if(result.card&&kind!=='rifle')staged.set('loadout-'+kind+'.png',decode(result.card));
   if(result.sequence){
     staged.set(kind+'-motion.webp',decode(result.sequence));
   }

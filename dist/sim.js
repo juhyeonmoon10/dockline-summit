@@ -5,7 +5,6 @@ import { nextWaypoint } from './arena-routes.js';
 import { tacticalBotInput } from './tactics.js';
 import { MAX_HP, WEAPONS, impactDamage, isPrimaryWeapon, botLoadouts } from './balance.js';
 import { gunFit } from './gun-fit.js';
-import { boundTracerOrigin } from './shot-path.js';
 export { MAP, MAX_HP, WEAPONS };
 export const TEAM_SIZES = Object.freeze([1,2,3]);
 
@@ -223,14 +222,33 @@ function trace(g,p,start,dx,dy,dz,map,limit=100) {
   return { x,y,z, ex:x+dx*distance, ey:y+dy*distance, ez:z+dz*distance, target, headshot, distance };
 }
 
-// The host uses the front cap of the equipped model and a neutral shoulder pose.
-// Recoil and camera bob stay visual, so host and guest resolve the same shot.
+// Grip and shoulder-pivot coordinates from each operator's Index1R and Shoulder
+// bones. Use the retracted idle frame and cycle centres for moving stances.
+// This keeps the network muzzle stable through breathing and footfalls.
+const operatorSockets=[
+  {
+    idle: [.102,1.125,-.210,1.262,-.027], run: [.105,1.022,-.272,1.163,-.095],
+    duck: [.102,.705,-.190,.914,-.097], jump: [.102,.966,-.246,1.103,-.063],
+  },
+  {
+    idle: [.100,1.213,-.242,1.352,-.044], run: [.104,1.121,-.304,1.265,-.113],
+    duck: [.100,.772,-.254,.991,-.149], jump: [.100,1.065,-.277,1.204,-.079],
+  },
+];
 export function firingMuzzle(p){
-  const fit=gunFit[p.active],right=(p.ads ? .018 : .125)+.86*fit.muzzleX;
-  const up=(p.ads ? -.13 : -.26)+.86*fit.muzzleY,forward=.22-.86*fit.muzzle;
-  const sy=Math.sin(p.yaw),cy=Math.cos(p.yaw),sp=Math.sin(p.pitch),cp=Math.cos(p.pitch);
-  const horizontal=forward*cp-up*sp;
-  return {x:p.x+right*cy+horizontal*sy,y:p.y+eyeHeight(p)+forward*sp+up*cp,z:p.z+right*sy-horizontal*cy};
+  const sockets=operatorSockets[p.team===1?1:0];
+  const stance=p.slide>0?sockets.duck:p.grounded===false?sockets.jump:p.speed>.35?sockets.run:sockets.idle;
+  const [handX,handY,handZ,shoulderY,shoulderZ]=stance;
+  const fit=gunFit[p.active],pitch=clamp(p.pitch,-.78,.78),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const sniper=p.active==='sniper';
+  // The Lookout pitches both arms at the shoulder. Other carried models pitch
+  // the gun at the finger mount. ADS only changes the first-person camera.
+  const pivotY=sniper?shoulderY:handY+.050,pivotZ=sniper?shoulderZ:handZ;
+  const localY=(sniper?handY+.050-shoulderY:0)+.86*fit.muzzleY;
+  const localZ=(sniper?handZ-shoulderZ:0)+.86*fit.muzzle;
+  const side=handX+.86*fit.muzzleX,z=pivotZ+localY*sp+localZ*cp;
+  const sy=Math.sin(p.yaw),cy=Math.cos(p.yaw);
+  return {x:p.x+side*cy-z*sy,y:p.y+pivotY+localY*cp-localZ*sp,z:p.z+side*sy+z*cy};
 }
 
 function traceVolley(g,p,w,map){
@@ -244,23 +262,20 @@ function traceVolley(g,p,w,map){
     const fraction=Math.max(0,obstruction.distance-.004)/reach;
     start={x:eye.x+ax*fraction,y:eye.y+ay*fraction,z:eye.z+az*fraction};
   }
-  const sights=[],spread=p.ads ? w.aimSpread : w.spread;
+  const hits=[],spread=p.ads ? w.aimSpread : w.spread;
   for(let i=0;i<(w.pellets||1);i++){
     const angle=Math.random()*Math.PI*2,radius=Math.sqrt(Math.random())*spread;
-    if(blocked){sights.push(obstruction);continue;}
+    if(blocked){hits.push({...obstruction,...start});continue;}
     const yaw=p.yaw+Math.cos(angle)*radius,pitch=p.pitch+Math.sin(angle)*radius,cp=Math.cos(pitch);
-    const aim=trace(g,p,eye,Math.sin(yaw)*cp,Math.sin(pitch),-Math.cos(yaw)*cp,map);
-    sights.push(aim);
-    if(aim.distance<=reach+.025)start=boundTracerOrigin(start,{x:aim.ex,y:aim.ey,z:aim.ez},eye);
-  }
-  const hits=sights.map(aim=>{
+    const sx=Math.sin(yaw)*cp,sy=Math.sin(pitch),sz=-Math.cos(yaw)*cp;
+    const aim=trace(g,p,eye,sx,sy,sz,map);
     const dx=aim.ex-start.x,dy=aim.ey-start.y,dz=aim.ez-start.z,length=Math.hypot(dx,dy,dz);
-    if(blocked||length<1e-6)return {...aim,...start,distance:length};
-    // Pick the reticle point with the eye, then resolve every intervening
-    // surface and target again from the muzzle. The tiny margin includes the
-    // shared endpoint even when the two floating-point rays round differently.
-    return trace(g,p,start,dx/length,dy/length,dz/length,map,length+.00001);
-  });
+    // A reticle can see a nearby surface alongside the barrel. Once the cap
+    // has passed that plane, continue forward instead of firing backwards or
+    // pulling the origin into the operator to force a hit.
+    if(dx*sx+dy*sy+dz*sz<=.00001)hits.push(trace(g,p,start,sx,sy,sz,map));
+    else hits.push(trace(g,p,start,dx/length,dy/length,dz/length,map,length+.00001));
+  }
   return {hits,blocked};
 }
 

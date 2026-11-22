@@ -23,8 +23,42 @@ test('every carried gun emits at the centre of a face on its posed barrel',()=>{
         const centre=vertices.reduce((sum,p)=>sum.map((v,i)=>v+p[i]/vertices.length),[0,0,0]);
         return Math.hypot(centre[0]-tip.x,centre[1]-tip.y,centre[2]-tip.z)<1e-7;
       }),active);
+      const behind=faces.flatMap(({vertices})=>vertices).map(([x,y,z])=>
+        (x-tip.x)*tip.forward.x+(y-tip.y)*tip.forward.y+(z-tip.z)*tip.forward.z);
+      assert.ok(Math.abs(Math.max(...behind))<1e-7,active+' points out of its opening');
     }
   }finally{team.model=previous;}
+});
+
+test('Lite releases from the resting cap, follows its pictured axis and keeps the shot independent of recoil',()=>{
+  const map={width:60,depth:60,boxes:[],ramps:[]};
+  const cam={x:0,y:1.5,z:0,sy:0,cy:1,sp:0,cp:1},sheet={complete:true,naturalWidth:1280};
+  for(const [kind,entry] of Object.entries(fieldViews))for(const aim of [0,.58,1]){
+    const focus={id:'self',active:kind,alive:true,reload:0,speed:0};
+    const scene=Object.assign(Object.create(LiteRenderer.prototype),{
+      map,aim,width:425,height:239,focal:208,shotAge:0,shotWeapon:kind,recoil:0,
+      fieldAtlas:sheet,stillAtlases:{[kind]:sheet},motionAtlas:{[kind]:sheet,magazines:sheet},
+      pellets:[{}],pelletIndex:0,trails:[],shotImpacts:[],remoteFlashes:new Map(),remoteMuzzles:new Map(),
+    });
+    const pose=scene.gunPose(focus,2),muzzle=scene.viewMuzzle(cam,pose,pose.depth);
+    const ref=entry.muzzles.find(sample=>sample===pose.uv);
+    assert.ok(ref&&ref.length===6,kind+' uses its still tile on release');
+    const path={type:'shot',actor:'self',weapon:kind,x:0,y:1.5,z:0,ex:-.18,ey:1.55,ez:-24};
+    scene.addShot(path,focus,cam,muzzle,Boolean(aim),2,pose);
+    const shot=kind==='shotgun'?scene.pellets[0]:scene.trails[0];
+    assert.deepEqual([shot.x,shot.y,shot.z],[muzzle.x,muzzle.y,muzzle.z]);
+    assert.ok(shot.departure,kind);
+    const bend=shot.departure,screen=scene.project([bend.x,bend.y-cam.y,-bend.z,0,0]);
+    const ax=(ref[3]-ref[0])*pose.gunWidth,ay=(ref[4]-ref[1])*scene.height;
+    const dx=screen[0]-pose.x,dy=screen[1]-pose.y;
+    assert.ok(ax*dx+ay*dy>0 && Math.abs(ax*dy-ay*dx)<1e-6,kind+' leaves the bore forwards');
+    const previous={...scene.localFlash.origin};focus.speed=5;scene.recoil=.8;scene.shotAge=.034;
+    scene.gunPose(focus,2.034);assert.deepEqual(scene.localFlash.origin,previous);
+    const behind={...path,ex:0,ey:1.5,ez:-.16};
+    scene.trails=[];scene.pelletIndex=0;scene.shotImpacts=[];
+    scene.addShot(behind,focus,cam,muzzle,Boolean(aim),3,pose);
+    assert.equal(scene.shotImpacts.length,1);assert.equal(scene.trails.length+scene.pelletIndex,0);
+  }
 });
 
 test('calibrated first-person cap pixels and their depth survive camera pitch and aspect',()=>{
@@ -39,4 +73,22 @@ test('calibrated first-person cap pixels and their depth survive camera pitch an
       assert.ok(Math.hypot(x-screen.x,y-screen.y)<1e-8);
     }
   }
+});
+
+test('cold viewmodels and operators still have visible barrel sockets while their art loads',()=>{
+  const pending={complete:false,naturalWidth:0},cam={x:0,y:1.55,z:0,sy:0,cy:1,sp:0,cp:1};
+  const scene=Object.assign(Object.create(LiteRenderer.prototype),{
+    width:425,height:239,focal:210,aim:0,shotAge:0,recoil:0,fieldAtlas:pending,blasterAtlas:pending,arcadeAtlas:pending,
+    motionAtlas:{},stillAtlases:{},remoteMuzzles:new Map(),operatorStates:new Map(),meleeSwings:new Map(),
+  });
+  const model=liteOperator(0),previous=model.model;model.model=null;
+  try{
+    for(const active of Object.keys(fieldViews)){
+      const player={id:'a',active,team:0,x:0,y:0,z:-3,yaw:0,pitch:.3,alive:true,speed:0};
+      const pose=scene.gunPose(player,1),tip=scene.viewMuzzle(cam,pose,.9),forward=scene.viewForward(cam,pose,tip);
+      assert.ok(pose&&Number.isFinite(forward.x)&&forward.z<0,active);
+      const meshes=[];scene.remoteOperator(meshes,player,cam,1,true);
+      assert.ok(meshes.length>8 && scene.remoteMuzzles.get('a').tip.forward.z<0,active);
+    }
+  }finally{model.model=previous;}
 });

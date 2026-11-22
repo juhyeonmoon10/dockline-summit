@@ -103,3 +103,10 @@ export function shotResponse(age, weapon='rifle') {
 export function shotFlashDuration(weapon) {
   return (impulse[weapon] ?? impulse.rifle).flash;
 }
+
+// Show the barrel releasing the round before the weapon kicks back.
+export const LOCAL_IGNITION_LIFE=.016;
+export function shotKickResponse(age,weapon){
+  const rise=.022;
+  return age<rise ? ease(0,rise,age) : shotResponse(age-rise,weapon);
+}

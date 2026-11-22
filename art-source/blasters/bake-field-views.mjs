@@ -34,10 +34,16 @@ export async function bakeFieldViews(kind,options={}){
     arena.guns[kind].visible=true;
     arena.flash.visible=false;arena.gunCamera.aspect=16/9;arena.gunCamera.updateProjectionMatrix();
     output?.render(arena.gunScene,arena.gunCamera);
-    const fit=gunFit[kind],tip=new T.Vector3(fit.muzzleX,fit.muzzleY,fit.muzzle);
-    const world=arena.guns[kind].localToWorld(tip),depth=-arena.gunCamera.worldToLocal(world.clone()).z;
-    const screen=world.project(arena.gunCamera);
-    return [round((screen.x+1)/2),round((1-screen.y)/2),round(depth)];
+    const fit=gunFit[kind];
+    const projectBore=z=>{
+      const point=arena.guns[kind].localToWorld(new T.Vector3(fit.muzzleX,fit.muzzleY,z));
+      const depth=-arena.gunCamera.worldToLocal(point.clone()).z;
+      point.project(arena.gunCamera);
+      return [round((point.x+1)/2),round((1-point.y)/2),round(depth)];
+    };
+    // The second five-decimal UV/depth sample records the bore axis of this
+    // exact tile, including receiver pitch, optic alignment and reload roll.
+    return [...projectBore(fit.muzzle),...projectBore(fit.muzzle-.22)];
   };
   const stops=options.aimStops||[0,1],base=output?canvas(640*stops.length,360):null,baseCtx=base?.getContext('2d'),muzzles=[];
   for(const [i,aim] of stops.entries()){

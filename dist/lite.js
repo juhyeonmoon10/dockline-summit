@@ -2,21 +2,26 @@
 // Reciprocal-depth tests keep players, short cover and the aim point correctly aligned.
 import { eyeHeight, WEAPONS } from './sim.js';
 import { loadLiteOperators, liteOperator, posedOperator, operatorGrip } from './lite-operator.js';
-import { approachAim, canAim, weaponFov, reloadPose, shotResponse, shotFlashDuration, scopeAfterShot, sniperScopeVisible } from './weapon-view.js';
+import { approachAim, canAim, weaponFov, reloadPose, shotKickResponse, shotFlashDuration, LOCAL_IGNITION_LIFE, scopeAfterShot, sniperScopeVisible } from './weapon-view.js';
 import { fieldViews } from './assets/field-frames.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
-import { pelletTrails, pelletSpan, clipBarrelOrigin, boundTracerOrigin, nearestShotEnd, visibleTraceEnd, singleShotSpan, SHOT_TRAIL_LIFE, PELLET_LIFE, PELLET_CAPACITY } from './shot-path.js';
+import { pelletTrails, pelletSpan, clipBarrelOrigin, visibleTraceEnd, exitsForward, muzzleDeparture, flightSlices, singleShotSpan, SHOT_TRAIL_LIFE, PELLET_LIFE, PELLET_CAPACITY } from './shot-path.js';
 import { buildSwitchyard, paintSwitchyardGround, paintSwitchyardPanel, switchyardPaints } from './switchyard-art.js';
 
 // 640×360 snapshots of the same two-handed rigs used by the WebGL view.
-// Each pair of muzzle positions is the projected world-space flash on the hip/ADS rig.
-const blasterFrames = {
-  rifle:[0,.562,.562,.583], shotgun:[1,.551,.590,.541],
-  sniper:[2,.539,.546,0], pistol:[3,.609,.628,.564]
-};
-const arcadeFrames={
-  smg:[0,.587,.625,.582],burst:[1,.565,.586,.597],
-  marksman:[2,.541,.574,.585],lmg:[3,.561,.581,.612]
+const blasterRows={rifle:0,shotgun:1,sniper:2,pistol:3};
+const arcadeRows={smg:0,burst:1,marksman:2,lmg:3};
+// These backup sheets still show the original barrels. Their own cap UV and
+// camera depth must stay fixed even when a replacement model changes length.
+const backupMuzzles={
+  rifle:[[.56626,.56536,.97694],[.50061,.5853,.95392]],
+  shotgun:[[.55414,.59436,1.08883],[.50012,.54186,1.06403]],
+  sniper:[[.541,.5478,1.26752],[.5,.55298,1.24567]],
+  pistol:[[.61623,.6366,.64335],[.5,.56712,.61830]],
+  smg:[[.61814,.63341,.78135],[.52723,.58683,.75154]],
+  burst:[[.56873,.5901,.94683],[.5,.5997,.92262]],
+  marksman:[[.54294,.57684,1.23225],[.5,.58719,1.20836]],
+  lmg:[[.56477,.58542,.98213],[.5,.61616,.95811]]
 };
 function closestFrame(times,time){
   let i=0;while(i+1<times.length&&time>(times[i]+times[i+1])*.5)i++;
@@ -26,7 +31,8 @@ function fieldPose(p,t,aim,w,h,age,kick,atlas,motion){
   const entry=fieldViews[p.active];
   if(!entry||(!atlas?.naturalWidth&&!(entry.sheet&&motion?.naturalWidth)))return null;
   const loading=p.reload>0,cycle=!loading&&age>=0&&age<=entry.shotTimes?.at(-1),aimed=aim>=.5;
-  const animated=!!(motion?.naturalWidth&&(loading||cycle||!atlas?.naturalWidth));
+  const animated=!!(motion?.naturalWidth&&(loading||cycle));
+  if(!atlas?.naturalWidth&&!animated)return null;
   const stops=entry.aimStops||[0,1],still=closestFrame(stops,aim);
   let sheet=atlas,sw=640,sh=360,sx=still*640,sy=entry.row*360,ox=0,oy=0;
   let muzzle=entry.muzzles[still];
@@ -60,20 +66,21 @@ function fieldPose(p,t,aim,w,h,age,kick,atlas,motion){
   const x=left+viewWidth*mx+h*(Math.sin(t*10)*.005*travel+load*.026);
   const gunWidth=Math.max(viewWidth,(w-x)/(1-muzzle[0]));
   return {sheet,sw,sh,sx,sy,gunWidth,drawWidth:animated?gunWidth*sw/512:gunWidth,drawHeight:animated?h*sh/288:h,
-    imageX:gunWidth*(ox/512-muzzle[0]),imageY:h*(oy/288-muzzle[1]),x,depth,
+    imageX:gunWidth*(ox/512-muzzle[0]),imageY:h*(oy/288-muzzle[1]),x,depth,uv:muzzle,aimStop:stops[still],
     y:h*(my+Math.abs(Math.cos(t*10))*.006*travel-recoil*.026+load*.082),reloadPose:load,kick:recoil};
 }
-function blasterPose(p,t,aim,w,h,kick,kind,frame,atlas){
+function blasterPose(p,t,aim,w,h,kick,kind,row,atlas){
   const aimFrame=aim>=.5;
   const gunWidth=Math.max(w,h*16/9),left=(w-gunWidth)*.5,movement=Math.min(1,(p.speed||0)*.16)*(1-.83*aim);
   const loading=reloadPose(p,kind);
-  const [hip,ads]=fieldViews[kind]?.muzzles||[[frame[1],frame[2],.9],[.5,frame[3],.9]];
+  const [hip,ads]=backupMuzzles[kind];
   const mx=left+gunWidth*(hip[0]+(ads[0]-hip[0])*aim),my=h*(hip[1]+(ads[1]-hip[1])*aim);
   const dx=Math.sin(t*10)*h*.005*movement+h*loading.tilt*.026;
   const dy=Math.abs(Math.cos(t*10))*h*.006*movement+h*(-kick*.026+loading.tilt*.082-loading.bump*.012);
   // Pivot each atlas image on its own muzzle as the gun moves into the sights.
   const point=aimFrame?ads:hip,imageX=-gunWidth*point[0],imageY=-h*point[1];
-  return {frame,atlas,aimFrame,gunWidth,imageX,imageY,x:mx+dx,y:my+dy,depth:hip[2]+(ads[2]-hip[2])*aim,reloadPose:loading.tilt,kick};
+  return {row,atlas,aimFrame,gunWidth,imageX,imageY,x:mx+dx,y:my+dy,depth:hip[2]+(ads[2]-hip[2])*aim,
+    uv:point,aimStop:Number(aimFrame),reloadPose:loading.tilt,kick};
 }
 
 const rgb = (r,g,b) => ((255<<24)|(b<<16)|(g<<8)|r)>>>0;
@@ -346,7 +353,7 @@ function heldEquipment(dst,p,[x,y,z],age){
     if(p.active==='shotgun')body(0,-.020,-front*.60,.083,.063,.18,0x6a6051);
   }
   const [mx,my,mz]=transform(0,barrelY,barrelZ-barrelLength/2);
-  return {x:mx,y:my,z:mz};
+  return {x:mx,y:my,z:mz,forward:{x:sy*co,y:si,z:-cy*co}};
 }
 
 function dummyFaces(target,faces) {
@@ -403,7 +410,7 @@ export class LiteRenderer {
   dispose() {this.staticMesh=[];this.clearShots();this.clearMelee();this.operatorStates.clear();this.lastGame=null;}
   clearShots(){
     for(const pellet of this.pellets)pellet.age=PELLET_LIFE;
-    this.pelletIndex=0;this.trails.length=0;this.shotImpacts.length=0;this.remoteFlashes.clear();
+    this.pelletIndex=0;this.trails.length=0;this.shotImpacts.length=0;this.remoteFlashes.clear();this.localFlash=null;
   }
   clearMelee(){this.meleeSwings.clear();this.meleeImpacts=[];this.lastMeleeSeq=0;this.knifeFocus=null;this.lastWeapon=null;}
   meleeEvents(game,p,now){
@@ -432,13 +439,13 @@ export class LiteRenderer {
     const aim=this.aim,w=this.width,h=this.height;
     const entry=fieldViews[kind];
     if(entry&&!entry.legacy){
-      const motion=this.motionAtlas[entry.shotTimes?kind:'magazines'],still=entry.sheet?this.stillAtlases[kind]:this.fieldAtlas;
-      const pose=fieldPose(p,t,aim,w,h,this.shotWeapon===kind?this.shotAge:Infinity,this.recoil,still,motion);
+      const motion=entry.poses&&this.motionAtlas[entry.shotTimes?kind:'magazines'],still=entry.sheet?this.stillAtlases[kind]:this.fieldAtlas;
+      const age=this.shotWeapon===kind&&this.shotAge>0?this.shotAge:Infinity;
+      const pose=fieldPose(p,t,aim,w,h,age,this.recoil,still,motion);
       if(pose)return pose;
-      if(entry.sheet&&(!still?.complete||!motion?.complete))return null;
     }
-    const atlas=arcadeFrames[kind]?this.arcadeAtlas:this.blasterAtlas;
-    if(!entry?.sheet&&atlas.complete&&atlas.naturalWidth)return blasterPose(p,t,aim,w,h,this.recoil,kind,arcadeFrames[kind]||blasterFrames[kind]||blasterFrames.rifle,atlas);
+    const arcade=kind in arcadeRows,atlas=arcade?this.arcadeAtlas:this.blasterAtlas;
+    if(atlas.complete&&atlas.naturalWidth)return blasterPose(p,t,aim,w,h,this.recoil,kind,arcade?arcadeRows[kind]:blasterRows[kind],atlas);
     const bob=p.speed>1?Math.sin(t*10)*.006*(1-.83*aim):0;
     return {x:w*(.57-.07*aim)+h*bob,y:h*(.64-.08*aim+this.recoil*.045+(p.reload>0?.17:0))};
   }
@@ -448,40 +455,76 @@ export class LiteRenderer {
     const forward=depth*cam.cp-up*cam.sp;
     return {x:cam.x+right*cam.cy+forward*cam.sy,y:cam.y+up*cam.cp+depth*cam.sp,z:cam.z+right*cam.sy-forward*cam.cy};
   }
+  viewForward(cam,pose,tip){
+    // Project a second point on the same photographed barrel. Account for the
+    // tile being stretched/translated around its cap during the aim transition.
+    const depth=pose.depth??.9,uv=pose.uv;
+    let dx=-this.height*.045,dy=-this.height*.025,dz=.22;
+    if(uv?.length>=6){
+      dx=(uv[3]-uv[0])*pose.gunWidth;dy=(uv[4]-uv[1])*this.height;dz=uv[5]-uv[2];
+    }else if(uv){
+      // Legacy backup sheets were photographed at this shared hip angle.
+      const hip=1-pose.aimStop,turn=.090*hip,pitch=.049*hip;
+      const cx=-Math.sin(turn),cy=Math.sin(pitch)*Math.cos(turn),cz=Math.cos(pitch)*Math.cos(turn);
+      const focal=.5/Math.tan(63*Math.PI/360),amount=.22*cz/(uv[2]+.22*cz);
+      dx=(.5+cx/cz*focal*9/16-uv[0])*pose.gunWidth*amount;
+      dy=(.5-cy/cz*focal-uv[1])*this.height*amount;
+      dz=.22*cz;
+    }
+    const front=this.viewMuzzle(cam,{x:pose.x+dx,y:pose.y+dy},depth+dz);
+    return {x:front.x-tip.x,y:front.y-tip.y,z:front.z-tip.z};
+  }
   remoteOrigin(attachment){
     const {player,tip}=attachment;
     return clipBarrelOrigin({x:player.x,y:player.y+eyeHeight(player),z:player.z},tip,this.map);
   }
-  addShot(event,focus,cam,muzzle,ads,now){
+  addShot(event,focus,cam,muzzle,ads,now,pose){
     if(![event.ex,event.ey,event.ez].every(Number.isFinite))return;
     const own=event.actor===focus.id;
     const remote=this.remoteMuzzles.get(event.actor);
+    if(own)this.localFlash=null;
     if(event.blocked){
       this.shotImpacts.push({point:event,until:now+.085});
       this.remoteFlashes.delete(event.actor);return;
     }
-    let origin=event;
+    let origin=event,forward;
     if(own&&focus.active===event.weapon&&muzzle){
-      const nearest=nearestShotEnd(event,cam),tip=clipBarrelOrigin(cam,muzzle,this.map);
-      origin=boundTracerOrigin(tip,{x:nearest.ex,y:nearest.ey,z:nearest.ez},cam);
+      const tip=clipBarrelOrigin(cam,muzzle,this.map);
+      if(tip.blocked){
+        const {x:ex,y:ey,z:ez}=tip.impact;
+        this.localFlash=null;this.shotImpacts.push({point:{ex,ey,ez},until:now+.085});return;
+      }
+      origin=muzzle;
+      if(pose)forward=this.viewForward(cam,pose,muzzle);
     }else if(!own&&remote?.player.active===event.weapon){
       origin=this.remoteOrigin(remote);
       if(origin.blocked){
         const {x:ex,y:ey,z:ez}=origin.impact;
         this.shotImpacts.push({point:{ex,ey,ez},until:now+.085});this.remoteFlashes.delete(event.actor);return;
       }
-      this.remoteFlashes.set(event.actor,{weapon:event.weapon,until:now+shotFlashDuration(event.weapon)});
+      forward=remote.tip.forward;
     }
     if(![origin.x,origin.y,origin.z].every(Number.isFinite))return;
+    let flashEnd=null,flashClearance=Infinity;
     for(const path of pelletTrails(event,own,ads,origin)){
       const end={x:path.ex,y:path.ey,z:path.ez},visible=visibleTraceEnd(origin,end,this.map);
+      if(forward&&!exitsForward(origin,visible,forward)){
+        this.shotImpacts.push({point:{ex:visible.x,ey:visible.y,ez:visible.z},until:now+.085});continue;
+      }
       if(visible!==end){
         path.ex=visible.x;path.ey=visible.y;path.ez=visible.z;path.target=null;
         path.dx=visible.x-origin.x;path.dy=visible.y-origin.y;path.dz=visible.z-origin.z;
         path.length=Math.hypot(path.dx,path.dy,path.dz);
       }
+      path.departure=forward?muzzleDeparture(origin,visible,forward,this.map):null;
+      if(!flashEnd){flashEnd=path.departure||visible;flashClearance=path.length;}
       if(event.weapon==='shotgun')Object.assign(this.pellets[this.pelletIndex++%PELLET_CAPACITY],path);
       else this.trails.push({...path,at:now,weapon:event.weapon});
+    }
+    if(flashEnd&&forward){
+      const life=own?LOCAL_IGNITION_LIFE:shotFlashDuration(event.weapon);
+      const flash={actor:event.actor,weapon:event.weapon,origin,end:flashEnd,clearance:flashClearance,until:now+life};
+      if(own)this.localFlash=flash;else this.remoteFlashes.set(event.actor,flash);
     }
   }
   project(v) {const iz=1/v[2],f=this.focal*iz;return [this.width*.5+v[0]*f,this.height*.5-v[1]*f,iz,v[3]*iz,v[4]*iz];}
@@ -519,10 +562,8 @@ export class LiteRenderer {
   remoteOperator(gear,player,cam,clock,firing){
     const team=liteOperator(player.team),swing=this.meleeSwings.get(player.id);
     if(!team.model){
-      if(team.failed){
-        const tip=fallbackOperator(gear,player,clock,swing);
-        if(tip)this.remoteMuzzles.set(player.id,{tip,player});
-      }
+      const tip=fallbackOperator(gear,player,clock,swing);
+      if(tip)this.remoteMuzzles.set(player.id,{tip,player});
       return;
     }
     const dx=player.x-cam.x,dz=player.z-cam.z,forward=dx*cam.sy-dz*cam.cy;
@@ -565,8 +606,17 @@ export class LiteRenderer {
     }
   }
   pelletStroke(cam,pellet,span){
-    let a=cameraVertex(cam,[pellet.x+pellet.dx*span.tail,pellet.y+pellet.dy*span.tail,pellet.z+pellet.dz*span.tail,0,0]);
-    let b=cameraVertex(cam,[pellet.x+pellet.dx*span.head,pellet.y+pellet.dy*span.head,pellet.z+pellet.dz*span.head,0,0]);
+    const bend=pellet.departure;
+    flightSlices(pellet.length,bend,span.tail,span.head,(leaving,tail,head)=>{
+      const start=leaving||!bend?pellet:bend;
+      const x=leaving?bend.x:pellet.ex,y=leaving?bend.y:pellet.ey,z=leaving?bend.z:pellet.ez;
+      const dx=x-start.x,dy=y-start.y,dz=z-start.z;
+      this.strokeSegment(cam,[start.x+dx*tail,start.y+dy*tail,start.z+dz*tail],
+        [start.x+dx*head,start.y+dy*head,start.z+dz*head],span.alpha);
+    });
+  }
+  strokeSegment(cam,start,end,alpha){
+    let a=cameraVertex(cam,start),b=cameraVertex(cam,end);
     if(a[2]<.14&&b[2]<.14)return;
     if(a[2]<.14||b[2]<.14){
       const t=(.14-a[2])/(b[2]-a[2]),edge=a.map((v,i)=>v+(b[i]-v)*t);
@@ -591,7 +641,7 @@ export class LiteRenderer {
     }
     const c=this.ctx;c.lineCap='round';
     for(let i=0;i<3;i++){
-      c.strokeStyle=i===2?'#fff5cf':'#f0bd70';c.globalAlpha=span.alpha*[.35,.65,.95][i];c.lineWidth=[.45,.8,1.05][i];c.stroke(paths[i]);
+      c.strokeStyle=i===2?'#fff5cf':'#f0bd70';c.globalAlpha=alpha*[.35,.65,.95][i];c.lineWidth=[.45,.8,1.05][i];c.stroke(paths[i]);
     }
     c.globalAlpha=1;c.lineCap='butt';
   }
@@ -610,17 +660,25 @@ export class LiteRenderer {
     }
     c.globalAlpha=1;
   }
-  remoteFlash(cam,origin){
+  remoteFlash(cam,origin,end){
     const at=cameraVertex(cam,[origin.x,origin.y,origin.z]);
     if(at[2]<=.14)return;
-    const [x,y,iz]=this.project(at),cx=Math.round(x),cy=Math.round(y);
-    const radius=Math.max(1,Math.min(8,.068*this.focal*iz)),extent=Math.ceil(radius);
+    const [x,y,iz]=this.project(at);
+    const radius=Math.max(1,Math.min(8,.055*this.focal*iz));
+    const dx=end.x-origin.x,dy=end.y-origin.y,dz=end.z-origin.z,ratio=Math.min(1,.17/(Math.hypot(dx,dy,dz)||1));
+    const tip=cameraVertex(cam,[origin.x+dx*ratio,origin.y+dy*ratio,origin.z+dz*ratio]);
+    if(tip[2]<.14)return;
+    const [tx,ty,tz]=this.project(tip),sx=tx-x,sy=ty-y,steps=Math.min(16,Math.max(1,Math.ceil(Math.hypot(sx,sy))));
     const c=this.ctx;
-    for(let dy=-extent;dy<=extent;dy++)for(let dx=-extent;dx<=extent;dx++){
-      const px=cx+dx,py=cy+dy;
-      if(px<0||px>=this.width||py<0||py>=this.height||iz*1.002<this.depth[py*this.width+px])continue;
-      if(Math.abs(dx)+Math.abs(dy)>radius+.25)continue;
-      c.fillStyle=Math.hypot(dx,dy)<radius*.46?'#fff4c5':'#ffb74d';c.fillRect(px,py,1,1);
+    for(let i=0;i<=steps;i++){
+      const t=i/steps,r=Math.max(.6,radius*(1-t*.85)),extent=Math.ceil(r);
+      const u=Math.round(x+sx*t),v=Math.round(y+sy*t),depth=iz+(tz-iz)*t;
+      for(let dy=-extent;dy<=extent;dy++)for(let dx=-extent;dx<=extent;dx++){
+        const px=u+dx,py=v+dy;
+        if(px<0||px>=this.width||py<0||py>=this.height||depth*1.002<this.depth[py*this.width+px])continue;
+        if(Math.abs(dx)+Math.abs(dy)>r+.25)continue;
+        c.fillStyle=Math.abs(dx)+Math.abs(dy)<r*.6?'#fff4c5':'#ffb74d';c.fillRect(px,py,1,1);
+      }
     }
   }
   knifeWeapon(p,t){
@@ -682,24 +740,24 @@ export class LiteRenderer {
     }
     if(flash){
       // Start on the cap. The tongue follows the shot out past the front sight.
-      const length=h*(isPistol?.083:.095),width=h*(isPistol?.014:.020);
-      c.save();c.translate(pose.x,pose.y);c.rotate(Math.atan2(flash.y-pose.y,flash.x-pose.x));
+      const length=Math.min(h*(isPistol?.083:.095),flash.length),width=Math.min(h*(isPistol?.014:.020),length*.4);
+      c.save();c.translate(flash.x,flash.y);c.rotate(flash.angle);
       c.fillStyle='#ffa835';c.beginPath();c.moveTo(0,0);c.lineTo(length*.25,-width*.48);
       c.lineTo(length*.45,-width);c.lineTo(length*.47,-width*.46);c.lineTo(length,0);
       c.lineTo(length*.38,width*.52);c.lineTo(length*.29,width);c.closePath();c.fill();
       c.fillStyle='#fff2b6';c.beginPath();c.moveTo(0,0);c.lineTo(length*.27,-width*.38);
       c.lineTo(length*.78,0);c.lineTo(length*.23,width*.37);c.closePath();c.fill();c.restore();
     }
-    if(pose.frame||pose.sheet){
-      const {frame,aimFrame,gunWidth,imageX,imageY,reloadPose,kick}=pose;
+    if(pose.atlas||pose.sheet){
+      const {row,aimFrame,gunWidth,imageX,imageY,reloadPose,kick}=pose;
       c.save();c.translate(pose.x,pose.y);c.rotate(reloadPose*.28+kick*.014);c.scale(1+kick*.035,1+kick*.035);
       if(pose.sheet)c.drawImage(pose.sheet,pose.sx,pose.sy,pose.sw,pose.sh,imageX,imageY,pose.drawWidth,pose.drawHeight);
-      else c.drawImage(pose.atlas,aimFrame?640:0,frame[0]*360,640,360,imageX,imageY,gunWidth,h);
+      else c.drawImage(pose.atlas,aimFrame?640:0,row*360,640,360,imageX,imageY,gunWidth,h);
       c.restore();return;
     }
     c.save();c.translate(pose.x,pose.y);c.scale(h*.0019,h*.0019);if(reload)c.rotate(.20);
     const poly=(color,pts)=>{c.fillStyle=color;c.beginPath();pts.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.closePath();c.fill();};
-    const gunColor=arcadeFrames[gun]?WEAPONS[gun].accent:isShot?'#ba784f':isSniper?'#6b9491':'#899598';
+    const gunColor=gun in arcadeRows?WEAPONS[gun].accent:isShot?'#ba784f':isSniper?'#6b9491':'#899598';
     poly('#26313b',[[-6,0],[6,-2],[29,14],[24,25],[1,9]]);poly('#a4aaa1',[[-6,0],[5,-4],[29,12],[20,16]]);
     const front=isPistol?10:19, back=isPistol?81:128;
     poly('#273a43',[[front,10],[front+14,7],[back+26,49],[back+10,91],[front+1,39]]);
@@ -741,19 +799,19 @@ export class LiteRenderer {
         if(entry.sheet&&!this.stillAtlases[p.active]){
           const image=new Image();image.src='./assets/'+entry.sheet;this.stillAtlases[p.active]=image;
         }
-        if(!this.motionAtlas[key]){
+        if(entry.poses&&!this.motionAtlas[key]){
           const image=new Image();image.src='./assets/'+(special?p.active+'-motion':'field-reloads')+'.webp';this.motionAtlas[key]=image;
         }
       }
       const previous=resync||!p.alive?game.seq:this.lastSeq;
       for(const e of game.events||[]){
         if(e.seq>previous&&e.type==='shot'&&e.actor===p.id&&e.weapon===p.active){
-          this.shotAge=0;this.shotWeapon=e.weapon;this.shotEvent=e;
+          this.shotAge=0;this.shotWeapon=e.weapon;
         }
       }
       if(p.reload>0){this.shotWeapon=null;this.shotAge=Infinity;}
     }
-    this.activeGun=p?.active;this.recoil=Number.isFinite(this.shotAge)?shotResponse(this.shotAge,p.active):0;
+    this.activeGun=p?.active;this.recoil=Number.isFinite(this.shotAge)?shotKickResponse(this.shotAge,p.active):0;
     const held=mode&&canAim(p,p.id===selfId?view.ads??p.ads:p.ads);
     const ads=mode&&scopeAfterShot(p.active,held,this.shotWeapon===p.active?this.shotAge:Infinity);
     this.aim=mode&&this.aimFocus===p.id?approachAim(this.aim,ads,dt):Number(ads);
@@ -809,12 +867,12 @@ export class LiteRenderer {
     for(const e of game.events??[]){
       if(e.seq<=this.lastSeq)continue;this.lastSeq=e.seq;
       if(e.type==='round')this.clearShots();
-      if(e.type==='shot')this.addShot(e,p,cam,muzzle,ads,now);
+      if(e.type==='shot')this.addShot(e,p,cam,muzzle,ads,now,pose);
       if(game.phase==='range'&&e.type==='hit')this.dummyHits.set(e.target,now+.14);
     }
     this.trails=this.trails.filter(tr=>now-tr.at<SHOT_TRAIL_LIFE);
     for(const tr of this.trails){
-      const span=singleShotSpan(tr.length,now-tr.at,tr.weapon);this.pelletStroke(cam,tr,span);
+      const span=singleShotSpan(tr.departure?.length??tr.length,now-tr.at,tr.weapon);this.pelletStroke(cam,tr,span);
       if(span.head>=1)this.pelletImpact(cam,tr,span.alpha);
     }
     this.shotImpacts=this.shotImpacts.filter(hit=>now<hit.until);
@@ -827,13 +885,22 @@ export class LiteRenderer {
     for(const [id,flash] of this.remoteFlashes){
       const attachment=this.remoteMuzzles.get(id);
       if(now>=flash.until||attachment?.player.active!==flash.weapon){this.remoteFlashes.delete(id);continue;}
-      const origin=this.remoteOrigin(attachment);
-      if(!origin.blocked)this.remoteFlash(cam,origin);
+      this.remoteFlash(cam,flash.origin,flash.end);
     }
     let flash=null;
-    if(muzzle&&this.shotEvent&&!this.shotEvent.blocked&&this.shotWeapon===p.active&&this.shotAge<shotFlashDuration(p.active)&&!clipBarrelOrigin(cam,muzzle,this.map).blocked){
-      const {ex,ey,ez}=this.shotEvent,end=cameraVertex(cam,[ex,ey,ez]);
-      const [x,y]=end[2]>.14?this.project(end):[w*.5,h*.5];flash={x,y};
+    const release=this.localFlash;
+    if(release&&pose&&release.actor===p.id&&release.weapon===this.shotWeapon&&now<release.until){
+      const {x,y,z}=release.origin,at=cameraVertex(cam,[x,y,z]);
+      if(at[2]>.14){
+        const [fx,fy]=this.project(at),end=cameraVertex(cam,[release.end.x,release.end.y,release.end.z]);
+        if(end[2]>.14){
+          const [tx,ty]=this.project(end);
+          // Let the bloom show past a raised front sight. Close cover limits
+          // its extent to the unobstructed portion of the outgoing segment.
+          const length=release.clearance<1?Math.hypot(tx-fx,ty-fy):Infinity;
+          flash={x:fx,y:fy,length,angle:Math.atan2(ty-fy,tx-fx)};
+        }
+      }
     }
     this.weapon(p,now,pose,flash);
   }

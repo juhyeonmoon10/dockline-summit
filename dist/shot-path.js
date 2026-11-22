@@ -12,28 +12,6 @@ export function clipBarrelOrigin(eye,muzzle,map){
     impact:{x:eye.x+dx*at,y:eye.y+dy*at,z:eye.z+dz*at}};
 }
 
-// A spread crossing a near corner still has a single visible origin.
-export function nearestShotEnd(event,eye){
-  let nearest=event,distance=Infinity;
-  for(const point of event.pellets||[]){
-    const d=(point.ex-eye.x)**2+(point.ey-eye.y)**2+(point.ez-eye.z)**2;
-    if(d<distance){nearest=point;distance=d;}
-  }
-  return nearest;
-}
-
-// Preserve the projected pixel on the wall-checked barrel when the target is
-// closer than the viewmodel. Pull the start toward the lens, never behind it.
-export function boundTracerOrigin(tip,end,eye){
-  const dx=tip.x-eye.x,dy=tip.y-eye.y,dz=tip.z-eye.z;
-  const ex=end.x-eye.x,ey=end.y-eye.y,ez=end.z-eye.z;
-  const distance=Math.hypot(ex,ey,ez);
-  if(distance<.001)return {x:end.x,y:end.y,z:end.z};
-  const projection=(dx*ex+dy*ey+dz*ez)/distance;
-  const fraction=projection>distance-.025 && projection>0 ? Math.max(0,distance-.025)/projection : 1;
-  return {x:eye.x+dx*fraction,y:eye.y+dy*fraction,z:eye.z+dz*fraction};
-}
-
 export function visibleTraceEnd(start,end,map){
   const dx=end.x-start.x,dy=end.y-start.y,dz=end.z-start.z,length=Math.hypot(dx,dy,dz);
   if(length<.008)return end;
@@ -47,6 +25,36 @@ export const PELLET_LIFE=.14;
 export const SHOT_TRAIL_LIFE=.105;
 export const PELLET_CAPACITY=96;
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+
+export function exitsForward(start,end,forward){
+  return !forward||((end.x-start.x)*forward.x+(end.y-start.y)*forward.y+(end.z-start.z)*forward.z)>.0001;
+}
+
+// Match the visible barrel axis on exit, then join the confirmed impact.
+// Use the direct path if either visual segment would cross cover.
+export function muzzleDeparture(start,end,forward,map){
+  if(!forward)return null;
+  const dx=end.x-start.x,dy=end.y-start.y,dz=end.z-start.z;
+  const direct=Math.hypot(dx,dy,dz),norm=Math.hypot(forward.x,forward.y,forward.z);
+  if(direct<.20||norm<1e-6)return null;
+  const alignment=(dx*forward.x+dy*forward.y+dz*forward.z)/(direct*norm);
+  if(alignment<=0||alignment>.999999)return null;
+  const exit=Math.min(.78,direct*.28),scale=exit/norm;
+  const point={x:start.x+scale*forward.x,y:start.y+scale*forward.y,z:start.z+scale*forward.z};
+  if(visibleTraceEnd(start,point,map)!==point||visibleTraceEnd(point,end,map)!==end)return null;
+  const rest=Math.hypot(end.x-point.x,end.y-point.y,end.z-point.z);
+  return {...point,exit,rest,length:exit+rest};
+}
+
+// Emit only the visible part of each leg. Fractions are local to that leg.
+export function flightSlices(directLength,departure,tail,head,emit){
+  if(directLength<=0||head<=tail)return;
+  if(!departure){emit(false,tail,head);return;}
+  const {exit,rest,length}=departure,a=tail*length,b=head*length;
+  if(a<exit)emit(true,a/exit,Math.min(1,b/exit));
+  if(b>exit)emit(false,Math.max(0,(a-exit)/rest),Math.min(1,(b-exit)/rest));
+}
+
 export function singleShotSpan(length,age,weapon){
   const speed=weapon==='sniper' ? 980 : 740;
   const visible=weapon==='sniper' ? 6 : 3.8;
@@ -65,9 +73,10 @@ export function pelletTrails(event,own,ads=false,origin=event){
   });
 }
 export function pelletSpan(trail){
-  const flight=clamp(trail.length/400,.035,.075);
-  const head=Math.min(1,Math.min(.20,.7/(trail.length||1))+trail.age/flight);
+  const length=trail.departure?.length??trail.length;
+  const flight=clamp(length/400,.035,.075);
+  const head=Math.min(1,Math.min(.20,.7/(length||1))+trail.age/flight);
   const finish=clamp((trail.age-flight)/(PELLET_LIFE-flight),0,1);
-  const span=Math.min(.62,3.6/(trail.length||1))*(1-finish*.85);
+  const span=Math.min(.62,3.6/(length||1))*(1-finish*.85);
   return {head,tail:Math.max(0,head-span),alpha:Math.pow(Math.max(0,1-trail.age/PELLET_LIFE),.8),contactAlpha:head>=1?Math.max(0,1-(trail.age-flight)/.065):0};
 }

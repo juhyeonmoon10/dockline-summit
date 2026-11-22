@@ -2,11 +2,11 @@ import * as T from './assets/three.module.min.js';
 import { blasterMesh, gunFit, sniperContacts } from './blaster.js';
 import { PRIMARY_WEAPONS } from './balance.js';
 import { eyeHeight, WEAPONS } from './sim.js';
-import { approachAim, canAim, weaponFov, reloadPose, shotResponse, shotCycle, shotFlashDuration, scopeAfterShot, sniperScopeVisible, emptySniperBolt, emptySniperGrasp, RELOAD_CONTACT } from './weapon-view.js';
+import { approachAim, canAim, weaponFov, reloadPose, shotKickResponse, shotCycle, shotFlashDuration, LOCAL_IGNITION_LIFE, scopeAfterShot, sniperScopeVisible, emptySniperBolt, emptySniperGrasp, RELOAD_CONTACT } from './weapon-view.js';
 import { makeYard, sky, Parts, glowMaterial } from './yard-art.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { PelletRenderer } from './pellet-render.js';
-import { clipBarrelOrigin,boundTracerOrigin,nearestShotEnd,visibleTraceEnd,singleShotSpan,SHOT_TRAIL_LIFE } from './shot-path.js';
+import { clipBarrelOrigin,visibleTraceEnd,exitsForward,muzzleDeparture,flightSlices,singleShotSpan,SHOT_TRAIL_LIFE } from './shot-path.js';
 import { knifeMesh,knifeFit,knifePose } from './knife.js';
 import { loadOperators,operatorAvailable,createOperator,updateOperator,disposeOperator,heldMuzzleWorld } from './operator.js';
 
@@ -15,6 +15,7 @@ const clamp=(n,min,max)=>Math.min(max,Math.max(min,n));
 const damp=(from,to,rate,dt)=>from+(to-from)*(1-Math.exp(-rate*dt));
 const weaponNames=[...PRIMARY_WEAPONS,'pistol','knife'];
 const pose=new T.Vector3(),direction=new T.Vector3(),endpoint=new T.Vector3();
+const forwardAxis=new T.Vector3(0,0,-1),beamStart=new T.Vector3(),beamEnd=new T.Vector3();
 const knifeWrist=new T.Vector3(),knifeShoulder=new T.Vector3(.50,-.55,.18);
 const vertical=new T.Vector3(0,1,0);
 const teamColors=['#168bc9','#ed7040'];
@@ -435,8 +436,21 @@ export class ArenaRenderer {
     flare.piece(tongue,0,0,-.085,.047,.17,.047,'#ffd992',-PI/2);
     flare.piece(tongue,-.015,.008,-.053,.036,.107,.025,'#ec9e48',-1.38,-.31);
     flare.piece(tongue,.014,-.007,-.038,.031,.078,.027,'#ffb660',-1.72,.32);
+    // Short radial tongues open in front of the cap. Through iron sights the
+    // slide can hide the core, while the outer tips remain visible around it.
+    const sideFlare=new Parts(),ray=new T.Vector3(),center=new T.Vector3(),scale=new T.Vector3(),rotation=new T.Quaternion(),matrix=new T.Matrix4();
+    for(let i=0;i<5;i++){
+      const angle=i*2*PI/5+.32,radius=.103+.016*Math.cos(i*2.4);
+      const length=.092+.031*Math.sin(i*1.9);
+      ray.set(Math.cos(angle)*radius,Math.sin(angle)*radius,-length);
+      center.copy(ray).multiplyScalar(.5);center.z-=.035;
+      scale.set(.026,ray.length(),.024);
+      rotation.setFromUnitVectors(vertical,ray.normalize());
+      matrix.compose(center,rotation,scale);sideFlare.append(tongue,matrix,i%2?'#ffc56f':'#ffae58');
+    }
     flare.six(0,0,-.024,.041,.047,.041,'#fff7ce',PI/2);tongue.dispose();
-    this.flash.add(flare.mesh(glowMaterial));this.gunRig.add(this.flash);
+    this.barrelTip=new T.Object3D();this.gunRig.add(this.barrelTip);
+    this.flash.add(flare.mesh(glowMaterial));this.scene.add(this.flash);
     this.flash.visible=false;
     // Remote flashes share the prop geometry, but have independent visibility,
     // materials and lifetime; they are depth-tested in the world pass.
@@ -451,6 +465,8 @@ export class ArenaRenderer {
       mesh.visible=false;this.scene.add(mesh);
       return {mesh,ttl:0,actor:null,weapon:null};
     });
+    this.sightFlare=sideFlare.mesh(glowMaterial);
+    this.sightFlare.visible=false;this.flash.add(this.sightFlare);
     this.templates=[operatorTemplate(0),operatorTemplate(1)];
     this.shadowMat=shadowStamp();this.shadowGeo=new T.PlaneGeometry(1.12,1.05);
     this.models=new Map();this.lastSeq=0;this.lastElapsed=-1;this.lastShotFrame=null;
@@ -460,12 +476,15 @@ export class ArenaRenderer {
     this.aim=0;this.bob=0;this.eye=1.55;this.roll=0;this.lastFocus=null;
     this.lookSwayX=0;this.lookSwayY=0;this.lastYaw=null;this.lastPitch=null;this.equip=0;this.active=null;
     this.tracers=[];this.shotsThisFrame=[];this.viewMuzzle=new T.Vector3();this.actorMuzzle=new T.Vector3();
+    this.viewForward=new T.Vector3();this.actorForward=new T.Vector3();this.actorRotation=new T.Quaternion();
     this.spark=[];this.marks=new ImpactMarks(this.scene);this.res={w:0,h:0};this.performanceScale=1;
     this.shotTrails=new PelletRenderer(this.scene);
     const beamGeo=new T.CylinderGeometry(1,1,1,5,1,true);
     for(let i=0;i<16;i++){
       const mesh=new T.Mesh(beamGeo,new T.MeshBasicMaterial({color:0xffdd91,transparent:true,depthWrite:false}));
-      mesh.visible=false;this.scene.add(mesh);this.tracers.push({mesh,ttl:0,start:new T.Vector3(),delta:new T.Vector3()});
+      const flightMesh=mesh.clone();mesh.visible=flightMesh.visible=false;
+      this.scene.add(mesh,flightMesh);
+      this.tracers.push({mesh,flightMesh,ttl:0,start:new T.Vector3(),end:new T.Vector3()});
     }
     const sparkGeo=new T.OctahedronGeometry(1);
     for(let i=0;i<14;i++){
@@ -584,8 +603,11 @@ export class ArenaRenderer {
       if(!actor?.alive||actor.active!=='knife'||swing.age>=.55)this.meleeSwings.delete(id);
     }
     this.shotTrails.step(dt);
-    this.shotAge+=shotDt;this.recoil=this.shotStrength*shotResponse(this.shotAge,this.shotWeapon);
+    this.shotAge+=shotDt;this.recoil=this.shotStrength*shotKickResponse(this.shotAge,this.shotWeapon);
     this.flashTime=Math.max(0,this.flashTime-shotDt);
+    if(this.flashTime>0 && this.shotWeapon){
+      this.flash.scale.setScalar(.91*gunFit[this.shotWeapon].flash*this.flashTime/LOCAL_IGNITION_LIFE);
+    }
     if(game.seq<this.lastSeq || game.elapsed<this.lastElapsed){this.lastSeq=0;this.marks.clear();this.clearShotEffects();this.meleeAge=.55;this.meleeSwings.clear();this.resetShot();}
     this.lastElapsed=game.elapsed;
     const events=game.events||[];
@@ -616,14 +638,16 @@ export class ArenaRenderer {
       const mine=e.actor===focus?.id;
       if(mine && focus.alive && e.weapon===focus.active){
         this.shotStrength=(gunFit[e.weapon]?.flash||1)+Math.min(.18,Math.max(0,.13-this.shotAge));
-        this.shotAge=0;this.shotWeapon=e.weapon;this.recoil=this.shotStrength;this.flashTime=e.blocked?0:shotFlashDuration(e.weapon);
+        this.shotAge=0;this.shotWeapon=e.weapon;
+        this.flashTime=e.blocked?0:LOCAL_IGNITION_LIFE;
       }
       const hit=events[i+1]?.type==='hit'&&events[i+1].actor===e.actor?events[i+1]:null;
       this.shotsThisFrame.push({event:e,mine,hit});
     }
     this.marks.step(dt);
     for(const tracer of this.tracers)if(tracer.ttl>0) {
-      tracer.ttl=Math.max(0,tracer.ttl-shotDt);tracer.mesh.visible=tracer.ttl>0;
+      tracer.ttl=Math.max(0,tracer.ttl-shotDt);
+      if(!tracer.ttl)tracer.mesh.visible=tracer.flightMesh.visible=false;
     }
     for(const particle of this.spark)if(particle.ttl>0) {
       particle.ttl=Math.max(0,particle.ttl-dt);particle.mesh.visible=particle.ttl>0;
@@ -634,28 +658,39 @@ export class ArenaRenderer {
   }
   clearShotEffects(){
     this.clearRemoteFlashes();this.shotTrails.clear();this.shotsThisFrame.length=0;
-    for(const t of this.tracers){t.ttl=0;t.mesh.visible=false;}
+    this.flash.visible=false;this.flashTime=0;
+    for(const t of this.tracers){t.ttl=0;t.mesh.visible=t.flightMesh.visible=false;}
   }
 
   renderShots(game,focus,cam){
     for(const {event:e,mine,hit} of this.shotsThisFrame){
       const actor=game.players.find(p=>p.id===e.actor);
-      const held=mine ? focus.alive&&focus.active===e.weapon : this.remoteMuzzle(e.actor,e.weapon,this.actorMuzzle);
-      let origin=e;
+      const held=mine ? focus.alive&&focus.active===e.weapon : this.remoteMuzzle(e.actor,e.weapon,this.actorMuzzle,this.actorRotation);
+      let origin=e,forward=null;
       endpoint.set(e.ex,e.ey,e.ez);
       if(held&&!e.blocked){
         const eye=mine?cam.position:{x:actor.x,y:actor.y+eyeHeight(actor),z:actor.z};
         const tip=mine?this.viewMuzzle:this.actorMuzzle;
         const clipped=clipBarrelOrigin(eye,tip,this.map);
+        origin=tip;
+        if(clipped.blocked){
+          if(mine){this.flash.visible=false;this.flashTime=0;}
+          const {x,y,z}=clipped.impact;
+          this.burst(x,y,z,0xffe5af,.092,.07);
+          continue;
+        }
+        forward=mine?this.viewForward:this.actorForward.copy(forwardAxis).applyQuaternion(this.actorRotation);
         if(mine){
-          const point=nearestShotEnd(e,eye);
-          origin=boundTracerOrigin(clipped,{x:point.ex,y:point.ey,z:point.ez},eye);
-        }else origin=clipped;
-        if(mine&&clipped.blocked){this.flash.visible=false;this.flashTime=0;}
-        if(!mine&&!clipped.blocked)this.flashRemote(e.actor,e.weapon,e.seq,clipped);
+          // Leave the light at the firing pose while the hands recoil or turn.
+          this.flash.position.copy(origin);
+          this.flash.quaternion.setFromUnitVectors(forwardAxis,forward);
+          this.flash.rotateZ(e.seq*1.9);this.flash.scale.setScalar(.91*gunFit[e.weapon].flash);
+          this.sightFlare.visible=this.aim>.65&&['pistol','rifle','smg'].includes(e.weapon);
+          this.flash.visible=this.flashTime>0;
+        }else this.flashRemote(e.actor,e.weapon,e.seq,origin);
       }
       if(e.weapon==='shotgun'&&!e.blocked){
-        const trails=this.shotTrails.add(e,mine,origin,this.map);
+        const trails=this.shotTrails.add(e,mine,origin,this.map,forward);
         trails.forEach((trail,index)=>{
           direction.set(trail.dx,trail.dy,trail.dz).normalize();
           trail.contact=!!trail.target||this.marks.add(this.map,{...trail,weapon:'shotgun',seq:e.seq*10+index},direction);
@@ -667,10 +702,10 @@ export class ArenaRenderer {
       if(!e.blocked){
         const end=visibleTraceEnd(origin,endpoint,this.map);
         const t=this.tracers[this.traceIndex++%this.tracers.length];
-        t.start.set(origin.x,origin.y,origin.z);t.delta.set(end.x,end.y,end.z).sub(t.start);
-        t.length=t.delta.length();t.weapon=e.weapon;t.ttl=t.length>.012?SHOT_TRAIL_LIFE:0;
-        t.mesh.visible=t.ttl>0;t.mesh.material.color.setHex(mine?0xffdf9e:0xffad7b);
-        if(t.ttl)t.mesh.quaternion.setFromUnitVectors(vertical,direction.copy(t.delta).normalize());
+        t.start.copy(origin);t.end.copy(end);t.length=t.start.distanceTo(t.end);
+        t.departure=muzzleDeparture(origin,end,forward,this.map);
+        t.weapon=e.weapon;t.ttl=t.length>.012&&exitsForward(origin,end,forward)?SHOT_TRAIL_LIFE:0;
+        t.mesh.visible=t.flightMesh.visible=false;t.mesh.material.color.setHex(mine?0xffdf9e:0xffad7b);
       }
       const target=hit&&game.players.find(p=>p.id===hit.target);
       if(landed||hit)this.burst(e.ex,e.ey,e.ez,target?teamLights[target.team]:0xffe5af,hit?.14:.092,hit?.16:.085);
@@ -678,10 +713,19 @@ export class ArenaRenderer {
     const pixel=2*Math.tan(cam.fov*PI/360)/this.res.h;
     for(const t of this.tracers){
       if(t.ttl<=0)continue;
-      const span=singleShotSpan(t.length,SHOT_TRAIL_LIFE-t.ttl,t.weapon);
-      t.mesh.position.copy(t.start).addScaledVector(t.delta,(span.tail+span.head)*.5);
-      const radius=Math.max(t.weapon==='sniper'?.008:.005,cam.position.distanceTo(t.mesh.position)*pixel*.55);
-      t.mesh.scale.set(radius,(span.head-span.tail)*t.length,radius);
+      const span=singleShotSpan(t.departure?.length??t.length,SHOT_TRAIL_LIFE-t.ttl,t.weapon);
+      t.mesh.visible=t.flightMesh.visible=false;
+      flightSlices(t.length,t.departure,span.tail,span.head,(exit,a,b)=>{
+        const mesh=exit||!t.departure?t.mesh:t.flightMesh;
+        const from=exit||!t.departure?t.start:t.departure,to=exit?t.departure:t.end;
+        beamStart.lerpVectors(from,to,a);beamEnd.lerpVectors(from,to,b);
+        mesh.position.copy(beamStart).lerp(beamEnd,.5);
+        const length=direction.subVectors(beamEnd,beamStart).length();
+        if(length<.0001)return;
+        const radius=Math.max(t.weapon==='sniper'?.008:.005,cam.position.distanceTo(mesh.position)*pixel*.55);
+        mesh.scale.set(radius,length,radius);mesh.quaternion.setFromUnitVectors(vertical,direction.divideScalar(length));
+        mesh.visible=true;
+      });
       t.mesh.material.opacity=span.alpha;
     }
   }
@@ -828,8 +872,8 @@ export class ArenaRenderer {
     const handling=weapon.userData.handling;
     this.gunRig.position.set(gunX+reloadWeight*(handling?.center??.042),gunY+reloadWeight*.059+reload.bump*.008-this.equip*.12,
       gunZ-reloadWeight*.17+this.recoil*(.030+.017*hip));
-    this.gunRig.rotation.set(this.recoil*(.057+.040*hip)+hip*.049+reloadWeight*.088-this.equip*.18,
-      .090*hip+reloadWeight*.10+this.lookSwayX*.55,-.032*hip+reloadWeight*(handling?.roll??.39)+reload.bump*.028+this.recoil*.014);
+    this.gunRig.rotation.set(this.recoil*(.057+.040*hip)+hip*.012+reloadWeight*.088-this.equip*.18,
+      .025*hip+reloadWeight*.10+this.lookSwayX*.55,-.032*hip+reloadWeight*(handling?.roll??.39)+reload.bump*.028+this.recoil*.014);
     if(key==='shotgun'){
       this.gunRig.position.x-=.098*reloadWeight;
       this.gunRig.position.y-=.038*cycle.stroke;
@@ -843,7 +887,7 @@ export class ArenaRenderer {
       this.gunRig.position.y+=.061*reloadWeight-.025*cycle.grasp;
       this.gunRig.position.z+=.066*cycle.grasp+.092*this.recoil;
       this.gunRig.rotation.x+=.082*this.recoil-.060*cycle.stroke;
-      this.gunRig.rotation.y+=.13*hip-.20*cycle.grasp-.11*reloadWeight+.020*this.recoil;
+      this.gunRig.rotation.y+=-.20*cycle.grasp-.11*reloadWeight+.020*this.recoil;
       this.gunRig.rotation.z-=.33*cycle.grasp+.73*reloadWeight;
       // Shoulders stay below the camera when the rifle lifts for a reload.
       placeSleeve(weapon,weapon.userData.support,leftShoulder);
@@ -860,14 +904,16 @@ export class ArenaRenderer {
       this.knifeArm.quaternion.setFromUnitVectors(vertical,direction.normalize());this.knifeArm.scale.set(1,armLength,1);
     }
     this.knifeArm.visible=key==='knife';
-    this.flash.position.set(fit.muzzleX??0,fit.muzzleY,fit.muzzle);this.flash.scale.setScalar(fit.flash);this.flash.visible=key!=='knife'&&this.flashTime>0;
-    this.flash.rotation.z=this.traceIndex*1.9;
+    this.barrelTip.position.set(fit.muzzleX??0,fit.muzzleY,fit.muzzle);
+    if(key==='knife'||this.flashTime<=0)this.flash.visible=false;
     this.ring.material.opacity=game.phase==='overtime'?.70+.19*Math.sin(t*5):.32;
     this.ring.material.color.setHex(game.phase==='overtime'&&game.capture?.team!==null?teamLights[game.capture?.team]||0xffdf78:0xffd77b);
-    cam.updateMatrixWorld();this.flash.getWorldPosition(this.viewMuzzle);
-    // Match the viewmodel's lens so the fan leaves the visible barrel, even in ADS.
+    cam.updateMatrixWorld();this.barrelTip.getWorldPosition(this.viewMuzzle);
+    // Transform a position AND its bore tangent through the two camera lenses.
     const lens=Math.tan(cam.fov*PI/360)/Math.tan(this.gunCamera.fov*PI/360);
     this.viewMuzzle.x*=lens;this.viewMuzzle.y*=lens;this.viewMuzzle.applyQuaternion(cam.quaternion).add(cam.position);
+    this.viewForward.copy(forwardAxis).transformDirection(this.barrelTip.matrixWorld);
+    this.viewForward.x*=lens;this.viewForward.y*=lens;this.viewForward.applyQuaternion(cam.quaternion).normalize();
     this.renderShots(game,focus,cam);
     this.shotTrails.draw(cam,this.res.h);
     this.gl.clear();this.gl.render(this.scene,cam);

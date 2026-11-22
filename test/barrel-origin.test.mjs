@@ -4,7 +4,7 @@ import {createRange,stepGame,eyeHeight,firingMuzzle,MAX_HP} from '../dist/sim.js
 import {getArena} from '../dist/arena-map.js';
 import {gunFit} from '../dist/gun-fit.js';
 import {worldHit} from '../dist/arena-world.js';
-import {boundTracerOrigin,clipBarrelOrigin,nearestShotEnd,pelletTrails,pelletSpan,singleShotSpan} from '../dist/shot-path.js';
+import {clipBarrelOrigin,pelletTrails,pelletSpan,singleShotSpan} from '../dist/shot-path.js';
 import {sniperScopeVisible} from '../dist/weapon-view.js';
 
 test('every gun publishes the muzzle as its shot origin for hip and aimed fire',t=>{
@@ -45,7 +45,8 @@ test('an opponent already touching the barrel intercepts the shot before the far
   const game=createRange({weapon:'sniper',mapId:'switchyard'}),p=game.players[0];
   Object.assign(p,{yaw:0,pitch:0});
   const [near,far]=game.targets;
-  Object.assign(near,{x:p.x,y:0,z:p.z-.56,yaw:0});
+  // Put the front face of the dummy's head across the eye-to-barrel segment.
+  Object.assign(near,{x:p.x,y:0,z:p.z-.48,yaw:0});
   Object.assign(far,{x:p.x,y:0,z:p.z-4,yaw:0});
   game.targets=[near,far];
   stepGame(game,{[p.id]:{fire:true,yaw:0,pitch:0}},1/60);
@@ -65,12 +66,25 @@ test('each tracer starts at the cap on the first visible frame, including long s
   }
   assert.ok(singleShotSpan(95,.04,'rifle').tail>0);
   const map={width:50,depth:50,boxes:[],ramps:[]},eye={x:0,y:1.55,z:0};
-  const end={x:0,y:1.55,z:-.22},near=boundTracerOrigin(tip,end,eye);
-  const nearPellet={ex:end.x,ey:end.y,ez:end.z};
-  assert.equal(nearestShotEnd({...event,pellets:[event,nearPellet,event]},eye),nearPellet);
-  assert.ok(near.z>end.z && near.z<0);
-  assert.ok(Math.abs(near.x/near.z-tip.x/tip.z)<1e-8);
   assert.equal(clipBarrelOrigin(eye,tip,map).blocked,false);
   assert.equal(sniperScopeVisible('sniper',.4,true),false);
   assert.equal(sniperScopeVisible('sniper',1,true),true);
+});
+
+test('a reticle target already beside the barrel cannot pull its origin into the player',t=>{
+  t.mock.method(Math,'random',()=>0);
+  const game=createRange({weapon:'sniper',mapId:'switchyard'}),p=game.players[0];
+  Object.assign(p,{yaw:0,pitch:0});
+  const cap=firingMuzzle(p),[near,far]=game.targets;
+  // The sight line skims the thin side of the target. The actual gun clears it.
+  Object.assign(near,{x:p.x-.13,y:0,z:p.z-.70,yaw:Math.PI/2});
+  Object.assign(far,{x:cap.x,y:0,z:p.z-4,yaw:0});
+  game.targets=[near,far];
+  stepGame(game,{[p.id]:{fire:true,yaw:0,pitch:0}},1/60);
+  const shot=game.events.find(e=>e.type==='shot');
+  assert.ok(!shot.blocked);
+  assert.deepEqual([shot.x,shot.y,shot.z],[cap.x,cap.y,cap.z]);
+  assert.ok(shot.ez<shot.z);
+  assert.equal(near.hp,MAX_HP);
+  assert.equal(game.events.find(e=>e.type==='hit')?.target,far.id);
 });
