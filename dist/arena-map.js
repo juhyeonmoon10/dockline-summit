@@ -5,7 +5,7 @@ const start = [
   {x:1.8,z:18.25,yaw:.25}, {x:-2.8,z:18.4,yaw:-.33}, {x:.1,z:19.4,yaw:-.08}
 ];
 export const MAP = {
-  id:'summit', label:'서밋 아레나', name:'서밋 아레나', description:'중앙 고가교와 양쪽 경사로가 만나는 입체 경기장', width:35, depth:42,
+  id:'summit', label:'서밋 옥상', name:'서밋 옥상', title:'SUMMIT', description:'중앙 고가교와 양쪽 경사로가 만나는 옥상 경기장', width:35, depth:42,
   zone:{x:0,y:2.58,z:0,r:2.24},
   spawns:[start,start.map(p=>({x:-p.x,z:-p.z,yaw:p.yaw+Math.PI}))],
   patrols:[
@@ -37,33 +37,41 @@ export const MAP = {
 };
 
 const yardStart = [
-  {x:-3.0,z:19.4,yaw:.10}, {x:-8.4,z:20.1,yaw:.20}, {x:8.0,z:19.8,yaw:-.17}
+  {x:-3.0,z:21.2,yaw:.22}, {x:-6.8,z:21.5,yaw:.34}, {x:6.4,z:22.1,yaw:-.22}
 ];
+// Preserve the public room and saved preference ID of the old freight yard.
 const SWITCHYARD = {
-  id:'switchyard', label:'스위치야드', name:'스위치야드', description:'화차 사이의 평면 교차로와 양옆의 높은 화물 승강장',
-  width:42, depth:46, zone:{x:0,y:0,z:0,r:2.45},
+  id:'switchyard', label:'세관 4번 창고', name:'세관 4번 창고', title:'CUSTOMS 04',
+  description:'중앙 계근대, 서쪽 검수 통로, 동쪽 하역 데크',
+  preview:{x:11.8,y:5.4,z:17.7,targetX:-.5,targetY:2.65,targetZ:-1.6},
+  width:32, depth:48, zone:{x:0,y:0,z:0,r:2.45},
   spawns:[yardStart,yardStart.map(p=>({x:-p.x,z:-p.z,yaw:p.yaw+Math.PI}))],
-  patrols:[{x:0,y:0,z:.4},{x:-13.2,y:1.48,z:.4},{x:9.4,y:0,z:5}]
+  patrols:[{x:0,y:0,z:.4},{x:-12,y:0,z:7},{x:10.2,y:0,z:12.8}]
     .map((opening,seat)=>[opening,{x:-yardStart[seat].x,y:0,z:-yardStart[seat].z}]),
-  plates:pair({x:-3,y:1.65,z:14.7}),
+  plates:pair({x:-3,y:1.65,z:15.7}),
   rangeTargets:[
-    {x:-3,y:0,z:14.3}, {x:-8.1,y:0,z:7.6}, {x:.45,y:0,z:-2.4}, {x:-13.2,y:1.48,z:-3.7}
+    {x:-3,y:0,z:15.8}, {x:1.4,y:0,z:10.4}, {x:-11.9,y:0,z:12.6}, {x:8.5,y:0,z:15.15}
   ],
   boxes:[
-    ...pair({x:5.3,z:7.45,w:3.15,d:9.1,h:3.18,kind:'boxcar'}),
-    ...pair({x:-5.3,z:10.45,w:3.12,d:6.1,h:.93,kind:'flatcar'}),
-    ...pair({x:-5.3,z:9.15,w:2.65,d:2.8,base:.93,h:2.55,kind:'freight'}),
-    ...pair({x:13.2,z:-.4,w:4.5,d:12.8,h:1.48,kind:'platform'}),
-    ...pair({x:-14.8,z:15,w:4.8,d:2.8,h:2.25,kind:'freight'}),
-    ...pair({x:1.1,z:14.2,w:2.45,d:2.35,h:2.14,kind:'freight'}),
-    ...pair({x:-8.7,z:3.35,w:1.8,d:3.0,h:1.04,kind:'supply'}),
-    ...pair({x:3.85,z:-2.45,w:1.65,d:1.6,h:1.18,kind:'relay'}),
-    ...pair({x:17.8,z:7.5,w:2.8,d:5.25,h:2.55,kind:'relay'}),
+    ...pair({x:5.3,z:8.8,w:3.15,d:7.9,h:3.14,kind:'trailer'}),
+    ...pair({x:5.3,z:13.67,w:2.84,d:1.84,h:2.76,kind:'cab'}),
+    ...pair({x:5.3,z:15.04,w:2.84,d:.9,h:1.21,kind:'hood'}),
+    ...pair({x:-2.6,z:5.0,w:10.65,d:.48,h:3.24,kind:'partition'}),
+    ...pair({x:-8.15,z:8.6,w:.46,d:7.65,h:4.8,kind:'inspection'}),
+    ...pair({x:-12.0,z:9.2,w:4.5,d:.44,h:3.1,kind:'officeDoor'}),
+    ...pair({x:-14.7,z:4.0,w:.44,d:9.3,h:3.1,kind:'officeWindow'}),
+    ...pair({x:12.9,z:.4,w:5.4,d:9.2,h:1.18,kind:'dock'}),
+    ...pair({x:9.9,z:.55,w:.55,d:5.5,h:1.87,kind:'pallet'}),
+    ...pair({x:7.9,z:18.0,w:2.7,d:1.4,h:.96,kind:'sack'}),
+    ...pair({x:-13.7,z:19.2,w:3.4,d:2.4,h:2.14,kind:'pallet'}),
+    ...pair({x:-9.1,z:14.5,w:1.4,d:1.4,h:1.09,kind:'crate'}),
+    ...pair({x:14.25,z:12.7,w:2.6,d:3.3,h:2.27,kind:'pallet'}),
+    {x:0,z:0,w:2.82,d:.55,base:3.92,h:4.86,kind:'display'},
   ],
-  ramps:pairedRamp({x:13.2,z:8.8,w:4.5,d:5.6,h:1.48,axis:'z',sign:-1,kind:'platform'}),
+  ramps:pairedRamp({x:12.9,z:7.2,w:5.4,d:4.4,h:1.18,axis:'z',sign:-1,kind:'dock'}),
 };
 
-export const ARENAS = [MAP, SWITCHYARD];
+export const ARENAS = [SWITCHYARD, MAP];
 export function getArena(id) {
   return ARENAS.find(arena=>arena.id===id) || MAP;
 }

@@ -5,6 +5,7 @@ import { nextWaypoint } from './arena-routes.js';
 import { tacticalBotInput } from './tactics.js';
 import { MAX_HP, WEAPONS, impactDamage, isPrimaryWeapon, botLoadouts } from './balance.js';
 export { MAP, MAX_HP, WEAPONS };
+export const TEAM_SIZES = Object.freeze([1,2,3]);
 
 const playerMemory = new WeakMap();
 
@@ -64,7 +65,7 @@ export function createRange({ id='local', name='나', weapon='rifle', mapId } = 
 
 export function createGame({ size = 2, players = [], warmup = 15, mapId } = {}) {
   const map = getArena(mapId);
-  size = size === 3 ? 3 : 2;
+  if (!TEAM_SIZES.includes(size)) size = 2;
   const roster = [];
   const botWeapon = botLoadouts();
   const used = new Set();

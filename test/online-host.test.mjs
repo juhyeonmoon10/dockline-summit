@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OnlineHost } from '../dist/online-host.js';
+import { createRange } from '../dist/sim.js';
 
 function fixture(size=2,mapId) {
   let wall=1000;
@@ -18,6 +19,36 @@ test('guests see the host arena in both the lobby and the first match snapshot',
   host.action('host','start',{fillBots:true});
   assert.equal(games[0].mapId,'switchyard');
   assert.equal(games[0].players.find(p=>p.id==='guest').weapon,'burst');
+});
+
+test('duels support a ready opponent or one bot and leave the practice range independent',()=>{
+  const {host,games}=fixture(1);
+  assert.equal(host.room.needed,2);
+  assert.throws(()=>host.action('host','start'),/자리가/);
+  host.join('guest',{});
+  assert.deepEqual(host.room.players.map(p=>p.team),[0,1]);
+  assert.throws(()=>host.join('extra',{}),/가득/);
+  assert.throws(()=>host.action('guest','team',{team:0}),/빈자리/);
+  assert.throws(()=>host.action('host','start',{fillBots:true}),/준비/);
+  host.action('guest','ready',{ready:true});
+  host.action('host','start');
+  assert.equal(games[0].size,1);
+  assert.deepEqual(games[0].players.map(p=>p.bot),[false,false]);
+  host.game.phase='warmup';host.game.time=0;
+  host.tick(1/30);
+  assert.equal(host.game.phase,'round');
+  assert.deepEqual(host.game.targets,[]);
+  host.game.players[1].alive=false;
+  host.tick(1/30);
+  assert.deepEqual(host.game.score,[1,0]);
+
+  const {host:solo}=fixture(1);
+  solo.action('host','start',{fillBots:true});
+  assert.deepEqual(solo.game.players.map(p=>p.bot),[false,true]);
+  const range=createRange();
+  assert.equal(range.phase,'range');
+  assert.deepEqual(range.players.map(p=>p.bot),[false]);
+  assert.ok(range.targets.length && range.targets.every(t=>t.kind==='dummy'));
 });
 
 test('online lobby enforces capacity, balanced teams, names and ready/start gates',()=>{

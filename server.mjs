@@ -6,7 +6,7 @@ import { networkInterfaces } from 'node:os';
 import { extname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
-import { createGame, stepGame } from './dist/sim.js';
+import { createGame, stepGame, TEAM_SIZES } from './dist/sim.js';
 import { gameSnapshot } from './dist/game-snapshot.js';
 import { getArena } from './dist/arena-map.js';
 import { isPrimaryWeapon, botLoadouts } from './dist/balance.js';
@@ -178,7 +178,7 @@ async function handleAPI(req, res, url) {
   if (req.method !== 'POST') fail(405, '지원하지 않는 요청입니다.');
   const body = await readJSON(req);
   if (action === 'create') {
-    if (![2, 3].includes(body.size)) fail(400, '팀 인원은 2명 또는 3명입니다.');
+    if (!TEAM_SIZES.includes(body.size)) fail(400, '팀 인원은 1~3명입니다.');
     if (rooms.size >= 32) fail(503, '사용 중인 방이 많습니다. 잠시 뒤 다시 시도해 주세요.');
     let code;
     do { code = codeForRoom(); } while (rooms.has(code));

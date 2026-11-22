@@ -2,7 +2,7 @@ import * as T from './assets/three.module.min.js';
 import { blasterMesh, gunFit } from './blaster.js';
 import { PRIMARY_WEAPONS } from './balance.js';
 import { eyeHeight, WEAPONS } from './sim.js';
-import { approachAim, canAim, weaponFov } from './weapon-view.js';
+import { approachAim, canAim, weaponFov, reloadPose, shotResponse } from './weapon-view.js';
 import { makeYard, sky, Parts, glowMaterial } from './yard-art.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { PelletRenderer } from './pellet-render.js';
@@ -124,6 +124,26 @@ function glove(support,fit,handOnly=false) {
   const elbow=[side*(support?.188:.235),support?-.258:-.258,center+(support?.50:.36)];
   const cuff=[side*(support?.065:.069),grip-.048,center+.03];
   const joint=f=>elbow.map((n,i)=>n+(cuff[i]-n)*f);
+  if(fit===gunFit.rifle){
+    // The guard's cuff and reinforcement panels sit inside the existing hand envelope.
+    limb(parts,elbow,joint(.74),.065,.050,'#323f44');
+    limb(parts,joint(.41),joint(.61),.058,.053,'#3c494b');
+    limb(parts,joint(.62),joint(.66),.0535,.0525,'#49524c');
+    limb(parts,joint(.70),cuff,.049,.039,'#292f31');
+    limb(parts,joint(.78),joint(.86),.049,.045,'#3c4340');
+    pod(parts,side*.057,grip,center+.004,.077,.091,.122,'#353b38',-.23,0,side*.10);
+    pod(parts,side*.081,grip+.009,center+.009,.034,.056,.071,'#4b5049',-.24);
+    // Stagger the fingertip pads, dark binding and cuff stitching so the hand reads in silhouette.
+    for(let i=0;i<3;i++){
+      const y=grip+.023-i*.025,z=center-.041+i*.002;
+      pod(parts,side*.032,y,z,.085-i*.002,.024,.036,'#434942',-.10,-side*.17);
+      pod(parts,side*.071,y+.001,z+.007,.029,.022,.028,'#55594e',-.18);
+      pod(parts,side*.051,y-.001,z-.009,.014,.021,.025,'#303734',-.10,-side*.18);
+    }
+    pod(parts,side*.042,grip+.039,center+.030,.035,.046,.073,'#454d44',-.40,side*.35);
+    for(let i=0;i<4;i++)parts.cube(side*.095,grip-.005+i*.006,center+.015-i*.005,.002,.0028,.005,'#676957');
+    group.add(parts.mesh());return group;
+  }
   if(!handOnly){
     limb(parts,elbow,joint(.73),.065,.051,'#30475a');
     limb(parts,joint(.53),joint(.66),.059,.056,'#5f7784');
@@ -150,7 +170,9 @@ export function gunModel(type) {
   }
   const group=new T.Group(),body=blasterMesh(type),fit=gunFit[type];
   const strong=glove(false,fit),support=glove(true,fit);
-  group.add(body,strong,support);group.userData={fit,body,support,magazine:body.getObjectByName('magazine')};
+  const magazine=body.getObjectByName('magazine');
+  const contact=magazine ? new T.Box3().setFromObject(magazine).getCenter(new T.Vector3()) : new T.Vector3(-.03,-.11,fit.support+.11);
+  group.add(body,strong,support);group.userData={fit,body,support,magazine,contact};
   return group;
 }
 
@@ -290,6 +312,7 @@ export class ArenaRenderer {
     this.templates=[operatorTemplate(0),operatorTemplate(1)];
     this.shadowMat=shadowStamp();this.shadowGeo=new T.PlaneGeometry(1.12,1.05);
     this.models=new Map();this.lastSeq=0;this.lastElapsed=-1;this.recoil=0;this.flashTime=0;
+    this.shotAge=.28;this.shotStrength=0;
     this.meleeAge=.55;this.meleeSide=1;this.meleeSwings=new Map();
     this.plates=new Map();
     this.aim=0;this.bob=0;this.eye=1.55;this.roll=0;this.lastFocus=null;
@@ -335,9 +358,10 @@ export class ArenaRenderer {
     this.worldCamera.updateProjectionMatrix();this.gunCamera.updateProjectionMatrix();
   }
   avatar(player) {
-    if(!operatorAvailable())loadOperators();
+    const team=player.team===1?1:0;
+    if(!operatorAvailable(team))loadOperators();
     let a=this.models.get(player.id);
-    const useRig=operatorAvailable();
+    const useRig=operatorAvailable(team);
     if(a && a.team===player.team && !!a.rig===useRig)return a;
     if(a){this.scene.remove(a.group,a.shadow);if(a.rig)disposeOperator(a.rig);}
     const rig=useRig?createOperator(player.team===1?1:0):null;
@@ -374,7 +398,8 @@ export class ArenaRenderer {
       if(!actor?.alive||actor.active!=='knife'||swing.age>=.55)this.meleeSwings.delete(id);
     }
     this.shotTrails.step(dt);
-    this.recoil=damp(this.recoil,0,18,dt);this.flashTime=Math.max(0,this.flashTime-dt);
+    this.shotAge+=dt;this.recoil=this.shotStrength*shotResponse(this.shotAge);
+    this.flashTime=Math.max(0,this.flashTime-dt);
     if(game.seq<this.lastSeq || game.elapsed<this.lastElapsed){this.lastSeq=0;this.marks.clear();this.shotTrails.clear();this.meleeAge=.55;this.meleeSwings.clear();}
     this.lastElapsed=game.elapsed;
     const events=game.events||[];
@@ -403,7 +428,10 @@ export class ArenaRenderer {
       }
       if(e.type!=='shot'||!Number.isFinite(e.ex))continue;
       const mine=e.actor===focus?.id;
-      if(mine){this.recoil=(gunFit[e.weapon]?.flash||1);this.flashTime=.057;}
+      if(mine){
+        this.shotStrength=(gunFit[e.weapon]?.flash||1)+Math.min(.18,Math.max(0,.13-this.shotAge));
+        this.shotAge=0;this.recoil=this.shotStrength;this.flashTime=.027;
+      }
       if(e.weapon==='shotgun'){
         const trails=this.shotTrails.add(e,mine,focus?.ads);
         trails.forEach((trail,index)=>{
@@ -497,9 +525,9 @@ export class ArenaRenderer {
     for(const e of [...this.tracers,...this.spark]){e.ttl=0;e.mesh.visible=false;}
     this.lastSeq=0;this.lastElapsed=-1;this.lastFocus=null;
     const c=this.worldCamera;
-    // The right hand side frames the open lane and skyline under the game menu.
-    c.position.set(13+Math.sin(t*.036)*.72,7.1+Math.sin(t*.025)*.14,20+Math.cos(t*.036)*.44);
-    c.lookAt(-1.3,1.64,-1.7);c.fov=58;c.updateProjectionMatrix();
+    const preview=this.map.preview;
+    c.position.set((preview?.x??13)+Math.sin(t*.036)*.72,(preview?.y??7.1)+Math.sin(t*.025)*.14,(preview?.z??20)+Math.cos(t*.036)*.44);
+    c.lookAt(preview?.targetX??-1.3,preview?.targetY??1.64,preview?.targetZ??-1.7);c.fov=58;c.updateProjectionMatrix();
     this.ring.material.opacity=.35;this.ring.material.color.setHex(0xffca74);
     this.gl.clear();this.gl.render(this.scene,c);
   }
@@ -562,16 +590,19 @@ export class ArenaRenderer {
     this.equip=damp(this.equip,0,14,dt);
     for(const [id,gun] of Object.entries(this.guns))gun.visible=id===key;
     const weapon=this.guns[key],sniper=key==='sniper';
-    const progress=focus.reload>0?clamp(1-focus.reload/(focus.reloadDuration||WEAPONS[key].reload),0,1):0;
-    const reloadWeight=Math.pow(Math.sin(PI*progress),.72);
-    // Pull the real, separately authored magazine out of the receiver and reseat it.
-    const pull=progress>.13&&progress<.83?Math.sin((progress-.13)/.70*PI):0;
+    const reload=reloadPose(focus,key),reloadWeight=reload.tilt;
+    const pull=reload.travel, contact=weapon.userData.contact;
     if(weapon.userData.magazine){
-      weapon.userData.magazine.position.set(-pull*.038,-pull*.140,pull*.030);
-      weapon.userData.magazine.rotation.z=pull*.19;
+      weapon.userData.magazine.position.set(-pull*.062,-pull*.20,pull*.056);
+      weapon.userData.magazine.rotation.z=pull*.14;
     }
-    weapon.userData.support.position.set(.015*pull,-.064*pull,pull*.172);
-    weapon.userData.support.rotation.x=-.13*pull;
+    if(contact){
+      weapon.userData.support.position.set(
+        (contact.x+.025)*reload.reach-.062*pull,
+        (contact.y+.042)*reload.reach-.20*pull,
+        (contact.z-weapon.userData.fit.support)*reload.reach+.056*pull);
+      weapon.userData.support.rotation.x=-.09*pull;
+    }
     if(first){this.lastYaw=yaw;this.lastPitch=pitch;}
     const turn=Math.atan2(Math.sin(yaw-this.lastYaw),Math.cos(yaw-this.lastYaw));
     this.lookSwayX=damp(this.lookSwayX,clamp(turn*.22,-.046,.046),15,dt);
@@ -582,9 +613,10 @@ export class ArenaRenderer {
     const gunX=(.188+Math.sin(this.bob)*.009*sway-this.lookSwayX)*hip;
     const gunY=(-.174-Math.abs(Math.cos(this.bob))*.009*sway-this.lookSwayY)*hip-(fit.sight*.91+.009)*this.aim;
     const gunZ=(key==='pistol'?-.35:-.422)+.029*this.aim;
-    this.gunRig.position.set(gunX+reloadWeight*.010,gunY-reloadWeight*.038-this.equip*.12,gunZ+this.recoil*.045);
-    this.gunRig.rotation.set(this.recoil*.094+hip*.049-reloadWeight*.19-this.equip*.18,
-      .090*hip+reloadWeight*.13+this.lookSwayX*.55,-.032*hip+reloadWeight*.46+this.recoil*.017);
+    this.gunRig.position.set(gunX+reloadWeight*.042,gunY+reloadWeight*.059+reload.bump*.008-this.equip*.12,
+      gunZ-reloadWeight*.17+this.recoil*(.030+.017*hip));
+    this.gunRig.rotation.set(this.recoil*(.057+.040*hip)+hip*.049+reloadWeight*.088-this.equip*.18,
+      .090*hip+reloadWeight*.10+this.lookSwayX*.55,-.032*hip+reloadWeight*.39+reload.bump*.028+this.recoil*.014);
     if(key==='knife'){
       const cut=knifePose(this.meleeAge,this.meleeSide);
       this.gunRig.position.set(.245+cut.x+Math.sin(this.bob)*.008*sway-this.lookSwayX,-.235+cut.y-Math.abs(Math.cos(this.bob))*.007*sway-this.equip*.22,-.52+cut.z);

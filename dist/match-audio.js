@@ -1,3 +1,5 @@
+import { RELOAD_CONTACT } from './weapon-view.js';
+
 const guns={
   rifle:{length:.36,hold:.025,decay:.080,body:.12,frequency:155,volume:.72,echo:.06},
   pistol:{length:.26,hold:.016,decay:.045,body:.08,frequency:190,volume:.60,echo:.025},
@@ -129,7 +131,8 @@ export class ArenaSound {
           }
           if(id==='reload'){
             this.buffers.set('magOut',clip(ctx,decoded,.100,.34,.48));
-            this.buffers.set('rack',clip(ctx,decoded,.970,.43,.58));
+            this.buffers.set('magSeat',clip(ctx,decoded,.603,.21,.60));
+            this.buffers.set('rack',clip(ctx,decoded,1.012,.39,.58));
             this.buffers.set('shell',clip(ctx,decoded,.100,.20,.42));
           }
         }catch(error){console.warn('효과음 해석 실패',id,error);}
@@ -212,10 +215,16 @@ export class ArenaSound {
       for(const voice of this.voices)if(voice.reload&&voice.actor===actor.id)this.stop(voice);
       if(!actor.alive||actor.active!==event.weapon||!(actor.reload>0))return;
       const reloadOptions={...options,priority:own?2:1,reload:true,actor:actor.id,weapon:event.weapon};
-      if(event.weapon==='shotgun')this.sample('shell',.35*attenuation,position,1,.05,reloadOptions);
+      const duration=actor.reloadDuration||actor.reload;
+      const cue=(sample,phase,level)=>{
+        const when=actor.reload-duration*(1-phase);
+        if(when>=-.035)this.sample(sample,level*attenuation,position,1,Math.max(0,when),reloadOptions);
+      };
+      if(event.weapon==='shotgun')cue('shell',RELOAD_CONTACT.shell,.36);
       else{
-        this.sample('magOut',.35*attenuation,position,1,0,reloadOptions);
-        this.sample('rack',.35*attenuation,position,1,Math.max(0,actor.reload-.40),reloadOptions);
+        cue('magOut',RELOAD_CONTACT.release,.32);
+        cue('magSeat',RELOAD_CONTACT.seat,.43);
+        cue('rack',RELOAD_CONTACT.settle,.22);
       }
     }
   }

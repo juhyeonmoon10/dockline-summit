@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#10212c"><title>DOCKLINE · 도크라인</title>
-  <meta name="description" content="서밋 아레나와 스위치야드 중 하나를 고르고, 일곱 가지 주무기로 더미 사격장과 2v2·3v3 팀전을 플레이하세요.">
+  <meta name="description" content="세관 4번 창고와 서밋 옥상에서 일곱 가지 주무기로 더미 사격장과 1v1·2v2·3v3 팀전을 플레이하세요.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='5' fill='%23f4cf52'/%3E%3Cpath d='m5 24 7-16h12l2 5-4 9-5 2zm8-5h4l3-6h-4z' fill='%2313222a'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="./arena-ui.css">
@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="./combat-ui.css">
 </head>
 <body data-scene="lobby">
-  <canvas id="arena" aria-label="도크라인 서밋 아레나" tabindex="-1"></canvas>
+  <canvas id="arena" aria-label="도크라인 세관 4번 창고" tabindex="-1"></canvas>
   <div class="veil" aria-hidden="true"></div>
   <div class="lobby-shell">
   <header id="mast">
@@ -25,8 +25,8 @@
   <main id="home">
     <div class="home-title">
       <div class="map-pick"><label for="arenaPick">경기장</label><select id="arenaPick" disabled></select></div>
-      <h1 lang="en"><b id="arenaTitle">SUMMIT</b><span aria-hidden="true"></span></h1>
-      <p><span data-icon="pin"></span><span id="arenaBlurb">산업단지 옥상</span></p>
+      <h1 lang="en"><b id="arenaTitle">CUSTOMS 04</b><span aria-hidden="true"></span></h1>
+      <p><span data-icon="pin"></span><span id="arenaBlurb">중앙 계근대, 서쪽 검수 통로, 동쪽 하역 데크</span></p>
     </div>
     <div class="lobby-deck">
       <section class="play-options" aria-labelledby="playTitle">
@@ -35,7 +35,7 @@
           <button class="primary" id="teamBtn" disabled><span class="mode-icon" data-icon="users"></span><span class="mode-name">친구와 대전</span><span class="mode-note">코드 참가 · 방 만들기</span></button>
           <button class="secondary" id="rangeBtn" disabled><span class="mode-icon" data-icon="play"></span><span class="mode-name">더미 사격장</span><span class="mode-note">혼자 연습</span></button>
         </div>
-        <p class="match-rules">2v2 · 3v3 <span aria-hidden="true">/</span> 3선승 · 라운드당 40초</p>
+        <p class="match-rules">1v1 · 2v2 · 3v3 <span aria-hidden="true">/</span> 3선승 · 라운드당 40초</p>
         <p id="boot" role="status">경기장 준비 중…</p>
       </section>
       <section id="arsenal" aria-labelledby="loadoutTitle">

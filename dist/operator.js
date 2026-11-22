@@ -4,38 +4,31 @@ import { blasterMesh } from './blaster.js';
 import { PRIMARY_WEAPONS } from './balance.js';
 import { knifeMesh,knifePose } from './knife.js';
 
-let source=null;
+const sources=[null,null];
 let loading;
-const teamMaterials=new Map();
 export function loadOperators(){
  if(!loading){
-   loading=Promise.all([import('./assets/GLTFLoader.js'),import('./assets/soldier-data.js')])
-     .then(([{GLTFLoader},{soldierData}])=>new GLTFLoader().parseAsync(soldierData,''))
-     .then(gltf=>{gltf.scene.updateMatrixWorld(true);source=gltf;})
+   loading=import('./assets/GLTFLoader.js')
+     .then(({GLTFLoader})=>Promise.all(['guard','responder'].map(async (outfit,team)=>{
+       const gltf=await new GLTFLoader().loadAsync(new URL('./assets/customs-'+outfit+'.glb',import.meta.url).href);
+       gltf.scene.updateMatrixWorld(true);
+       sources[team]=gltf;
+     })))
      .catch(error=>{console.warn('캐릭터 모델을 불러오지 못했습니다.',error);});
  }
  return loading;
 }
-export const operatorAvailable=()=>source!==null;
+export const operatorAvailable=(team)=>sources[team]!==null;
 const handPoint=new T.Vector3();
-function materialFor(original,team){
- const key=original.uuid+'/'+team;if(teamMaterials.has(key))return teamMaterials.get(key);
- const material=original.clone();material.roughness=.66;material.metalness=.05;
- if(original.name==='Character_Main')material.color.set(team?'#df6d39':'#228fc1');
- if(original.name==='Pants')material.color.set(team?'#66514a':'#3c586d');
- if(original.name==='Grey')material.color.set('#8498a5');
- teamMaterials.set(key,material);return material;
-}
 export function createOperator(team){
+ const source=sources[team];
  if(!source)return null;
  const group=new T.Group(),model=clone(source.scene);group.add(model);
- model.traverse(object=>{if(object.isMesh){object.material=materialFor(object.material,team);object.frustumCulled=false;}});
+ model.traverse(object=>{if(object.isMesh)object.frustumCulled=false;});
  const mixer=new T.AnimationMixer(model),actions=Object.fromEntries(source.animations.map(clip=>[clip.name,mixer.clipAction(clip)]));
  actions.Idle_Shoot.play();mixer.update(0);
  model.updateMatrixWorld(true);
- const bounds=new T.Box3().setFromObject(model),height=bounds.max.y-bounds.min.y;
- model.scale.setScalar(1.80/height);model.position.y=-bounds.min.y*model.scale.y;
- // The source faces +Z; the arena's forward direction is -Z.
+ // Both wardrobe meshes are authored at 1.80 m, facing +Z.
  model.rotation.y=Math.PI;
  const loadout=new T.Group(),loadouts={};loadout.scale.setScalar(.86);group.add(loadout);
  for(const key of [...PRIMARY_WEAPONS,'pistol','knife']){const mesh=key==='knife'?knifeMesh():blasterMesh(key);loadouts[key]=mesh;mesh.visible=false;loadout.add(mesh);}

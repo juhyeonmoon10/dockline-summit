@@ -299,18 +299,22 @@ function serviceFans(parts) {
   }
 }
 function switchyardScene(scene,map) {
+  scene.add(new T.AmbientLight(0xf4f2e5,.53));
   const [floorCanvas,floorContext]=canvas(1024,1024);
   paintSwitchyardGround(floorContext,1024,1024,map);
   const floor=new T.Mesh(new T.PlaneGeometry(map.width,map.depth),new T.MeshLambertMaterial({map:texture(floorCanvas)}));
   floor.rotation.x=-PI/2;floor.receiveShadow=true;scene.add(floor);
   const batches=new Map(),tint=new T.Color();
-  buildSwitchyard(map,(points,paint)=>{
+  buildSwitchyard(map,(points,paint,shade,uv)=>{
     const textured=typeof paint==='string',key=textured?paint:'solid';
     if(!batches.has(key))batches.set(key,{pos:[],uv:[],colors:[],indices:[]});
     const batch=batches.get(key),first=batch.pos.length/3;
     for(const point of points)batch.pos.push(...point);
     batch.indices.push(first,first+1,first+2,first,first+2,first+3);
-    if(textured)batch.uv.push(0,0,1,0,1,1,0,1);
+    if(textured){
+      if(uv)for(const [u,v] of uv)batch.uv.push(u,1-v);
+      else batch.uv.push(0,0,1,0,1,1,0,1);
+    }
     else{tint.setHex(paint);for(let i=0;i<4;i++)batch.colors.push(tint.r,tint.g,tint.b);}
   });
   for(const [key,batch] of batches){
@@ -320,13 +324,19 @@ function switchyardScene(scene,map) {
     if(key==='solid'){
       geo.setAttribute('color',new T.Float32BufferAttribute(batch.colors,3));material=new T.MeshLambertMaterial({vertexColors:true});
     }else{
-      const [c,g]=canvas(key==='terminal'?1024:512,256);
+      const [c,g]=canvas(key==='customs'?1024:512,256);
       paintSwitchyardPanel(g,c.width,c.height,key);
       geo.setAttribute('uv',new T.Float32BufferAttribute(batch.uv,2));
-      const Material=(key==='proceed'||key==='stop')?T.MeshBasicMaterial:T.MeshLambertMaterial;
-      material=new Material({map:texture(c)});
+      const params={map:texture(c)};
+      if(['display','clerestory'].includes(key))material=new T.MeshBasicMaterial(params);
+      else if(['trailer','vehicleEnd','windshield','cab','hood'].includes(key)){
+        const glass=key==='windshield';
+        material=new T.MeshPhongMaterial({...params,shininess:glass?42:14,specular:glass?0x343c3a:0x151817});
+      }else material=new T.MeshLambertMaterial(params);
     }
-    const mesh=new T.Mesh(geo,material);mesh.castShadow=mesh.receiveShadow=true;scene.add(mesh);
+    const mesh=new T.Mesh(geo,material);
+    mesh.castShadow=!['solid','clerestory'].includes(key);
+    mesh.receiveShadow=true;scene.add(mesh);
   }
 }
 

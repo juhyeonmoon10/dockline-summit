@@ -1,4 +1,4 @@
-import { createGame, stepGame } from './sim.js';
+import { createGame, stepGame, TEAM_SIZES } from './sim.js';
 import { gameSnapshot } from './game-snapshot.js';
 import { getArena } from './arena-map.js';
 import { isPrimaryWeapon, botLoadouts } from './balance.js';
@@ -20,7 +20,7 @@ function sanitizedInput(input) {
 // this host owns all movement, ammunition, hits and match transitions.
 export class OnlineHost {
   constructor({code,size,hostId,name,weapon,mapId,onRoom,onGame,now=()=>performance.now()}) {
-    if(![2,3].includes(size))fail('팀 인원은 2명 또는 3명입니다.');
+    if(!TEAM_SIZES.includes(size))fail('팀 인원은 1~3명입니다.');
     if(typeof hostId!=='string'||!hostId)fail('방장 연결을 확인해 주세요.');
     this.state={code,size,mapId:getArena(mapId).id,hostId,phase:'lobby',players:[],needed:size*2};
     this.members=new Map();this.game=null;this.closed=false;this.broadcastTime=0;

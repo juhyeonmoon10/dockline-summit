@@ -1,4 +1,4 @@
-import { createRange, stepGame, spawnYaw } from './sim.js';
+import { createRange, stepGame, spawnYaw, TEAM_SIZES } from './sim.js';
 import { ARENAS, getArena } from './arena-map.js';
 import { MAX_HP, WEAPONS, PRIMARY_WEAPONS as primary } from './balance.js';
 import { LiteRenderer } from './lite.js';
@@ -28,8 +28,9 @@ function save(key,value){try{localStorage.setItem('dockline.'+key,JSON.stringify
 const esc=v=>String(v??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const clamp=(x,lo,hi)=>Math.max(lo,Math.min(hi,x));
 const teamName=t=>t===0?'블루':'오렌지';
-let chosenArena=getArena(read('mapId','summit'));
-let size=read('size',2)===3?3:2, selected=primary.includes(read('weapon','rifle'))?read('weapon','rifle'):'rifle';
+let chosenArena=getArena(read('mapId',ARENAS[0].id));
+const savedSize=read('size',2);
+let size=TEAM_SIZES.includes(savedSize)?savedSize:2, selected=primary.includes(read('weapon','rifle'))?read('weapon','rifle'):'rifle';
 let sensitivity=clamp(Number(read('sensitivity',1))||1,.1,3),quality=read('quality','auto'),nickname=String(read('name','')).slice(0,16);
 audio.enabled=read('sound',true);
 let canvas=$('arena'),renderer,game=null,client=null,selfId='local',room=null,screen='home',modal='',lan=false;
@@ -175,8 +176,7 @@ async function openNetwork(invite=''){
         <label for="roomSize">새 방 인원</label>
         <div class="create-actions">
           <select id="roomSize">
-            <option value="2">2 vs 2</option>
-            <option value="3">3 vs 3</option>
+            ${TEAM_SIZES.map(n=>`<option value="${n}">${sizeText(n)}</option>`).join('')}
           </select>
           <button type="button" class="secondary" id="createRoom">방 만들기</button>
         </div>
@@ -187,7 +187,7 @@ async function openNetwork(invite=''){
   const roomSize = $('roomSize');
   roomSize.value = String(size);
   roomSize.onchange = () => {
-    size = Number(roomSize.value) === 3 ? 3 : 2;
+    size = Number(roomSize.value);
     save('size', size);
   };
   $('nick').value=nickname;$('joinCode').value=invite.slice(0,digits);
@@ -365,7 +365,7 @@ function displayArena(map){
     try{renderer.setMap(map);}
     catch(error){if(renderer instanceof LiteRenderer)throw error;switchToLite(map);}
   }
-  $('arenaTitle').textContent=map.id.toUpperCase();
+  $('arenaTitle').textContent=map.title;
   $('arenaBlurb').textContent=map.description;
   $('arenaPick').value=map.id;
   canvas.setAttribute('aria-label','도크라인 '+map.label);

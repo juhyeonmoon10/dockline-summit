@@ -34,6 +34,108 @@ const arcadeBodies={smg:'pistol',burst:'rifle',marksman:'sniper',lmg:'shotgun'};
 const ink='#203340',shell='#365164',silver='#c6d9dc';
 const halfTurn=Math.PI/2;
 
+// The Breaker keeps its original silhouette and separately animated magazine.
+// Small differences in roughness and grain make the three finishes read under moving light.
+let breakerMaterials;
+function breakerPaint(){
+ if(breakerMaterials)return breakerMaterials;
+ const size=96,pixels=new Uint8Array(size*size*4);
+ let seed=107;
+ for(let i=0;i<size*size;i++){
+  seed=(Math.imul(seed,1664525)+1013904223)>>>0;
+  const grain=217+(seed>>>27);
+  pixels.set([grain,grain,grain,255],4*i);
+ }
+ const map=new T.DataTexture(pixels,size,size);map.wrapS=map.wrapT=T.RepeatWrapping;
+ map.colorSpace=T.SRGBColorSpace;map.magFilter=T.LinearFilter;map.minFilter=T.LinearMipmapLinearFilter;
+ map.generateMipmaps=true;map.needsUpdate=true;
+ breakerMaterials=[[.80,.16],[.57,.39],[.91,.035]].map(([roughness,metalness])=>
+  new T.MeshStandardMaterial({vertexColors:true,roughness,metalness,map}));
+ return breakerMaterials;
+}
+
+function breakerUV(geo){
+ const {position,normal}=geo.attributes,uv=new Float32Array(position.count*2);
+ for(let i=0;i<position.count;i++){
+  const side=Math.abs(normal.getX(i))>.65,cap=Math.abs(normal.getZ(i))>.70;
+  uv[2*i]=(cap?position.getX(i):position.getZ(i))*14;
+  uv[2*i+1]=(side||cap?position.getY(i):position.getX(i))*14;
+ }
+ geo.setAttribute('uv',new T.BufferAttribute(uv,2));
+}
+
+function breakerSurface(geo,isMagazine){
+ const {color,position,normal}=geo.attributes,faceGroup=[],tone=new T.Color();
+ const groups=[[],[],[]],palette=['#3d4444','#535f63','#525742'];
+ for(let i=0;i<color.count;i++){
+  const r=color.getX(i),g=color.getY(i),b=color.getZ(i);
+  const group=r>g*1.4?2:b>r*1.4?1:0;
+  faceGroup.push(group);
+  const y=position.getY(i),z=position.getZ(i);
+  // Edges facing upward catch a softer polished grey, including on the loose magazine.
+  const wear=Math.max(0,normal.getY(i))*.13+.04*Math.cos(z*43+y*30);
+  tone.set(isMagazine?(group===1?'#465050':'#323938'):palette[group]);
+  tone.multiplyScalar((group===0&&z<-.39?.76:1)+wear);
+  color.setXYZ(i,tone.r,tone.g,tone.b);
+ }
+ const ids=geo.index.array;
+ for(let i=0;i<ids.length;i+=3)groups[faceGroup[ids[i]]].push(ids[i],ids[i+1],ids[i+2]);
+ let start=0;
+ for(let i=0;i<groups.length;i++){
+  if(groups[i].length)geo.addGroup(start,groups[i].length,i);
+  start+=groups[i].length;
+ }
+ geo.setIndex(groups.flat());breakerUV(geo);
+}
+
+// Molded overlays follow the long faces visible nearest the camera. Each station
+// has a beveled section, giving the top plane and sidewall separate reflections.
+function breakerShell(parts,stations,face,edge){
+ const section=([z,w,bottom,top])=>[
+  [-w*.64,top,z],[w*.64,top,z],[w,top-.007,z],[w,bottom+.005,z],
+  [w*.68,bottom,z],[-w*.68,bottom,z],[-w,bottom+.005,z],[-w,top-.007,z]
+ ];
+ const sections=stations.map(section),a=new T.Vector3(),b=new T.Vector3(),n=new T.Vector3();
+ const color=new T.Color();
+ function triangle(p,q,r,tint){
+  a.fromArray(q).sub(b.fromArray(p));n.copy(a).cross(b.fromArray(r).sub(new T.Vector3(...p))).normalize();
+  color.set(tint);const index=parts.points.length/3;
+  for(const v of [p,q,r]){parts.points.push(...v);parts.normals.push(n.x,n.y,n.z);parts.colors.push(color.r,color.g,color.b);}
+  parts.indices.push(index,index+1,index+2);
+ }
+ for(let row=0;row+1<sections.length;row++)for(let i=0;i<8;i++){
+  const j=(i+1)%8,p=sections[row][i],q=sections[row][j],r=sections[row+1][j],s=sections[row+1][i];
+  const tint=i===1||i===7?edge:face;
+  triangle(p,s,r,tint);triangle(p,r,q,tint);
+ }
+ for(let j=1;j<7;j++){
+  triangle(sections[0][0],sections[0][j],sections[0][j+1],face);
+  const rear=sections.at(-1);triangle(rear[0],rear[j+1],rear[j],face);
+ }
+}
+
+function breakerDetails(model){
+ const polymer=new Parts(),metal=new Parts();
+ breakerShell(polymer,[[.066,.019,.051,.092],[.084,.024,.042,.100],[.171,.027,.052,.104],[.215,.023,.063,.104],[.229,.019,.068,.099]],'#505642','#5b6050');
+ breakerShell(polymer,[[.217,.022,-.027,.097],[.223,.024,-.036,.101],[.234,.024,-.035,.102],[.240,.019,-.030,.098]],'#303633','#424841');
+ for(const side of [-1,1]){
+  // Interrupted mold line, small worn edge and pressed grooves on either cheek.
+  polymer.beam([side*.025,.071,.087],[side*.0273,.082,.166],.0023,.0033,'#383e33');
+  polymer.beam([side*.0273,.082,.166],[side*.024,.085,.205],.0023,.0033,'#404536');
+  for(let i=0;i<4;i++)polymer.beam([side*.025,.061+i*.002,.123+i*.011],[side*.0273,.073+i*.002,.111+i*.011],.0036,.0032,'#646755');
+  metal.beam([side*.0378,.072,-.222],[side*.0378,.072,-.020],.0025,.0039,'#354044');
+  metal.beam([side*.0378,.075,-.161],[side*.0378,.075,-.069],.0026,.0016,'#6c7473');
+  for(const z of [-.202,-.045,.044])metal.six(side*.0377,.045,z,.009,.003,.009,'#687071',0,0,halfTurn);
+ }
+ breakerShell(metal,[[-.344,.030,.122,.132],[-.338,.035,.123,.137],[-.200,.035,.123,.137],[-.189,.029,.123,.133]],'#41494a','#596061');
+ // An asymmetric inset keeps the broad upper face legible during reload rolls.
+ for(const z of [-.312,-.280,-.248])metal.cube(0,.1376,z,.046,.0015,.004,'#2d3536');
+ metal.cube(-.021,.1379,-.218,.005,.0018,.011,'#a28d63');
+ for(const [parts,slot] of [[metal,1],[polymer,2]]){
+  const mesh=parts.mesh(breakerPaint()[slot]);breakerUV(mesh.geometry);model.add(mesh);
+ }
+}
+
 // Laminate a beveled faceplate along the hand-authored side profile (Z/Y).
 function sidePanel(parts,profile,inner,outer,color){
  const cy=profile.reduce((sum,p)=>sum+p[1],0)/profile.length;
@@ -135,8 +237,10 @@ export function blasterMesh(kind='rifle'){
      colors.setXYZ(i,tone.r,tone.g,tone.b);
     }
    }
-   const part=new T.Mesh(geo,paint);part.name=name;model.add(part);
+   if(kind==='rifle')breakerSurface(geo,name==='magazine');
+   const part=new T.Mesh(geo,kind==='rifle'?breakerPaint():paint);part.name=name;model.add(part);
   }
+  if(kind==='rifle')breakerDetails(model);
   if(base)arcadeDetails(kind,model,WEAPONS[kind].accent);
   cache.set(kind,model);
  }
