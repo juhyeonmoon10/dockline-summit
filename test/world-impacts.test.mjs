@@ -14,6 +14,7 @@ function setup(weapon='rifle',boxes=[]) {
   Object.assign(view,{map,flash:new T.Group(),sightFlare:new T.Group(),flashTime:.02,viewMuzzle:new T.Vector3(.80,1.40,-.7),
     viewForward:new T.Vector3(0,0,-1),res:{h:720},tracers:[trace],traceIndex:0,
     impacts:new WorldImpacts(scene,id=>flashes.push(id)),shotTrails:new PelletRenderer(scene)});
+  view.flash.visible=false;
   const cam=new T.PerspectiveCamera(70,16/9,.02,80);cam.position.set(0,1.54,0);cam.updateMatrixWorld();
   const focus={id:'self',active:weapon,alive:true},game={players:[focus]};
   const draw=(events=[])=>{view.shotsThisFrame=events;view.renderShots(game,focus,cam);};
@@ -56,4 +57,18 @@ test('blocked muzzle causes one immediate real impact, and an empty arena bounda
   draw([{event:{...event,ey:8,ez:-25},mine:true}]);contact.step(.11);draw();
   assert.equal(contact.pending.length,0);assert.equal(active(contact).length,0);
   assert.equal(contact.marks.mesh.visible,false);
+});
+
+test('a remote confirmed contact survives an unequipped prop and clears on a round reset',()=>{
+  const {view,draw,event,flashes,contact}=setup();
+  // The remote actor is already gone from this snapshot. Visuals still use the
+  // authoritative origin and endpoint, without borrowing the focused viewmodel.
+  draw([{event:{...event,actor:'remote'},mine:false,hit:{target:'dummy'}}]);
+  assert.equal(view.flash.visible,false);
+  assert.equal(view.tracers[0].start.x,event.x);
+  assert.equal(contact.pending.length,1);
+  contact.clear();contact.step(.09);draw();assert.deepEqual(flashes,[]);
+  draw([{event:{...event,actor:'remote',blocked:true,x:0,y:1.4,z:-1,ex:0,ey:1.4,ez:-1.004},
+    mine:false,hit:{target:'dummy'}}]);
+  assert.deepEqual(flashes,['dummy']);assert.equal(contact.pending.length,0);
 });

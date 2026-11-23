@@ -74,13 +74,13 @@ class ImpactSprites {
     this.pool=new ImpactParticlePool(capacity);
     const g=new T.InstancedBufferGeometry();
     g.setAttribute('position',new T.Float32BufferAttribute([-1,-1,0,1,-1,0,1,1,0,-1,1,0],3));g.setIndex([0,1,2,0,2,3]);
-    this.origin=dynamic(capacity,3);this.speed=dynamic(capacity,3);this.ink=dynamic(capacity,4);this.shape=dynamic(capacity,4);
+    this.origin=dynamic(capacity,3);this.speed=dynamic(capacity,3);this.ink=dynamic(capacity,4);this.shape=dynamic(capacity,3);
     g.setAttribute('origin',this.origin);g.setAttribute('velocity',this.speed);g.setAttribute('ink',this.ink);g.setAttribute('shape',this.shape);
-    const m=new T.ShaderMaterial({transparent:true,depthWrite:false,side:T.DoubleSide,
-      vertexShader:`attribute vec3 origin,velocity;attribute vec4 ink,shape;
+    const m=new T.ShaderMaterial({transparent:true,depthWrite:false,side:T.DoubleSide,uniforms:{rasterHeight:{value:720}},
+      vertexShader:`attribute vec3 origin,velocity,shape;attribute vec4 ink;uniform float rasterHeight;
         varying vec4 color;varying vec2 p;varying float kind;varying float spin;
         void main(){
-          vec4 at=modelViewMatrix*vec4(origin,1.);p=position.xy;color=ink;kind=shape.y;spin=shape.w;
+          vec4 at=modelViewMatrix*vec4(origin,1.);p=position.xy;color=ink;kind=shape.y;spin=shape.z;
           vec2 motion=(mat3(modelViewMatrix)*velocity).xy;
           vec2 major=length(motion)>.0001?normalize(motion):vec2(1.,0.);
           if(kind<.5||kind>4.5)major=vec2(cos(spin),sin(spin));
@@ -92,6 +92,11 @@ class ImpactSprites {
           if(kind>.5&&kind<1.5){along=width*2.6;width*=.33;}
           else if(kind>1.5&&kind<2.5){along=width*1.35;width*=.48;}
           else if(kind<.5||kind>4.5)width*=.87;
+          // Subpixel steel vanishes between MSAA samples. Use the actual
+          // camera lens and raster height to retain a narrow, tapered glint.
+          float pixel=2.*max(.01,-at.z)/(rasterHeight*projectionMatrix[1][1]);
+          if(kind>.5&&kind<1.5){width=max(width,.64*pixel);along=max(along,1.65*pixel);}
+          if(kind<.5||kind>4.5){width=max(width,1.02*pixel);along=max(along,1.08*pixel);}
           at.xy+=major*p.x*along+minor*p.y*width;
           gl_Position=projectionMatrix*at;
         }`,
@@ -109,14 +114,15 @@ class ImpactSprites {
     });
     this.mesh=new T.Mesh(g,m);this.mesh.frustumCulled=false;this.mesh.renderOrder=3;this.mesh.visible=false;scene.add(this.mesh);
   }
-  draw(){
+  draw(rasterHeight){
+    this.mesh.material.uniforms.rasterHeight.value=rasterHeight;
     let count=0;
     for(const particle of this.pool.particles){
       if(!particle.active)continue;
       const p=particle,i=count++;
       this.origin.setXYZ(i,p.x,p.y,p.z);this.speed.setXYZ(i,p.vx,p.vy,p.vz);
       tint.setHex(p.color);this.ink.setXYZW(i,tint.r,tint.g,tint.b,p.alpha);
-      this.shape.setXYZW(i,p.size*.5,materialId[p.kind],p.age/p.life,p.angle);
+      this.shape.setXYZ(i,p.size*.5,materialId[p.kind],p.angle);
     }
     this.mesh.geometry.instanceCount=count;this.mesh.visible=count>0;
     if(count)for(const attr of [this.origin,this.speed,this.ink,this.shape])attr.needsUpdate=true;
@@ -137,7 +143,7 @@ export class WorldImpacts {
   step(dt){
     this.clock+=dt;this.marks.step(dt);this.sprites.pool.step(dt);
   }
-  draw(){
+  draw(rasterHeight=720){
     let keep=0;
     for(const p of this.pending){
       const late=this.clock-p.at;
@@ -148,7 +154,7 @@ export class WorldImpacts {
         if(p.hit.kind==='target')this.onTarget(p.target);
       }
     }
-    this.pending.length=keep;this.sprites.draw();
+    this.pending.length=keep;this.sprites.draw(rasterHeight);
   }
   clear(){
     this.clock=0;this.pending.length=0;

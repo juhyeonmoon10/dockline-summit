@@ -741,7 +741,7 @@ export class ArenaRenderer {
       });
       t.mesh.material.opacity=span.alpha*(t.own?1:.82);
     }
-    this.impacts.draw();
+    this.impacts.draw(this.res.h);
   }
   updateModels(players,focusId,dt) {
     const ids=new Set();
