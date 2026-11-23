@@ -17,10 +17,29 @@ test('the alternating attacks cross in opposite directions on the simulation con
     assert.deepEqual(knifeDrawPose(skin,timing.draw),knifeDrawPose(skin,Infinity));
     assert.ok(knifeDrawPose(skin,timing.drawCatch).grip<.1);
     assert.ok(Math.abs(knifeClipPhase(contact,skin)-.56)<1e-9);
-    const a=knifePose(contact,1,skin),b=knifePose(contact,-1,skin);
-    assert.ok(a.x<-.18&&a.rz>.85&&b.rz<-1);
-    assert.ok(a.z<-.12&&b.z<-.12);
+    assert.ok(end<WEAPONS.knife.interval);
+    const rig=new Group(),model=gunModel('knife',skin);
+    rig.scale.setScalar(.91);rig.add(model);
+    const blade=model.userData.body.getObjectByName('blade'),vertices=blade.geometry.attributes.position;
+    const extent=i=>skin==='balisong'?vertices.getY(i):-vertices.getX(i);
+    let tipIndex=0;
+    for(let i=1;i<vertices.count;i++)if(extent(i)>extent(tipIndex))tipIndex=i;
+    const tip=new Vector3().fromBufferAttribute(vertices,tipIndex),projected=new Vector3();
     for(const side of [-1,1]){
+      for(const aspect of [4/3,16/9]){
+        const lens=new PerspectiveCamera(63,aspect,.012,4);
+        const at=age=>{
+          poseHeldKnife(rig,model,skin,Infinity,Infinity,age,side);
+          return blade.localToWorld(projected.copy(tip)).project(lens);
+        };
+        const hit=at(contact);
+        assert.ok(Math.hypot(hit.x,hit.y)<.006,skin+' tip crosses the reticle on impact');
+        const before=at(contact-.016).x,after=at(contact+.016).x;
+        assert.ok((before-after)*side>.10,skin+' must travel through contact');
+        const xs=[];
+        for(let frame=0;frame<=60;frame++)xs.push(at(end*frame/60).x);
+        assert.ok(Math.max(...xs)-Math.min(...xs)>1.03,skin+' spans over half the viewport width');
+      }
       assert.deepEqual(knifePose(end,side,skin),knifePose(Infinity,side,skin));
       assert.equal(knifeClipPhase(end,skin),1);
     }

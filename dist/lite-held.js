@@ -31,7 +31,9 @@ export class LiteHeldView {
     const resize=this.canvas.width!==w||this.canvas.height!==h;
     if(resize){this.canvas.width=w;this.canvas.height=h;}
     const changed=this.id!==id||this.swing!==swing||this.inspect!==!!inspection||this.still!==still;
-    if(resize||changed||(!still&&now-this.lastDraw>=(striking?1/45:1/36))){
+    // The world already limits knife frames. Capping the hand separately
+    // skips alternating wrist poses on high refresh displays.
+    if(resize||changed||(!still&&(knife||now-this.lastDraw>=1/36))){
       this.id=id;this.swing=swing;this.inspect=!!inspection;this.still=still;this.lastDraw=now;
       if(model.parent!==this.rig){this.rig.clear();this.rig.add(model);}
       if(knife)poseHeldKnife(this.rig,model,skin,drawAge,inspectAge,age,swing?.side||1,now*9,walk);

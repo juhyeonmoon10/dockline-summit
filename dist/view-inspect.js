@@ -1,4 +1,5 @@
 import { KNIFE_TIMING } from './knife-types.js';
+import { createKnifeGesture,sampleKnifeGesture } from './knife-motion.js';
 
 // Distances are camera-space metres. Each firearm stays nose-left as its stock
 // rolls on the shoulder. The long holds give the receiver and sights time to read.
@@ -22,34 +23,26 @@ const blend=(a,b,t)=>a+(b-a)*t;
 
 // Camera-space wrist keys: seconds, x/y/z, and pitch/yaw/roll. The
 // blade, hinge, and the individual fingers are driven separately.
-const hook=[
-  [0,.014,-.080,-.453,-.06,.24,-.12],[.060,.018,-.094,-.458,-.20,-.14,-.43],
-  [.171,.022,-.024,-.524,.09,.17,.13],[.251,.008,-.016,-.576,.16,.28,.31],
-  [.440,-.010,-.021,-.596,.12,.19,.15],[.550,.016,-.028,-.556,.18,.40,.52],
-  [KNIFE_TIMING.karambit.inspectCatch,.018,-.038,-.506,.22,.55,.64],[.720,.022,-.045,-.497,.14,.48,.50],
-  [.853,.020,-.047,-.496,.14,.53,.55],[.989,.043,-.100,-.448,-.17,.32,-.21],
-  [1.058,.009,-.071,-.458,-.02,.20,-.07],[KNIFE_TIMING.karambit.inspect,.014,-.080,-.453,-.06,.24,-.12]
-];
-const butterfly=[
-  [0,.123,-.095,-.435,-.06,-.23,.72],[.073,.136,-.085,-.458,-.23,-.35,.87],
-  [.14,.077,-.040,-.517,.20,.10,.25],[.237,.047,-.017,-.542,.28,.20,-.44],
-  [.319,.079,-.064,-.538,-.16,-.12,.51],[.407,.056,-.032,-.505,.10,.16,.12],
-  [KNIFE_TIMING.balisong.inspectFold,.064,-.035,-.483,.21,.10,-.07],[.572,.061,-.040,-.484,.15,.07,-.02],
-  [.70,.046,-.023,-.536,.23,.18,-.54],[.802,.075,-.041,-.532,-.13,-.17,.66],
-  [KNIFE_TIMING.balisong.inspectOpen,.039,-.030,-.496,.21,.28,.36],[1.023,.051,-.039,-.477,.13,.22,.28],
-  [1.132,.053,-.043,-.475,.15,.30,.37],[1.235,.129,-.086,-.460,-.16,-.28,.84],
+const hook=createKnifeGesture([
+  [0,.014,-.080,-.453,-.06,.24,-.12],[.090,.056,-.103,-.519,-.22,-.24,-.45],
+  [.225,-.051,-.022,-.561,.13,.17,.13],[.305,-.193,.018,-.688,.20,.29,.31],
+  [.400,-.102,.027,-.725,.16,.31,.32],[.556,-.007,-.023,-.604,.12,.02,.41],
+  [KNIFE_TIMING.karambit.inspectCatch,.103,.003,-.572,.13,-.25,.46],
+  [.839,.118,.017,-.569,.05,-.34,.38],[KNIFE_TIMING.karambit.inspect,.014,-.080,-.453,-.06,.24,-.12]
+]);
+const butterfly=createKnifeGesture([
+  [0,.123,-.095,-.435,-.06,-.23,.72],[.088,.144,-.046,-.470,-.14,-.33,.85],
+  [.233,.039,.046,-.583,.27,.22,-.64],[.334,-.104,.037,-.594,.13,.18,-.12],
+  [KNIFE_TIMING.balisong.inspectFold,-.153,-.026,-.566,.13,.14,.15],[.558,-.144,-.034,-.561,.11,.12,.16],
+  [.726,-.080,.019,-.605,.20,.22,-.58],[.833,.026,.062,-.600,.10,.14,.44],
+  [KNIFE_TIMING.balisong.inspectOpen,.128,.021,-.544,.20,.26,.51],
+  [1.102,.128,.008,-.533,.17,.24,.48],
   [KNIFE_TIMING.balisong.inspect,.123,-.095,-.435,-.06,-.23,.72]
-];
-function wristPose(frames,t){
-  let i=1;while(frames[i][0]<t)i++;
-  const a=frames[i-1],b=frames[i],u=ease((t-a[0])/(b[0]-a[0]));
-  return {x:blend(a[1],b[1],u),y:blend(a[2],b[2],u),z:blend(a[3],b[3],u),
-    rx:blend(a[4],b[4],u),ry:blend(a[5],b[5],u),rz:blend(a[6],b[6],u)};
-}
+]);
 export function inspectionPose(id,age) {
   const duration=inspectDuration(id);if(!(age>0&&age<duration))return null;
   const t=age/duration,gun=guns[id];
-  if(!gun)return {...wristPose(id==='balisong'?butterfly:hook,age),weight:ease(Math.min(age/.040,(duration-age)/.065)),freeHand:0};
+  if(!gun)return {...sampleKnifeGesture(id==='balisong'?butterfly:hook,age),weight:ease(Math.min(age/.040,(duration-age)/.065)),freeHand:0};
   const weight=ease(Math.min(t/.112,(1-t)/.125));
   const roll=ease((t-.502)/.124),fall=ease((t-.875)/.071);
   const settle=Math.sin(Math.PI*ease((t-.112)/.074));

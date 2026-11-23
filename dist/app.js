@@ -7,6 +7,7 @@ import { ArenaSound } from './match-audio.js';
 import { CombatFeedback } from './combat-feedback.js';
 import { canAim } from './weapon-view.js';
 import { KNIFE_LABELS, normalizeKnifeSkin } from './knife-types.js';
+import { knifeAttackDuration } from './knife-motion.js';
 import { inspectDuration } from './view-inspect.js';
 
 const $ = id => document.getElementById(id);
@@ -44,7 +45,7 @@ let roundKey='',eventFeed=[],pendingFire=false,heldFire=false,ads=false,paused=f
 let lastResult='',spectatorIndex=0,frameTime=performance.now(),hudStamp=0,roundFlash=0,clockStamp=0;
 let prevNet=null,netAt=0,lastNotice='',noticeTimer;
 let joining=false,joinAttempt=0;
-let inspectStart=null, inspectDeadline=0, inspectedItem=null, controlsUnderstood=false;
+let inspectStart=null, inspectRequestedAt=null, inspectedItem=null, knifeSwingEnd=0, controlsUnderstood=false;
 const keys=new Set(), pressed=new Set();
 function notify(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>$('toast').classList.remove('show'),2800);}
 function drawSound(){const el=$('soundBtn');el.innerHTML=svg(audio.enabled?'sound':'mute');el.title=el.ariaLabel=audio.enabled?'소리 끄기':'소리 켜기';}
@@ -89,7 +90,7 @@ function showPanel(kind,title,html){
 function closePanel(){modal='';if(panel.open)panel.close();}
 function cancelInspection(){
   audio.cancelKnifeHandling();
-  inspectedItem=null;inspectStart=null;inspectDeadline=0;
+  inspectedItem=null;inspectStart=null;inspectRequestedAt=null;
   $('weaponHud').removeAttribute('data-inspecting');
 }
 function clearInput(){
@@ -164,7 +165,7 @@ function enterGame(state,id){
   $('rangeStats').hidden=!inRange;
   for(const id of ['scoreboard','living','health','feed'])$(id).hidden=inRange;
   feedback.reset();
-  game=state;selfId=id;paused=false;lastEvent=0;lastResult=roundKey='';eventFeed=[];slot=1;lastNotice='';spectatorIndex=0;controlsUnderstood=false;clearInput();
+  game=state;selfId=id;paused=false;lastEvent=0;lastResult=roundKey='';eventFeed=[];slot=1;knifeSwingEnd=0;lastNotice='';spectatorIndex=0;controlsUnderstood=false;clearInput();
   const me=state.players.find(p=>p.id===id);yaw=me?.yaw||0;pitch=me?.pitch||0;
   audio.unlock();firstFrame=true;roundFlash=0;frameTime=performance.now();hudStamp=0;canvas.focus();
 }
@@ -293,9 +294,11 @@ function receiveEvents(now){
   const me=game.players.find(p=>p.id===selfId), watch=watchPlayer();
   for(const ev of game.events){if(ev.seq<=lastEvent)continue;lastEvent=ev.seq;audio.event(ev,game,watch);
     if(ev.actor===selfId&&['shot','melee','reload'].includes(ev.type)){
-      const earlierCut=ev.type==='melee'&&inspectStart!==null&&Number.isFinite(ev.at)&&
-        game.elapsed-ev.at>now-inspectStart+.015;
-      if(!earlierCut)cancelInspection();
+      if(ev.type==='melee'){
+        const started=Number.isFinite(ev.at)?now-Math.max(0,game.elapsed-ev.at):now;
+        knifeSwingEnd=started+knifeAttackDuration(ev.knifeSkin??me?.knifeSkin);
+        if(inspectRequestedAt===null||started>=inspectRequestedAt-.015)cancelInspection();
+      }else cancelInspection();
     }
     if(ev.type==='shot'&&ev.actor===watch?.id)feedback.shot(ev.weapon,now);
     if(ev.type==='hit'&&ev.actor===selfId)feedback.hit(ev,now);
@@ -364,16 +367,18 @@ function inspectWeapon(){
   const primaryId=game.phase==='range'||game.phase==='warmup'?selected:p.weapon;
   inspectedItem=slot===3?normalizeKnifeSkin(p.knifeSkin):slot===2?secondaryWeapon(p.sidearm):primaryId;
   // A switch and F can arrive between frames, especially before an online snapshot.
-  inspectStart=null;inspectDeadline=performance.now()/1000+.65;
+  inspectStart=null;inspectRequestedAt=performance.now()/1000;
 }
 function inspectionAge(p,now){
   if(inspectedItem){
     if(inspectionAllowed(p)){
       if(inspectedItem===heldItem(p)){
+        // Start a queued flourish from its opening pose once the slash has finished.
+        if(p.active==='knife'&&inspectStart===null&&now<knifeSwingEnd)return Infinity;
         inspectStart??=now;
         const age=Math.max(0,now-inspectStart);
         if(age<inspectDuration(inspectedItem))return age;
-      }else if(inspectStart===null&&now<inspectDeadline)return Infinity;
+      }else if(inspectStart===null&&now-inspectRequestedAt<.65)return Infinity;
     }
     cancelInspection();
   }
@@ -427,7 +432,7 @@ document.addEventListener('keydown',e=>{
   if(e.code==='KeyF'){inspectWeapon();return;}
   if(['KeyC','KeyR','KeyQ','Digit1','Digit2','Digit3'].includes(e.code))cancelInspection();
   if(e.code==='Escape'){showPause();return;}
-  if(['Digit1','Digit2','Digit3'].includes(e.code)){slot=Number(e.code.slice(-1));if(slot===3)ads=false;}
+  if(['Digit1','Digit2','Digit3'].includes(e.code)){slot=Number(e.code.slice(-1));if(slot===3)ads=false;else knifeSwingEnd=0;}
   if(e.code==='Tab')spectatorIndex++;
   if(e.code==='KeyQ'&&['range','warmup','between'].includes(game.phase)){setLoadout(primary[(primary.indexOf(selected)+1)%primary.length]);slot=1;}
 });

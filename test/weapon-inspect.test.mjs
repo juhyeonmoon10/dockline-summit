@@ -4,9 +4,31 @@ import {Group,PerspectiveCamera,Vector3} from '../dist/assets/three.module.min.j
 import {PRIMARY_WEAPONS,SECONDARY_WEAPONS} from '../dist/balance.js';
 import {gunModel,poseHeldKnife,poseHeldSleeves} from '../dist/render.js';
 import {inspectDuration,inspectionPose,applyInspection,ringFlourish} from '../dist/view-inspect.js';
+import {KNIFE_TIMING} from '../dist/knife-types.js';
 
 const camera=new PerspectiveCamera(63,4/3,.012,4);
 const point=new Vector3();
+test('draw and inspect move the grip across the view even after the blade has entered frame',()=>{
+  const wide=new PerspectiveCamera(63,16/9,.012,4);
+  for(const skin of ['karambit','balisong']){
+    const rig=new Group(),model=gunModel('knife',skin),hand=model.userData.hand;
+    rig.scale.setScalar(.91);rig.add(model);
+    for(const action of ['draw','inspect']){
+      let left=Infinity,right=-Infinity;
+      for(let frame=action==='draw'?12:0;frame<=60;frame++){
+        const age=KNIFE_TIMING[skin][action]*frame/60;
+        const look=action==='inspect'?age:Infinity;
+        poseHeldKnife(rig,model,skin,action==='draw'?age:Infinity,look,Infinity,1);
+        applyInspection(rig,inspectionPose(skin,look));
+        const x=hand.localToWorld(point.copy(hand.userData.wrist)).project(wide).x;
+        left=Math.min(left,x);right=Math.max(right,x);
+      }
+      const width=(right-left)/2;
+      assert.ok(width>(action==='draw'?1/6:.23),skin+' '+action+' wrist sweep '+width);
+    }
+  }
+});
+
 test('every firearm shows the receiver and top with the full weapon framed during the shoulder roll',()=>{
   for(const key of [...PRIMARY_WEAPONS,...SECONDARY_WEAPONS]){
     const rig=new Group(),model=gunModel(key);rig.scale.setScalar(.91);rig.add(model);

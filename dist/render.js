@@ -15,7 +15,7 @@ import { clipBarrelOrigin,visibleTraceEnd,exitsForward,muzzleDeparture,flightSli
 import { WorldImpacts } from './world-impacts.js';
 import { knifeMesh,knifeFit,knifePose,animateKnife,animateCarriedKnife } from './knife.js';
 import { normalizeKnifeSkin,KNIFE_TIMING,KARAMBIT_RING } from './knife-types.js';
-import { knifeDrawPose,knifeAttackDuration } from './knife-motion.js';
+import { knifeDrawPose,knifeAttackDuration,knifeWristPose } from './knife-motion.js';
 import { inspectionPose,applyInspection,ringFlourish } from './view-inspect.js';
 import { studioReflection } from './weapon-light.js';
 import { EjectedCases } from './ejected-cases.js';
@@ -224,12 +224,9 @@ export function poseHeldKnife(rig,weapon,skin,drawAge,inspectAge,cut,side,step=0
   if(striking)inspectAge=Infinity;
   if(striking||Number.isFinite(inspectAge))drawAge=Infinity;
   const slash=knifePose(cut,side,skin),draw=knifeDrawPose(skin,drawAge);
-  const walkShift=Math.sin(step)*.006*walk;
-  rig.position.set((butterfly?.123:.014)+draw.x+slash.x*.88+walkShift-swayX,
-    (butterfly?-.095:-.080)+draw.y+slash.y*.84-Math.abs(Math.cos(step))*.005*walk,
-    (butterfly?-.435:-.453)+draw.z+slash.z*.80);
-  rig.rotation.set(-.06+draw.rx+slash.rx*.85,(butterfly?-.23:.24)+draw.ry+slash.ry*.89,
-    (butterfly?.72:-.12)+draw.rz+slash.rz*.93);
+  const wrist=knifeWristPose(skin,draw,slash,step,walk,swayX);
+  rig.position.set(wrist.x,wrist.y,wrist.z);
+  rig.rotation.set(wrist.rx,wrist.ry,wrist.rz);
   const {body,hand}=weapon.userData;
   animateKnife(body,skin,drawAge,inspectAge);
   const flourish=butterfly?null:ringFlourish(inspectAge);
@@ -636,10 +633,10 @@ export class ArenaRenderer {
 
   effects(game,focus,dt,shotDt) {
     this.shotsThisFrame.length=0;this.stepRemoteFlashes(shotDt,focus.id);
-    this.meleeAge=Math.min(.55,this.meleeAge+dt);
+    this.meleeAge=Math.min(.55,this.meleeAge+shotDt);
     if(!focus?.alive||focus.active!=='knife')this.meleeAge=.55;
     for(const [id,swing] of this.meleeSwings){
-      const actor=game.players.find(player=>player.id===id);swing.age+=dt;
+      const actor=game.players.find(player=>player.id===id);swing.age+=shotDt;
       if(!actor?.alive||actor.active!=='knife'||swing.age>=.55)this.meleeSwings.delete(id);
     }
     this.shotTrails.step(shotDt);this.impacts.step(shotDt);

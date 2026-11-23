@@ -1,58 +1,81 @@
 import { KNIFE_TIMING } from './knife-types.js';
 
 const rest=Object.freeze({x:0,y:0,z:0,rx:0,ry:0,rz:0,turn:0,grip:0});
+export function knifeWristPose(skin,draw,slash,step=0,walk=0,swayX=0){
+  const flip=skin==='balisong';
+  return {
+    x:(flip?.123:.014)+draw.x+slash.x*.88+Math.sin(step)*.006*walk-swayX,
+    y:(flip?-.095:-.080)+draw.y+slash.y*.84-Math.abs(Math.cos(step))*.005*walk,
+    z:(flip?-.435:-.453)+draw.z+slash.z*.80,
+    rx:-.06+draw.rx+slash.rx*.85,ry:(flip?-.23:.24)+draw.ry+slash.ry*.89,
+    rz:(flip?.72:-.12)+draw.rz+slash.rz*.93
+  };
+}
 const clamp01=x=>Math.min(1,Math.max(0,x));
 const ease=x=>{const t=clamp01(x);return t*t*(3-2*t);};
 // Camera-space translation and rotation deltas; the last two optional columns
 // are the index ring's unwrapped angle and the release of the other fingers.
-function sample(keys,age){
+export function sampleKnifeGesture({keys,tangents},age){
   if(!(age>=0&&age<keys.at(-1)[0]))return rest;
   let i=1;while(age>keys[i][0])i++;
-  const a=keys[i-1],b=keys[i],f=ease((age-a[0])/(b[0]-a[0]));
-  const lerp=k=>(a[k]||0)+((b[k]||0)-(a[k]||0))*f;
+  const a=keys[i-1],b=keys[i],span=b[0]-a[0],t=(age-a[0])/span,f=ease(t);
+  const lerp=k=>{
+    const value=(a[k]||0)+((b[k]||0)-(a[k]||0))*f;
+    return value+span*t*(1-t)*((1-t)*tangents[i-1][k]-t*tangents[i][k]);
+  };
   return {x:lerp(1),y:lerp(2),z:lerp(3),rx:lerp(4),ry:lerp(5),rz:lerp(6),turn:lerp(7),grip:lerp(8)};
 }
 
-const hookDraw=[
-  [0,.089,-.213,.027,-.47,-.37,-.71,-3.71,.75],
-  [.068,.060,-.084,-.021,-.32,-.21,-.39,-2.91,.94],
-  [.126,.002,.020,-.047,.19,.22,.22,-1.18,.87],
-  [KNIFE_TIMING.karambit.drawCatch,-.010,.014,-.016,.11,.12,.12,.082,.08],
-  [.234,.004,-.005,.003,-.038,-.025,-.035,-.036,0],
+// Preserve velocity through intermediate keys. A channel eases to a stop
+// only at its actual extrema, including the catch at the end of a flourish.
+export function createKnifeGesture(keys){
+  const tangents=keys.map((key,i)=>Array.from({length:9},(_,k)=>{
+    if(!k||i===0||i===keys.length-1)return 0;
+    const prev=keys[i-1],next=keys[i+1],value=key[k]??0;
+    const a=(value-(prev[k]??0))/(key[0]-prev[0]),b=((next[k]??0)-value)/(next[0]-key[0]);
+    return a*b>0?2*a*b/(a+b):0;
+  }));
+  return {keys,tangents};
+}
+
+const hookDraw=createKnifeGesture([
+  [0,.152,-.163,-.025,-.50,-.40,-.82,-4.05,.78],
+  [.060,.110,-.045,-.051,-.29,-.20,-.46,-3.20,.94],
+  [.132,-.074,.071,-.094,.18,.26,.39,-1.12,.81],
+  [KNIFE_TIMING.karambit.drawCatch,-.117,.075,-.066,.19,.33,.52,.063,.04],
   [KNIFE_TIMING.karambit.draw,0,0,0,0,0,0]
-];
-const butterflyDraw=[
-  [0,.087,-.198,.045,-.46,-.37,-.70,0,.42],
-  [.069,.060,-.074,-.037,.06,-.15,-.36,0,.64],
-  [KNIFE_TIMING.balisong.drawBeat,-.025,.032,-.068,.25,.22,.24,0,.73],
-  [.187,-.019,.012,-.052,.11,.14,.14,0,.65],
-  [.242,.014,-.016,-.020,-.13,-.19,-.17,0,.49],
-  [KNIFE_TIMING.balisong.drawCatch,.018,-.003,.002,-.045,-.07,-.10,0,.04],
-  [.333,-.004,.008,-.005,.044,.02,.041,0,.08],
+]);
+const butterflyDraw=createKnifeGesture([
+  [0,.145,-.163,-.034,-.38,-.38,-.86,0,.42],
+  [.065,.048,-.041,-.070,-.04,-.16,-.47,0,.63],
+  [KNIFE_TIMING.balisong.drawBeat,-.166,.077,-.115,.28,.26,-.40,0,.74],
+  [.206,-.139,.088,-.122,.24,.32,-.26,0,.65],
+  [KNIFE_TIMING.balisong.drawCatch,-.008,.044,-.073,.11,-.13,.42,0,.04],
   [KNIFE_TIMING.balisong.draw,0,0,0,0,0,0]
-];
-export const knifeDrawPose=(skin,age)=>sample(skin==='balisong'?butterflyDraw:hookDraw,age);
+]);
+export const knifeDrawPose=(skin,age)=>sampleKnifeGesture(skin==='balisong'?butterflyDraw:hookDraw,age);
 
 const start=[0,0,0,0,0,0,0];
-// Each pair has its own anticipation, crossing line and short recoil. Contact
-// is the third key, exactly when the simulation resolves the melee event.
+// The 100 ms key puts the actual tip through the crosshair at the simulated hit.
+// Each blade travels past it before returning low to the resting grip.
 const hooks=[
-  [start,[.036,.057,.036,.001,-.16,-.30,-.55],[.100,-.252,.005,-.139,.31,.67,1.44],
-    [.145,-.281,-.017,-.088,.23,.43,1.29],[.218,-.079,-.037,-.024,-.07,.13,.43],
-    [.286,.012,.008,.006,.03,-.04,-.085],[.34,0,0,0,0,0,0]],
-  [start,[.041,-.145,-.057,-.047,-.17,.28,.77],[.100,.037,.080,-.133,.55,-.49,-1.08],
-    [.140,.068,.065,-.088,.41,-.60,-1.25],[.215,.042,-.016,-.023,-.02,-.22,-.39],
-    [.289,-.009,.009,0,.029,.036,.065],[.34,0,0,0,0,0,0]]
-];
+  [start,[.040,.042,.118,.010,-.70,.15,-.99],[.100,.011,-.110,-.095,.65,-.85,1.40],
+    [.190,-.222,-.006,-.085,.65,-.85,1.63],[.245,-.231,.006,-.058,.65,-.85,1.40],
+    [.340,-.191,-.178,-.008,.20,-.85,1.14],[.480,0,0,0,0,0,0]],
+  [start,[.053,-.309,-.093,-.022,-.25,-.85,.83],[.078,-.415,.069,-.070,-.50,-.35,-.05],
+    [.100,-.249,.228,-.097,-.70,.15,-.91],[.125,-.076,.184,-.090,-.70,.15,-1.10],
+    [.184,.118,.151,-.065,-.70,.15,-1.42],[.244,.096,.140,-.050,-.70,.15,-1.42],
+    [.338,-.121,.179,-.005,-.70,.15,-1.17],[.480,0,0,0,0,0,0]]
+].map(createKnifeGesture);
 const butterflies=[
-  [start,[.034,.035,.035,-.028,-.16,-.27,-.19],[.100,-.202,.043,-.175,.52,.37,.91],
-    [.151,-.224,.080,-.119,.42,.39,1.20],[.246,-.065,.007,-.037,.05,.12,.49],
-    [.316,.012,-.011,.002,-.055,-.04,-.10],[.38,0,0,0,0,0,0]],
-  [start,[.037,-.090,.048,-.024,.23,.17,.53],[.100,-.056,-.048,-.197,-.17,-.56,-1.11],
-    [.150,.067,.016,-.130,-.16,-.51,-1.23],[.238,.042,.017,-.057,-.08,-.17,-.37],
-    [.307,-.009,.004,.002,.044,.035,.073],[.38,0,0,0,0,0,0]]
-];
-export const knifeAttackDuration=skin=>skin==='balisong'?.38:.34;
+  [start,[.042,.008,.025,-.060,-.29,-.25,-1.60],[.100,.117,.051,-.092,.28,.17,.76],
+    [.184,-.268,.036,-.072,.37,.33,1.22],[.250,-.232,.005,-.045,.28,.29,1.16],
+    [.346,-.081,-.141,-.015,-.05,.12,.46],[.490,0,0,0,0,0,0]],
+  [start,[.044,-.216,.023,-.052,.20,.14,.79],[.100,-.313,-.083,-.175,.09,-.18,-1.54],
+    [.193,.060,.030,-.095,-.20,-.53,-1.53],[.261,.056,.023,-.047,-.19,-.46,-1.32],
+    [.370,.046,-.071,-.048,-.04,-.13,-.47],[.490,0,0,0,0,0,0]]
+].map(createKnifeGesture);
+export const knifeAttackDuration=skin=>(skin==='balisong'?butterflies:hooks)[0].keys.at(-1)[0];
 // The sampled operator clip reaches full extension at phase .56.
 export function knifeClipPhase(age,skin){
   const contact=.10,end=knifeAttackDuration(skin);
@@ -60,5 +83,5 @@ export function knifeClipPhase(age,skin){
 }
 export function knifePose(age,side=1,skin='karambit'){
   const pair=skin==='balisong'?butterflies:hooks;
-  return sample(pair[side<0?1:0],age);
+  return sampleKnifeGesture(pair[side<0?1:0],age);
 }

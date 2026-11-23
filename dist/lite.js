@@ -13,7 +13,8 @@ import { pelletTrails, pelletSpan, clipBarrelOrigin, visibleTraceEnd, exitsForwa
 import { classifyImpact, ImpactParticlePool, SURFACE_FX } from './surface-fx.js';
 import { buildSwitchyard, paintSwitchyardGround, paintSwitchyardPanel, switchyardPaints } from './switchyard-art.js';
 import { normalizeKnifeSkin } from './knife-types.js';
-import { knifePose,knifeDrawPose,knifeAttackDuration } from './knife-motion.js';
+import { knifePose,knifeAttackDuration } from './knife-motion.js';
+import { drawLiteKnife } from './lite-knife.js';
 
 // The old sniper sheet has its own barrel length and projected front caps.
 const sniperBackupMuzzles=[[.541,.5478,1.26752],[.5,.55298,1.24567]];
@@ -311,7 +312,7 @@ function fallbackOperator(dst,p,clock,swing) {
   part(.1,1.45,-.232,.13,.024,.02,0xbfedef);
   if(p.active==='knife'){
     const age=clock-(swing?.at??-10),pose=knifePose(age,swing?.side,p.knifeSkin);
-    const handX=.27+pose.x*.62,handY=1.02+pose.y*.44,handZ=-.35+pose.z*.85;
+    const handX=.27+Math.max(-.17,Math.min(.09,pose.x*.62)),handY=1.02+pose.y*.44,handZ=-.35+pose.z*.85;
     part(handX,handY-.10,handZ,.105,.17,.11,0x263641);
     const grip=[x+handX*cy-handZ*sy,y+handY*h,z+handX*sy+handZ*cy];
     return heldEquipment(dst,p,grip,age,swing?.side);
@@ -831,21 +832,7 @@ export class LiteRenderer {
       }
       if(this.heldView?.draw(this.ctx,p,t,t-this.knifeEquippedAt,inspectAge,this.meleeSwings.get(p.id)))return;
       if(p.active==='knife'){
-        // Immediate equip silhouette while the 3D renderer loads on a cold connection.
-        const c=this.ctx,h=this.height,flip=p.knifeSkin==='balisong';
-        const swing=this.meleeSwings.get(p.id),slash=knifePose(t-(swing?.at??-10),swing?.side,p.knifeSkin);
-        const draw=knifeDrawPose(p.knifeSkin,t-this.knifeEquippedAt);
-        c.save();c.translate(this.width*.70+h*(slash.x+draw.x)*.8,h*(.81-slash.y-draw.y));
-        c.scale(h*.20,h*.20);c.rotate(-.40+slash.rz+draw.rz);
-        c.fillStyle='#39443f';c.beginPath();c.moveTo(-.12,-.04);c.lineTo(.15,-.08);
-        c.lineTo(1,1.18);c.lineTo(.54,1.24);c.lineTo(-.13,.31);c.fill();
-        c.fillStyle='#b3c3c2';c.beginPath();c.moveTo(-.10,-.10);c.lineTo(.13,-.10);
-        if(flip){c.lineTo(.085,-.95);c.lineTo(-.061,-1.28);}
-        else{c.quadraticCurveTo(.35,-.68,-.24,-1.08);c.quadraticCurveTo(.02,-.71,-.10,-.38);}
-        c.closePath();c.fill();
-        if(flip){c.fillStyle='#ed9f51';c.fillRect(-.095,-.08,.14,.095);}
-        else{c.strokeStyle='#8fd6c8';c.lineWidth=.06;c.beginPath();c.arc(.02,.14,.13,0,Math.PI*2);c.stroke();}
-        c.restore();return;
+        drawLiteKnife(this.ctx,p,t,t-this.knifeEquippedAt,inspectAge,this.meleeSwings.get(p.id));return;
       }
     }
     if(!pose)return; // The shared HUD draws the magnified scope.
@@ -902,9 +889,19 @@ export class LiteRenderer {
     const factor=Math.min(1,cap/Math.max(sizeX,sizeY));const w=Math.max(2,Math.round(sizeX*factor)),h=Math.max(2,Math.round(sizeY*factor));
     if(w!==this.width||h!==this.height){this.width=this.canvas.width=w;this.height=this.canvas.height=h;this.image=this.ctx.createImageData(w,h);this.pixels=new Uint32Array(this.image.data.buffer);this.depth=new Float32Array(w*h);this.lastFrame=-1;}
     if(now<this.lastFrame){this.lastFrame=-1;this.clearShots();this.clearMelee();}
-    if(this.lastFrame>=0 && now-this.lastFrame<(playing?1/45:1/18))return;
-    const frameTime=this.lastFrame<0?.03:now-this.lastFrame,dt=Math.min(.1,frameTime);this.lastFrame=now;
     const p=playing?(game.players.find(v=>v.id===(view.spectatorId||selfId))||game.players[0]):null;
+    if(p?.active==='knife'){
+      // Keep the 45 Hz budget on a 60 Hz display. Dropping the remainder
+      // after every rendered frame otherwise locks knife sweeps to 30 Hz.
+      const step=1/45;
+      if(this.lastFrame<0||this.nextKnifeFrame==null)this.nextKnifeFrame=now;
+      if(now+.0002<this.nextKnifeFrame)return;
+      this.nextKnifeFrame=(now-this.nextKnifeFrame>=step?now:this.nextKnifeFrame)+step;
+    }else{
+      this.nextKnifeFrame=null;
+      if(this.lastFrame>=0 && now-this.lastFrame<(playing?1/45:1/18))return;
+    }
+    const frameTime=this.lastFrame<0?.03:now-this.lastFrame,dt=Math.min(.1,frameTime);this.lastFrame=now;
     const mode=Boolean(p),preview=this.map.preview;
     const previewYaw=preview?Math.atan2(preview.targetX-preview.x,preview.z-preview.targetZ):-.58;
     const previewPitch=preview?Math.atan2(preview.targetY-preview.y,Math.hypot(preview.targetX-preview.x,preview.targetZ-preview.z)):-.22;
