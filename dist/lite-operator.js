@@ -1,5 +1,6 @@
 // Derived from the same rigged, textured GLBs used by the WebGL renderer.
 // Only positions change between frames. Triangle topology and hues stay shared.
+import {knifeAttackDuration,knifeClipPhase} from './knife-motion.js';
 const CLIPS=['Idle_Shoot','Run_Gun','Jump_Idle','Duck','Punch'];
 const sources=['customs-guard','customs-responder'];
 const teams=sources.map(()=>({model:null,promise:null,failed:false}));
@@ -61,7 +62,7 @@ export function operatorGrip(world,player){
 
 export function posedOperator(model,player,clock,swing,state){
   const age=swing?clock-swing.at:Infinity;
-  const key=player.active==='knife'&&age>=0&&age<.55?'Punch':player.slide>0?'Duck':
+  const key=player.active==='knife'&&age>=0&&age<knifeAttackDuration(player.knifeSkin)?'Punch':player.slide>0?'Duck':
     player.grounded===false?'Jump_Idle':player.speed>.35?'Run_Gun':'Idle_Shoot';
   const clip=model.clips[key],loop=key==='Idle_Shoot'||key==='Run_Gun';
   if(state.clip!==key||state.previous>clock){
@@ -70,7 +71,7 @@ export function posedOperator(model,player,clock,swing,state){
   const dt=Math.min(.1,Math.max(0,clock-state.previous));state.previous=clock;
   const speed=key==='Run_Gun'?Math.max(.6,Math.min(1.55,player.speed/5.4)):1;
   state.phase+=dt*speed;
-  const phase=key==='Punch'?age/.55:key==='Duck'?1-Math.min(1,player.slide/.52):state.phase/clip.seconds;
+  const phase=key==='Punch'?knifeClipPhase(age,player.knifeSkin):key==='Duck'?1-Math.min(1,player.slide/.52):state.phase/clip.seconds;
   const frame=loop?(phase%1)*clip.length:Math.min(1,phase)*(clip.length-1);
   const a=Math.floor(frame),b=loop?(a+1)%clip.length:Math.min(clip.length-1,a+1);
   const first=(clip.first+a)*model.stride,second=(clip.first+b)*model.stride;

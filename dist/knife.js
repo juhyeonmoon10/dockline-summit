@@ -1,5 +1,7 @@
 import * as T from './assets/three.module.min.js';
 import { knifeParts,knifeAngles,knifePartPose } from './knife-art.js';
+import { KNIFE_TIMING,KARAMBIT_RING } from './knife-types.js';
+import { knifeDrawPose } from './knife-motion.js';
 
 const templates=new Map();
 // Independent colour, roughness and normal fields keep the steel satin, the
@@ -55,7 +57,7 @@ function knifeMaterial(kind){
     normalMap:texture(normals),normalScale:new T.Vector2(props.relief,props.relief),envMapIntensity:1.0});
   materials.set(kind,mat);return mat;
 }
-const restPose={x:0,y:0,z:0,rx:0,ry:0,rz:0};
+
 export const knifeFit={muzzle:-.10,muzzleY:.35,support:0,grip:-.075,sight:0,flash:0};
 
 function softenSurface(geom){
@@ -126,18 +128,15 @@ export function animateKnife(mesh,skin,drawAge=Infinity,inspectAge=Infinity){
   }
 }
 
-// Wind-up, a quick crossing cut at 100 ms, then a longer readable recovery.
-export function knifePose(age,side=1){
-  if(age<0||age>=.55)return restPose;
-  const frames=[
-    [0,0,0,0,0,0,0],
-    [.045,.035,.025,.035,-.10,-.25*side,-.25*side],
-    [.105,-.35,-.025*side,-.15,.40,.52*side,1.34*side],
-    [.190,-.26,-.09*side,-.08,.30,.26*side,.92*side],
-    [.55,0,0,0,0,0,0]
-  ];
-  let i=1;while(i<frames.length-1&&age>frames[i][0])i++;
-  const a=frames[i-1],b=frames[i],f=(age-a[0])/(b[0]-a[0]),t=f*f*(3-2*f);
-  const out={};for(const [index,key] of ['x','y','z','rx','ry','rz'].entries())out[key]=a[index+1]+(b[index+1]-a[index+1])*t;
-  return out;
+const ringOffset=new T.Vector3();
+export function animateCarriedKnife(mesh,skin,drawAge,gripY){
+  if(skin==='balisong'){animateKnife(mesh,skin,drawAge);return;}
+  if(drawAge>KNIFE_TIMING.karambit.draw&&mesh.userData.atGrip)return;
+  const draw=knifeDrawPose(skin,drawAge);
+  mesh.rotation.set(.24,-.24,-1.92+draw.turn);
+  ringOffset.fromArray(KARAMBIT_RING).applyQuaternion(mesh.quaternion);
+  mesh.position.set(-.018,gripY,0).sub(ringOffset);
+  mesh.userData.atGrip=drawAge>=KNIFE_TIMING.karambit.draw;
 }
+
+export { knifePose } from './knife-motion.js';

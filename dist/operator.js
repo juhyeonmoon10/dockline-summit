@@ -2,7 +2,8 @@ import * as T from './assets/three.module.min.js';
 import { clone } from './assets/SkeletonUtils.js';
 import { blasterMesh, gunFit } from './blaster.js';
 import { PRIMARY_WEAPONS } from './balance.js';
-import { knifeMesh,knifePose,animateKnife } from './knife.js';
+import { knifeMesh,knifePose,animateCarriedKnife } from './knife.js';
+import { knifeAttackDuration,knifeClipPhase } from './knife-motion.js';
 import { normalizeKnifeSkin } from './knife-types.js';
 
 const sources=[null,null];
@@ -63,11 +64,14 @@ export function createOperator(team){
 export function updateOperator(rig,player,dt,swing){
  // Restore the animation pose before mixing the next frame or changing guns.
  if(rig.aimed){for(const arm of rig.aimArms)arm.bone.quaternion.copy(arm.pose);rig.aimed=false;}
- const cutting=player.active==='knife'&&swing&&swing.age<.55;
+ const knifeSkin=normalizeKnifeSkin(player.knifeSkin),cutLength=knifeAttackDuration(knifeSkin);
+ const cutting=player.active==='knife'&&swing&&swing.age<cutLength;
  const clip=cutting?'Punch':player.slide>0?'Duck':player.y>0.15&&!(player.grounded??true)?'Jump_Idle':(player.speed||0)>.35?'Run_Gun':'Idle_Shoot';
  if(clip!==rig.clip){const before=rig.actions[rig.clip],next=rig.actions[clip];next.reset().play();next.crossFadeFrom(before,cutting?.05:.16,false);rig.clip=clip;}
  rig.actions.Run_Gun.timeScale=Math.max(.6,Math.min(1.55,(player.speed||0)/5.4));
- if(cutting){rig.actions.Punch.timeScale=0;rig.actions.Punch.time=Math.min(.995,swing.age/.55)*rig.actions.Punch.getClip().duration;}
+ if(cutting){
+   rig.actions.Punch.timeScale=0;rig.actions.Punch.time=knifeClipPhase(swing.age,knifeSkin)*rig.actions.Punch.getClip().duration;
+ }
  rig.mixer.update(dt);
  const pitch=Math.max(-.78,Math.min(.78,player.pitch||0));
  if(player.active==='sniper'){
@@ -90,7 +94,7 @@ export function updateOperator(rig,player,dt,swing){
  // This keeps every weapon aligned with shots, independently of source-file axes.
  rig.group.updateMatrixWorld(true);
  if(rig.hand){rig.hand.getWorldPosition(handPoint);rig.group.worldToLocal(handPoint);rig.loadout.position.copy(handPoint);}
- const cut=knifePose(cutting?swing.age:.55,swing?.side||1);
+ const cut=knifePose(cutting?swing.age:Infinity,swing?.side||1,knifeSkin);
  rig.loadout.rotation.set(pitch+(player.active==='knife'?cut.rx-.18:0),player.active==='knife'?cut.ry:0,player.active==='knife'?cut.rz+.2:0);
  if(rig.hand){
    gripOffset.set(0,.050,0);
@@ -98,14 +102,14 @@ export function updateOperator(rig,player,dt,swing){
    rig.loadout.position.add(gripOffset);
  }
  if(player.active==='knife'){
-   const skin=normalizeKnifeSkin(player.knifeSkin);
+   const skin=knifeSkin;
    if(skin!==(rig.knifeSkin||'karambit')){
      rig.loadout.remove(rig.loadouts.knife);
      rig.loadouts.knife=knifeMesh(skin);rig.loadout.add(rig.loadouts.knife);
      rig.knifeAge=0;
    }
    if(rig.active!=='knife')rig.knifeAge=0;
-   rig.knifeSkin=skin;animateKnife(rig.loadouts.knife,skin,rig.knifeAge,Infinity);rig.knifeAge+=dt;
+   rig.knifeSkin=skin;animateCarriedKnife(rig.loadouts.knife,skin,cutting?Infinity:rig.knifeAge,-.055);rig.knifeAge+=dt;
  }
  if(rig.active!==player.active){for(const [key,item] of Object.entries(rig.loadouts))item.visible=key===player.active;rig.active=player.active;}
 }

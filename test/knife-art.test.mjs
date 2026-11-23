@@ -7,7 +7,8 @@ import {knifeParts,knifeAngles,knifePartPose} from '../dist/knife-art.js';
 test('the karambit has a through-ring and the balisong has open scale windows on both faces',()=>{
   for(const [id,points] of [
     ['karambit',[[.018,-.210,false],[.058,-.210,true]]],
-    ['balisong',[[-.050,0,false],[-.063,0,true],[-.061,-.090,true]]],
+    ['balisong',[[-.050,0,false],[-.063,0,true],[-.061,-.090,true],
+      [-.059,-.135,false],[-.045,-.135,true],[-.059,-.060,false],[-.050,-.060,true]]],
   ]){
     const model=knifeMesh(id);model.updateMatrixWorld(true);
     for(const [x,y,solid] of points)for(const z of [-1,1]){
@@ -40,10 +41,10 @@ test('the independent balisong pivots stay on the moving tang and reset after in
   const a=knifeMesh('balisong'),b=knifeMesh('balisong'),parts=knifeParts('balisong');
   const fixed=a.getObjectByName('grip'),blade=a.getObjectByName('blade'),handle=a.getObjectByName('handle');
   const initial=handle.position.clone(),pin=initial.clone().sub(blade.position);
-  for(const [draw,inspect] of [[0,Infinity],[.24,Infinity],[Infinity,.8],[Infinity,1.51],[Infinity,2.24],[Infinity,3.25]]){
+  for(const [draw,inspect] of [[0,Infinity],[.14,Infinity],[Infinity,.238],[Infinity,.47],[Infinity,.782],[Infinity,1.32]]){
     animateKnife(a,'balisong',draw,inspect);a.updateMatrixWorld(true);
     assert.ok(blade.localToWorld(pin.clone()).distanceTo(handle.position)<1e-8);
-    if(inspect===1.51){
+    if(inspect===.47){
       const frame=new T.Box3().setFromObject(fixed,true).union(new T.Box3().setFromObject(handle,true));
       const folded=new T.Box3().setFromObject(blade,true);
       assert.ok(folded.min.y>=frame.min.y,'closed blade stays inside the handle silhouette');

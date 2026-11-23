@@ -30,6 +30,18 @@ function swing(game,extra={}){
   stepGame(game,{[game.players[0].id]:{slot:3,fire:true,yaw:0,pitch:0,...extra}},dt);
 }
 
+test('a tap during the last 90 ms queues one alternate swing even across unrelated events',()=>{
+  const {game,target}=setup();swing(game);
+  advance(game,{slot:3},.47);
+  // This tap ends before recovery; a wall/target event must not choose the next hand motion.
+  swing(game);advance(game,{slot:3},.24);
+  const starts=game.events.filter(e=>e.type==='melee');
+  assert.deepEqual(starts.map(e=>e.side),[1,-1]);
+  assert.ok(starts[1].at-starts[0].at>=WEAPONS.knife.interval-dt);
+  assert.equal(target.hp,MAX_HP-100);
+  advance(game,{slot:3},.80);assert.equal(game.events.filter(e=>e.type==='melee').length,2);
+});
+
 test('knife has a real equip/windup, one50-damage contact and no headshot multiplier in both modes',()=>{
   for(const mode of ['range','team']){
     const {game,player,target}=setup(mode);

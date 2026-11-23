@@ -81,8 +81,14 @@ function showPanel(kind,title,html){
   if(!panel.open)panel.showModal();panel.scrollTop=0;
 }
 function closePanel(){modal='';if(panel.open)panel.close();}
+function cancelInspection(){
+  audio.cancelKnifeHandling();
+  inspectedItem=null;inspectStart=null;inspectDeadline=0;
+  $('weaponHud').removeAttribute('data-inspecting');
+}
 function clearInput(){
-  keys.clear();pressed.clear();heldFire=ads=pendingFire=false;dragX=dragY=null;inspectedItem=null;
+  keys.clear();pressed.clear();heldFire=ads=pendingFire=false;dragX=dragY=null;
+  cancelInspection();
   if(game&&!client)clearBufferedFire(game.players.find(p=>p.id===selfId));
   audio.cancelHandling();
 }
@@ -162,7 +168,7 @@ function openRange(){
 }
 $('rangeBtn').onclick=openRange;
 function showPause(){if(screen!=='game'||game?.phase==='end')return;paused=true;clearInput();
-  audio.clear();
+  audio.clear(true);
   showPanel('pause',client?'경기 메뉴':'사격장 일시정지',(client?'<p class="note">다른 참가자와 경기는 계속 진행 중입니다.</p>':'')+
     sensitivityControls()+'<div class="row"><button class="primary" id="resume">계속 플레이</button></div><div class="row"><button class="secondary" id="gameControls">조작 안내</button><button class="secondary" id="gameSettings">설정</button></div><div class="row"><button class="minor" id="quit">로비로 나가기</button></div>');release();bindSensitivity();
   $('resume').onclick=()=>{closePanel();paused=false;attemptLock();};$('gameControls').onclick=help;$('gameSettings').onclick=settings;$('quit').onclick=client?leaveConfirm:goHome;
@@ -280,7 +286,11 @@ function results(){
 function receiveEvents(now){
   const me=game.players.find(p=>p.id===selfId), watch=watchPlayer();
   for(const ev of game.events){if(ev.seq<=lastEvent)continue;lastEvent=ev.seq;audio.event(ev,game,watch);
-    if(ev.actor===selfId&&['shot','melee','reload'].includes(ev.type))inspectedItem=null;
+    if(ev.actor===selfId&&['shot','melee','reload'].includes(ev.type)){
+      const earlierCut=ev.type==='melee'&&inspectStart!==null&&Number.isFinite(ev.at)&&
+        game.elapsed-ev.at>now-inspectStart+.015;
+      if(!earlierCut)cancelInspection();
+    }
     if(ev.type==='shot'&&ev.actor===watch?.id)feedback.shot(ev.weapon,now);
     if(ev.type==='hit'&&ev.actor===selfId)feedback.hit(ev,now);
     if(ev.type==='hit'&&ev.target===selfId)feedback.hurt(me,game.players.find(p=>p.id===ev.actor),now);
@@ -344,6 +354,7 @@ function inspectionAllowed(p){
 function inspectWeapon(){
   const p=watchPlayer();
   if(!inspectionAllowed(p))return;
+  cancelInspection();
   const primaryId=game.phase==='range'||game.phase==='warmup'?selected:p.weapon;
   inspectedItem=slot===3?normalizeKnifeSkin(p.knifeSkin):slot===2?'pistol':primaryId;
   // A switch and F can arrive between frames, especially before an online snapshot.
@@ -358,7 +369,7 @@ function inspectionAge(p,now){
         if(age<inspectDuration(inspectedItem))return age;
       }else if(inspectStart===null&&now<inspectDeadline)return Infinity;
     }
-    inspectedItem=null;
+    cancelInspection();
   }
   return Infinity;
 }
@@ -386,7 +397,7 @@ function bindCanvas(){
   canvas.addEventListener('mousedown',e=>{
     if(screen!=='game'||modal)return;e.preventDefault();audio.unlock();
     if(!pointerMode){attemptLock();dragX=e.clientX;dragY=e.clientY;}
-    if(e.button===0||e.button===2){inspectedItem=null;controlsUnderstood=true;}
+    if(e.button===0||e.button===2){cancelInspection();controlsUnderstood=true;}
     if(e.button===0)heldFire=pendingFire=true;if(e.button===2&&slot!==3&&!WEAPONS[watchPlayer()?.active]?.melee)ads=true;
   });
 }
@@ -408,7 +419,7 @@ document.addEventListener('keydown',e=>{
   pressed.add(e.code);
   if(['KeyW','KeyA','KeyS','KeyD','KeyF'].includes(e.code))controlsUnderstood=true;
   if(e.code==='KeyF'){inspectWeapon();return;}
-  if(['KeyC','KeyR','KeyQ','Digit1','Digit2','Digit3'].includes(e.code))inspectedItem=null;
+  if(['KeyC','KeyR','KeyQ','Digit1','Digit2','Digit3'].includes(e.code))cancelInspection();
   if(e.code==='Escape'){showPause();return;}
   if(['Digit1','Digit2','Digit3'].includes(e.code)){slot=Number(e.code.slice(-1));if(slot===3)ads=false;}
   if(e.code==='Tab')spectatorIndex++;

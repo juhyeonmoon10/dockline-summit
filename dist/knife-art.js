@@ -74,12 +74,16 @@ function ring(m,x,y,z,outer,inner,h,faceColor,sideColor,lipColor,count=28){
     const point=(j,angle)=>[x+profile[j][0]*Math.cos(angle),y+profile[j][0]*Math.sin(angle),z+profile[j][1]];
     for(let j=0;j<profile.length;j++){
       const k=(j+1)%profile.length;
-      quad(m,point(j,a),point(j,b),point(k,b),point(k,a),tints[j]);
+      // A single enamel insert runs across the visible outside of the loop.
+      // The polished inner lip remains continuous as the loop turns edge-on.
+      const enamel=i>=Math.floor(count*.41)&&i<Math.floor(count*.86);
+      const ink=enamel&&(j===1||j===5)?0x76c6b4:enamel&&j===3?0x548e85:tints[j];
+      quad(m,point(j,a),point(j,b),point(k,b),point(k,a),ink);
     }
   }
 }
 // A recessed centre and a polished shoulder read as separate surfaces in the turntable.
-function pivotDisc(m,x,y,z,r){
+function pivotDisc(m,x,y,z,r,amber=false){
   const side=Math.sign(z),n=16,back=side<0;
   function band(a,b,ha,hb,ink){
     for(let i=0;i<n;i++){
@@ -89,8 +93,8 @@ function pivotDisc(m,x,y,z,r){
       if(back)quad(m,s,t,q,p,ink);else quad(m,p,q,t,s,ink);
     }
   }
-  band(1,.85,0,.0009,0x858e91);
-  band(.85,.66,.0009,.0004,0x30383b);
+  band(1,.79,0,.0009,amber?0xee9a50:0x858e91);
+  band(.79,.66,.0009,.0004,amber?0x9d542a:0x30383b);
   band(.66,.57,.0004,.0014,0x99a3a7);
   const core=Array.from({length:n},(_,i)=>[x+Math.cos(tau*i/n)*r*.57,y+Math.sin(tau*i/n)*r*.57]);
   face(m,core,z+side*.0014,0x687278,back);
@@ -114,9 +118,9 @@ function groundBlade(m,stations,palette){
   sections.push(stations.at(-1));
   function profile(s,sign,t){
     const [ax,ay,bx,by,h]=s;
-    const swedge=.030+.20*Math.pow(Math.max(0,(t-.25)/.75),.75);
-    const ridge=.58-.22*t+.035*Math.sin(t*Math.PI*2);
-    const coords=[[0,.31],[swedge,.79],[ridge,1],[.78,.54],[.969,.065],[1,0]];
+    const swedge=.035+.24*Math.pow(Math.max(0,(t-.25)/.75),.75);
+    const ridge=.62-.24*t+.035*Math.sin(t*Math.PI*2);
+    const coords=[[0,.31],[swedge,.77],[ridge,1],[.825,.48],[.944,.10],[1,0]];
     return coords.map(([f,z])=>[mix(ax,bx,f),mix(ay,by,f),h*z*sign]);
   }
   for(let i=0;i<sections.length-1;i++){
@@ -152,17 +156,17 @@ function karambit(){
   const blade=part('blade','steel'),grip=part('grip','grip'),metal=part('fittings','hardware');
   groundBlade(blade,[
     [.035,.024,-.042,.027,.0105],[.040,.056,-.043,.058,.012],
-    [.041,.088,-.039,.083,.012],[.031,.126,-.045,.106,.012],
-    [.013,.164,-.060,.126,.012],[-.014,.195,-.081,.145,.012],
-    [-.046,.219,-.108,.159,.0115],[-.082,.235,-.139,.169,.0105],
-    [-.122,.245,-.169,.174,.0095],[-.161,.246,-.198,.174,.008],
-    [-.197,.236,-.224,.169,.0066],[-.228,.219,-.246,.159,.005],
-    [-.251,.197,-.263,.145,.0034],[-.268,.171,-.275,.129,.0018],
+    [.040,.085,-.032,.080,.012],[.025,.129,-.043,.110,.012],
+    [.006,.165,-.061,.132,.012],[-.022,.196,-.084,.152,.012],
+    [-.052,.219,-.111,.168,.0115],[-.088,.235,-.143,.181,.0105],
+    [-.128,.244,-.175,.190,.0095],[-.166,.244,-.202,.189,.008],
+    [-.199,.235,-.228,.180,.0066],[-.230,.220,-.248,.166,.005],
+    [-.250,.199,-.265,.148,.0034],[-.265,.174,-.276,.129,.0018],
     [-.283,.106,-.283,.106,0]
-  ],[[0x83919a,0xa4aeb0],[0x6d7a80,0x8d989e],[0x859297,0x98a3a6],
-     [0x89969b,0xb0bbba],[0xc6ceca,0xe1e2da]]);
+  ],[[0xa6b9c2,0xc8d6de],[0x415665,0x677b88],[0x8598a1,0xa2b3bc],
+     [0xc1ced0,0xe1e9e8],[0xe1e8e4,0xf2f3ed]]);
   const tang=gripSections.map(([y,l])=>[l-.0015,y]).concat(gripSections.slice().reverse().map(([y,,r])=>[r+.0015,y]));
-  plate(metal,tang,0,.014,.0018,0x4b5658,0x6c7776);
+  plate(metal,tang,0,.014,.0018,0x424d55,0x91a1a7);
   // A continuous crown gives the rubber scales a convex surface and the open
   // grooves a shadow that moves as the player rolls the hand.
   const widths=[0,.060,.18,.41,.64,.83,.95,1],heights=[.0100,.0150,.0198,.0235,.0227,.0200,.015,.010];
@@ -171,7 +175,7 @@ function karambit(){
     let j=1;while(j<widths.length-1&&f>widths[j])j++;
     return [mix(l+.002,r-.002,f),y,sign*(mix(heights[j-1],heights[j],(f-widths[j-1])/(widths[j]-widths[j-1]))+lift)];
   };
-  const shades=[0x292c2b,0x303432,0x393d39,0x383c38,0x343936,0x2f3431,0x252a29];
+  const shades=[0x242a30,0x2b3238,0x343c42,0x343d43,0x30393f,0x292f35,0x21272d];
   for(const side of [-1,1]){
     function patch(a,b,c,d,ink){if(side===1)quad(grip,a,b,c,d,ink);else quad(grip,d,c,b,a,ink);}
     for(let i=1;i<gripSections.length;i++){
@@ -182,13 +186,13 @@ function karambit(){
       }
     }
     // Discrete raised diagonal chevrons span the crown and reveal a graphite rim.
-    for(let row=0;row<16;row++){
-      const y=-.148+row*.0098;
+    for(let row=0;row<7;row++){
+      const y=-.145+row*.022;
       for(let j=2;j<6;j++){
         const x=widths[j-1],X=widths[j],d=f=>(1-f)*.016+.0006*Math.sin(f*6);
         const strip=(f,py,h)=>shell(y+d(f)+py,f,side,h);
-        patch(strip(x,0,0),strip(X,0,0),strip(X,.0016,.0018),strip(x,.0016,.0018),0x4a504a);
-        patch(strip(x,.0016,.0018),strip(X,.0016,.0018),strip(X,.004,0),strip(x,.004,0),0x282c2a);
+        patch(strip(x,0,0),strip(X,0,0),strip(X,.003,.0021),strip(x,.003,.0021),0x54616a);
+        patch(strip(x,.003,.0021),strip(X,.003,.0021),strip(X,.009,0),strip(x,.009,0),0x262c31);
       }
     }
     // The top collar is intentionally smooth so the two finish families read at distance.
@@ -202,7 +206,7 @@ function karambit(){
     pivotDisc(metal,.018,-.151,side*.0236,.0062);
     pivotDisc(metal,-.013,.019,side*.0238,.0065);
   }
-  ring(metal,.018,-.210,0,.0475,.036,.0137,0x505b5b,0x303839,0x929b97,48);
+  ring(metal,.018,-.210,0,.0475,.036,.0137,0x56616a,0x323c43,0xb4c6c8,48);
   return [blade,grip,metal];
 }
 // Shape the two cast frames with different shoulders while keeping a continuous
@@ -210,7 +214,9 @@ function karambit(){
 const handleRows=[
   [-.299,.009,0],[-.296,.015,0],[-.289,.018,0],[-.278,.018,0],
   [-.271,.018,.004],[-.264,.018,.008],[-.255,.017,.0075],[-.249,.017,.004],[-.245,.017,0],
-  [-.226,.017,0],[-.199,.0172,0],[-.166,.0176,0],[-.137,.0173,0],[-.110,.017,0],
+  [-.226,.017,0],[-.219,.017,.006],[-.210,.017,.0102],[-.183,.0175,.0106],
+  [-.172,.0176,.0076],[-.166,.0176,0],[-.144,.0175,0],[-.138,.0173,.006],
+  [-.128,.0173,.0102],[-.111,.017,.0102],[-.103,.017,.0078],[-.096,.017,0],
   [-.085,.017,0],[-.077,.017,0],[-.069,.017,.004],[-.063,.0168,.0072],
   [-.054,.0164,.0074],[-.046,.0168,.0066],[-.040,.017,.003],[-.037,.017,0],
   [-.026,.018,0],[-.015,.020,0],[.002,.021,0],[.012,.0188,0],[.018,.012,0],[.019,.007,0]
@@ -236,13 +242,13 @@ function handleFrame(m,side){
         if(b[2])iq[0]+=wing*.0016;if(a[2])ip[0]+=wing*.0016;
         const panel=(p,q,r,s,c)=>sign*wing>0?quad(m,p,q,r,s,c):quad(m,s,r,q,p,c);
         const raised=a[0]>=-.037||b[0]<=-.245;
-        panel(op,oq,iq,ip,raised?0x505659:0x41484a);
+        panel(op,oq,iq,ip,raised?0x53636c:0x404e58);
         const aEdge=point(a,wing,sign*edge),bEdge=point(b,wing,sign*edge);
-        panel(aEdge,bEdge,oq,op,raised?0x8c9190:0x707978);
+        panel(aEdge,bEdge,oq,op,raised?0xb0bcc1:0xa0b0b4);
         panel(point(a,wing,sign*inside),point(b,wing,sign*inside),bEdge,aEdge,0x42494c);
         if(a[2]||b[2]){
           const ar=point(a,wing*.5,sign*edge),br=point(b,wing*.5,sign*edge);
-          panel(ip,iq,br,ar,0x717c7e);
+          panel(ip,iq,br,ar,0x94a4ab);
           panel(ar,br,point(b,wing*.5,sign*inside),point(a,wing*.5,sign*inside),0x343b40);
         }
         panel(point(a,wing*.5,sign*inside),point(b,wing*.5,sign*inside),
@@ -252,27 +258,27 @@ function handleFrame(m,side){
     for(const row of [handleRows[0],handleRows.at(-1)]){
       quad(m,point(row,-1,sign*inside),point(row,1,sign*inside),point(row,1,sign*flat),point(row,-1,sign*flat),0x606767);
     }
-    pivotDisc(m,0,0,sign*.0173,.0095);
+    pivotDisc(m,0,0,sign*.0173,.0120,true);
     pivotDisc(m,centreLine(-.286,side),-.286,sign*.0173,.0039);
-    // The contrasting inset is softly crowned and framed on all four sides.
-    const panelRows=[[-.242,.001],[-.235,.0078],[-.220,.0118],[-.200,.012],[-.179,.0124],
-      [-.158,.0126],[-.137,.0124],[-.116,.012],[-.101,.0115],[-.087,.0098],[-.080,.004],[-.078,.0006]];
+    // Short angled guards leave the open rails visible in silhouette mid-flip.
     const across=[-1,-.83,-.67,0,.67,.83,1],depth=[.0173,.018,.0193,.0205,.0193,.018,.0173];
-    const ink=side<0?[0x242b2e,0x453b39,0x724943,0x855047,0x513733,0x292c2e]
-      :[0x252b2e,0x50433e,0x835447,0x945c4d,0x5b4039,0x292d2f];
-    const lacquer=(row,f,z)=>[centreLine(row[0],side)+row[1]*f,row[0],sign*z];
+    const lacquer=(row,f,z)=>[centreLine(row[0],side)+row[1]*f,row[0]+.002*f*side,sign*z];
     const start=m.colors.length;
-    for(let j=1;j<panelRows.length;j++){
-      const a=panelRows[j-1],b=panelRows[j];
-      for(let k=1;k<across.length;k++){
-        const l=across[k-1],r=across[k],p=lacquer(a,l,depth[k-1]),q=lacquer(a,r,depth[k]);
-        const v=lacquer(b,r,depth[k]),w=lacquer(b,l,depth[k-1]);
-        sign>0?quad(m,p,q,v,w,ink[k-1]):quad(m,w,v,q,p,ink[k-1]);
+    for(const [top,bottom,warm] of [[-.243,-.227,false],[-.165,-.145,true],[-.095,-.078,false]]){
+      const ink=warm?[0x513b2e,0x935434,0xc27741,0xdb8a4e,0xa25d35,0x553a2e]
+        :[0x303a41,0x45535b,0x56636a,0x606c73,0x48565d,0x313b42];
+      const panelRows=[[top,.005],[top+.0032,.011],[bottom-.0038,.012],[bottom,.004]];
+      for(let j=1;j<panelRows.length;j++){
+        const a=panelRows[j-1],b=panelRows[j];
+        for(let k=1;k<across.length;k++){
+          const l=across[k-1],r=across[k],p=lacquer(a,l,depth[k-1]),q=lacquer(a,r,depth[k]);
+          const v=lacquer(b,r,depth[k]),w=lacquer(b,l,depth[k-1]);
+          sign>0?quad(m,p,q,v,w,ink[k-1]):quad(m,w,v,q,p,ink[k-1]);
+        }
       }
     }
     m.inlays.push([start,m.colors.length]);
-    // Two small flush pins define the ends of each long inset.
-    for(const y of [-.219,-.102])pivotDisc(m,centreLine(y,side),y,sign*.0205,.0031);
+    pivotDisc(m,centreLine(-.155,side),-.155,sign*.0205,.0038);
   }
 }
 function balisong(){
@@ -288,17 +294,17 @@ function balisong(){
   groundBlade(blade,[
     [.008,.019,-.039,.018,.007],[.010,.035,-.038,.032,.0075],
     [.013,.047,-.047,.042,.0080],[.018,.066,-.043,.060,.0085],
-    [.026,.097,-.033,.089,.0090],[.034,.130,-.026,.121,.0090],
-    [.039,.161,-.023,.152,.0088],[.040,.190,-.022,.182,.0083],
-    [.036,.216,-.023,.207,.0074],[.026,.242,-.022,.234,.0067],
-    [.011,.265,-.022,.252,.0048],[-.006,.280,-.023,.269,.003],
+    [.023,.097,-.033,.089,.0090],[.031,.130,-.025,.121,.0090],
+    [.036,.161,-.022,.152,.0088],[.038,.190,-.022,.182,.0083],
+    [.035,.216,-.021,.207,.0074],[.030,.237,-.020,.225,.0067],
+    [.008,.265,-.024,.250,.0048],[-.008,.280,-.025,.268,.003],
     [-.032,.294,-.032,.294,0]
-  ],[[0x9ba5a7,0xbec5c5],[0x7e8a90,0x98a1a5],[0x94a0a4,0xafb8b8],
-     [0x9da7aa,0xb5bfbc],[0xcfd3ce,0xe2e4dc]]);
+  ],[[0xb3bfc2,0xd6dddd],[0x50616d,0x788793],[0x81939c,0xaab8be],
+     [0xb6c3c7,0xd4dedd],[0xd9e3e3,0xf2f2e8]]);
   const cx=centreLine(-.299,-1);
   const endLock=[[.004,-.294],[.006,-.302],[.002,-.310],[-.015,-.318],[-.030,-.316],[-.032,-.312],
     [-.017,-.313],[-.006,-.305],[-.006,-.294]].map(([x,y])=>[x+cx,y]);
-  plate(swing,easedOutline(endLock),0,.006,.001,0x50585b,0x7e8889);
+  plate(swing,easedOutline(endLock),0,.006,.001,0xa56339,0xe79a57);
   return [fixed,blade,swing];
 }
 export function knifeParts(skin='karambit'){
@@ -310,10 +316,11 @@ export function knifeParts(skin='karambit'){
   }
   return cache.get(key);
 }
-const drawFrames=[[0,3.10,0],[.115,2.81,-.52],[.24,1.75,-2.25],[.36,.75,-1.78],[.49,-.04,.12],[.56,0,0]];
-const inspectFrames=[[0,0,0],[.43,0,0],[.74,.095,-1.42],[1.02,.98,-2.57],[1.32,2.61,-.70],
-  [1.50,3.085,-.06],[1.78,3.085,-.06],[1.98,2.67,.67],[2.24,1.56,2.70],[2.46,.54,1.71],
-  [2.68,-.055,-.12],[2.82,0,0]];
+const drawFrames=[[0,3.10,0],[.042,3.04,-.27],[.097,2.42,-1.42],[.14,1.55,-2.43],
+  [.178,1.32,-2.24],[.242,.62,-1.26],[.29,-.045,.082],[.335,.025,-.045],[.42,0,0]];
+const inspectFrames=[[0,0,0],[.092,-.025,.085],[.14,.13,-.38],[.238,.62,-2.04],[.296,1.13,-2.66],
+  [.39,2.79,-.61],[.47,3.085,-.06],[.57,3.085,-.06],[.652,2.86,.53],[.70,2.29,1.92],
+  [.782,1.41,2.78],[.868,.67,1.62],[.96,-.038,-.075],[1.006,.02,.043],[1.073,0,0]];
 const open={blade:0,handle:0};
 function hingePose(frames,t){
   if(!(t>=0)||t>=frames.at(-1)[0])return open;

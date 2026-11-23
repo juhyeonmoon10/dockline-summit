@@ -2,6 +2,7 @@ import { RELOAD_CONTACT, SHOT_MECHANIC, SNIPER_RELOAD_CONTACT } from './weapon-v
 import { foleyUrl, unpackFoley, reloadClips } from './weapon-foley.js';
 import { prepareShot, prepareAction, makeHandlingFoley } from './weapon-sound.js';
 import { inspectDuration } from './view-inspect.js';
+import { KNIFE_TIMING, normalizeKnifeSkin } from './knife-types.js';
 
 const shotVolumes={
   rifle:.74,pistol:.64,shotgun:.88,sniper:.94,smg:.62,burst:.69,marksman:.80,lmg:.78,
@@ -43,7 +44,7 @@ export class ArenaSound {
   setEnabled(value){
     this._enabled=!!value;
     if(this.master)this.master.gain.setTargetAtTime(this._enabled?.78:0,this.ctx.currentTime,.004);
-    if(!this._enabled)this.clear();
+    if(!this._enabled)this.clear(true);
   }
   // Fetch in the lobby. Decoding and playback use the context unlocked by the player.
   preload(){
@@ -143,11 +144,19 @@ export class ArenaSound {
   }
   stop(voice){
     const now=this.ctx.currentTime;
-    voice.gain.gain.cancelScheduledValues(now);voice.gain.gain.setTargetAtTime(0,now,.002);
-    try{voice.source.stop(now+.008);}catch{}
+    const silent=voice.handling&&voice.weapon==='knife'&&voice.at>=now;
+    voice.gain.gain.cancelScheduledValues(now);
+    if(silent)voice.gain.gain.setValueAtTime(0,now);
+    else voice.gain.gain.setTargetAtTime(0,now,.002);
+    try{voice.source.stop(silent?now:now+.008);}catch{}
     this.voices.delete(voice);
   }
-  clear(){this.pending.length=0;this.stepsFor.clear();this.takes.clear();this.held=null;this.inspectClock=null;this.nextPositionUpdate=0;for(const voice of this.voices)this.stop(voice);}
+  clear(keepHeldKnife=false){
+    this.pending.length=0;this.stepsFor.clear();this.takes.clear();
+    if(!keepHeldKnife||!this.held||!Object.hasOwn(KNIFE_TIMING,this.held.item))this.held=null;
+    this.inspectClock=null;this.nextPositionUpdate=0;
+    for(const voice of this.voices)this.stop(voice);
+  }
   connected(source,volume,pan,delay=0,options={}){
     const ctx=this.ctx;if(!this.enabled||ctx?.state!=='running')return;
     const priority=options.priority||1;
@@ -174,12 +183,13 @@ export class ArenaSound {
       reloadEnd:options.reloadEnd,handling:options.handling,viewId:options.viewId,baseGain:volume/(options.attenuation||1),stereo,at};
     this.voices.add(voice);
     source.onended=()=>{this.voices.delete(voice);for(const node of nodes)node.disconnect();};
-    source.start(at);return gain;
+    if(options.offset>0)source.start(at,options.offset);else source.start(at);
+    return gain;
   }
   sample(id,volume=.5,pan=0,speed=1,delay=0,options={}){
     const ctx=this.ctx,key=options.nearReport?id+'@near':options.weapon?id+'@'+options.weapon:id;
     const buffer=this.buffers.get(key)||this.buffers.get(id);
-    if(!this.enabled||ctx?.state!=='running'||!buffer||!Number.isFinite(volume)||volume<.008)return;
+    if(!this.enabled||ctx?.state!=='running'||!buffer||!Number.isFinite(volume)||volume<.008||options.offset>=buffer.duration)return;
     const source=ctx.createBufferSource();source.buffer=buffer;source.playbackRate.value=clamp(speed,.5,2);
     return this.connected(source,volume,pan,delay,options);
   }
@@ -199,11 +209,19 @@ export class ArenaSound {
     for(const voice of this.voices)if(voice.handling)this.stop(voice);
     this.inspectClock=null;
   }
+  cancelKnifeHandling(){
+    if(this.held&&Object.hasOwn(KNIFE_TIMING,this.held.item))this.cancelHandling();
+  }
   handling(actor,inspectAge,t){
+    if(!this.enabled&&actor?.alive&&actor.active==='knife'){
+      const item=normalizeKnifeSkin(actor.knifeSkin);
+      if(this.held?.item!==item||this.held?.actor!==actor.id)this.held={actor:actor.id,item};
+      return;
+    }
     if(!actor?.alive||!this.enabled||this.ctx?.state!=='running'){
       if(this.held){this.cancelHandling();this.held=null;}return;
     }
-    const weapon=actor.active,item=weapon==='knife'?(actor.knifeSkin==='balisong'?'balisong':'karambit'):weapon;
+    const weapon=actor.active,item=weapon==='knife'?normalizeKnifeSkin(actor.knifeSkin):weapon;
     const changed=!this.held||this.held.actor!==actor.id||this.held.item!==item;
     const inspect=Number.isFinite(inspectAge)&&!actor.reload&&!actor.slide&&!actor.ads;
     const started=inspect?t-inspectAge:null;
@@ -216,8 +234,8 @@ export class ArenaSound {
     if(changed){
       this.cancelHandling();this.held={actor:actor.id,item};
       if(!inspect&&!actor.reload){
-        if(item==='balisong')events('draw',[[0,'gloveShift',.17],[.115,'hingeFlick',.19,1.06,.07],[.49,'hingeCatch',.32,1.02,.06]]);
-        else if(item==='karambit')events('draw',[[.015,'ringSlip',.19,1.03,.06],[.17,'gripSet',.23,.96,.08]]);
+        if(item==='balisong')events('draw',[[.012,'gloveShift',.12],[KNIFE_TIMING.balisong.drawBeat,'hingeFlick',.17,1.06,-.04],[KNIFE_TIMING.balisong.drawCatch,'hingeOpen',.33,1.02,.07]]);
+        else if(item==='karambit')events('draw',[[.024,'ringSlip',.14,1.02,.04],[KNIFE_TIMING.karambit.drawCatch,'ringCatch',.26,.97,.07]]);
         else events('draw',[[0,'gloveShift',.17],[weapon==='pistol'?.12:.26,'gripSet',weapon==='lmg'?.24:.17,weapon==='pistol'?1.16:.94,.08]]);
       }
     }
@@ -228,11 +246,11 @@ export class ArenaSound {
     if(this.inspectClock!==null&&Math.abs(started-this.inspectClock)<.018)return;
     this.cancelHandling();this.inspectClock=started;
     if(item==='balisong'){
-      events('inspect',[[.10,'gloveShift',.12],[.55,'hingeFlick',.15,1.09,.06],[1.50,'hingeCatch',.29,.95,-.08],
-        [1.94,'hingeFlick',.18,.98,-.04],[2.68,'hingeCatch',.32,1.06,.08],[2.87,'gripSet',.14,.98,.08]],inspectAge);
+      events('inspect',[[.085,'gloveShift',.11,1.10,.04],[KNIFE_TIMING.balisong.inspectFold,'hingeFold',.30,.98,-.08],
+        [.68,'flipSwing',.11,1.14,-.035],[KNIFE_TIMING.balisong.inspectOpen,'hingeOpen',.35,1.04,.08]],inspectAge);
     }else if(item==='karambit'){
-      events('inspect',[[.09,'gloveShift',.14],[.42,'ringSlip',.21,1.06,-.04],[.66,'hookSwing',.10,1.17,-.07],
-        [1.04,'gripSet',.22,1.08,.08],[2.62,'gloveShift',.13,.96,.06]],inspectAge);
+      events('inspect',[[.055,'gloveShift',.095],[.225,'ringSlip',.17,1.04,-.04],
+        [.31,'hookSwing',.14,1.15,-.08],[KNIFE_TIMING.karambit.inspectCatch,'ringCatch',.30,1.02,.065]],inspectAge);
     }else{
       const duration=inspectDuration(item);
       events('inspect',[[duration*.07,'gloveShift',.14,1.05,.06],[duration*.48,'gloveShift',.17,.86,-.06],
@@ -241,7 +259,18 @@ export class ArenaSound {
   }
   event(event,game,view){
     if(!view||!this.enabled)return;const actor=game.players.find(p=>p.id===event.actor);if(!actor)return;
-    if(actor.id===this.held?.actor&&['shot','reload','melee'].includes(event.type))this.cancelHandling();
+    if(event.type==='melee'||event.type==='meleeImpact'){
+      // The game has already committed this cut. A cold gun download must
+      // never replay an old swipe after the next item has been equipped.
+      const age=Number.isFinite(game.elapsed)&&Number.isFinite(event.at)?Math.max(0,game.elapsed-event.at):0;
+      if(age<.17&&this.canPlay(event)){
+        if(event.type==='melee'&&actor.id===this.held?.actor&&
+          (!age||this.inspectClock===null||performance.now()/1000-age+.015>=this.inspectClock))this.cancelHandling();
+        this.playEvent(event,actor,view,age);
+      }
+      return;
+    }
+    if(actor.id===this.held?.actor&&['shot','reload'].includes(event.type))this.cancelHandling();
     if(event.type==='shot'||event.type==='reload'){
       this.pending=this.pending.filter(c=>!(c.event.actor===event.actor&&c.event.type==='reload'));
     }
@@ -252,15 +281,20 @@ export class ArenaSound {
     }
     this.playEvent(event,actor,view);
   }
-  playEvent(event,actor,view){
+  playEvent(event,actor,view,eventAge=0){
     const own=actor.id===view.id;
     const origin=event.type==='meleeImpact'&&Number.isFinite(event.ex)&&Number.isFinite(event.ez)?{x:event.ex,z:event.ez}:
       ['shot','melee','meleeImpact'].includes(event.type)&&Number.isFinite(event.x)&&Number.isFinite(event.z)?event:actor;
     const {dist,pan}=this.relative(origin,view),attenuation=own?1:.65/(1+(dist/9)**1.35),position=own?0:pan;
     const options={priority:own?3:2,lowpass:own?0:Math.max(1800,16000/(1+dist*.12))};
     const propagation=own?0:Math.min(.12,dist/343),variant=(event.seq||0)%3;
-    if(event.type==='melee')this.sample(actor.knifeSkin==='balisong'?'flipSwing':'hookSwing',.35*attenuation,position,.96+variant*.04,propagation,options);
-    if(event.type==='meleeImpact')this.sample(event.target?'bladeHit':'bladeWall',.49*attenuation,own?pan*.28:pan,.98+variant*.025,propagation,options);
+    if(event.type==='melee'||event.type==='meleeImpact'){
+      const swing=event.type==='melee',butterfly=normalizeKnifeSkin(event.knifeSkin??actor.knifeSkin)==='balisong';
+      const take=swing?(butterfly?'flipSwing':'hookSwing'):(event.target?'bladeHit':'bladeWall');
+      const speed=swing?.975+variant*.025:(butterfly?1.04:.95)+variant*.025;
+      this.sample(take,(swing?.37:.49)*attenuation,swing||!own?position:pan*.28,speed,
+        Math.max(0,propagation-eventAge),{...options,offset:Math.max(0,eventAge-propagation)*speed});
+    }
     if(event.type==='shot'&&Object.hasOwn(shotVolumes,event.weapon)){
       const weapon=event.weapon,delay=own?0:Math.min(.12,dist/343);
       let take=weapon;

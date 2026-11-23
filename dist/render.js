@@ -8,8 +8,9 @@ import { dummyBody, dummyStand } from './range-dummy.js';
 import { PelletRenderer } from './pellet-render.js';
 import { clipBarrelOrigin,visibleTraceEnd,exitsForward,muzzleDeparture,flightSlices,singleShotSpan,pelletSpan,SHOT_TRAIL_LIFE } from './shot-path.js';
 import { WorldImpacts } from './world-impacts.js';
-import { knifeMesh,knifeFit,knifePose,animateKnife } from './knife.js';
-import { normalizeKnifeSkin } from './knife-types.js';
+import { knifeMesh,knifeFit,knifePose,animateKnife,animateCarriedKnife } from './knife.js';
+import { normalizeKnifeSkin,KNIFE_TIMING,KARAMBIT_RING } from './knife-types.js';
+import { knifeDrawPose,knifeAttackDuration } from './knife-motion.js';
 import { inspectionPose,applyInspection,ringFlourish } from './view-inspect.js';
 import { studioReflection } from './weapon-light.js';
 import { EjectedCases } from './ejected-cases.js';
@@ -214,37 +215,43 @@ export function poseHeldSleeves(weapon,key,weight=0,freeHand=0) {
 }
 
 export function poseHeldKnife(rig,weapon,skin,drawAge,inspectAge,cut,side,step=0,walk=0,swayX=0) {
-  const slash=knifePose(cut,side);
-  const equip=Math.max(0,1-drawAge/.27)**2,butterfly=skin==='balisong';
-  const catchBeat=Number.isFinite(drawAge)?Math.exp(-(((drawAge-.29)/.064)**2)):0;
+  const butterfly=skin==='balisong',striking=cut>=0&&cut<knifeAttackDuration(skin);
+  if(striking)inspectAge=Infinity;
+  if(striking||Number.isFinite(inspectAge))drawAge=Infinity;
+  const slash=knifePose(cut,side,skin),draw=knifeDrawPose(skin,drawAge);
   const walkShift=Math.sin(step)*.006*walk,guard=Math.abs(slash.x)*2.8;
   weapon.userData.walkShift=walkShift;weapon.userData.guard=guard;
-  rig.position.set((butterfly?.123:.014)+slash.x*.79+walkShift-swayX,
-    (butterfly?-.095:-.080)+slash.y*.70-Math.abs(Math.cos(step))*.005*walk-equip*.135+catchBeat*.006,
-    (butterfly?-.435:-.453)+slash.z*.59-equip*.029);
-  rig.rotation.set(-.06+slash.rx*.65-equip*.34,(butterfly?-.23:.24)+slash.ry*.74,
-    (butterfly?.72:-.12)+slash.rz*.88+equip*.49-catchBeat*.065);
+  rig.position.set((butterfly?.123:.014)+draw.x+slash.x*.88+walkShift-swayX,
+    (butterfly?-.095:-.080)+draw.y+slash.y*.84-Math.abs(Math.cos(step))*.005*walk,
+    (butterfly?-.435:-.453)+draw.z+slash.z*.80);
+  rig.rotation.set(-.06+draw.rx+slash.rx*.85,(butterfly?-.23:.24)+draw.ry+slash.ry*.89,
+    (butterfly?.72:-.12)+draw.rz+slash.rz*.93);
   const {body,hand}=weapon.userData;
+  animateKnife(body,skin,drawAge,inspectAge);
   const flourish=butterfly?null:ringFlourish(inspectAge);
   if(butterfly){
-    const age=Number.isFinite(inspectAge)?inspectAge:drawAge;
-    const hinge=Number.isFinite(inspectAge)?Math.sin(Math.min(1,Math.max(0,(age-.35)/2.47))*Math.PI):Math.sin(Math.min(1,Math.max(0,age/.56))*Math.PI);
-    hand.rotation.set(-.09,.37+hinge*.15,.12+hinge*.21);
-    flexGlove(hand,.12+hinge*.54);
-    body.position.set(.012,-.019,.002);
+    // Only the free handle fans out. The rail held in the palm follows the
+    // same contact in every draw, hinge catch and attack.
+    const hinge=clamp(Math.abs(body.getObjectByName('handle').rotation.z)/2.5,0,1);
+    hand.rotation.set(-.09,.37+hinge*.14,.12+hinge*.20);
+    flexGlove(hand,.10+Math.max(draw.grip,hinge*.72));
+    weapon.worldToLocal(hand.localToWorld(gripTarget.set(.004,-.063,.002)));
+    body.rotation.set(-.025,.035+hinge*.05,.060*hinge);
+    wristAxis.set(-.015,-.075,0).multiply(body.scale).applyQuaternion(body.quaternion);
+    body.position.copy(gripTarget).sub(wristAxis);
   }else{
-    hand.quaternion.copy(reverseRightFrame);hand.rotateY((flourish?.grip||0)*.28);
-    flexGlove(hand,(flourish?.grip||0)*.94,true);
+    const loose=flourish?.grip??draw.grip;
+    hand.quaternion.copy(reverseRightFrame);hand.rotateY(loose*.28);
+    flexGlove(hand,loose*.94,true);
     const index=hand.userData.fingers[0].b;
     // Keep the centre of the actual metal ring on the index segment, including
     // during draw, wrist roll, and the loosen/regrip around the single spin.
     weapon.worldToLocal(index.localToWorld(gripTarget.set(-.020,0,0)));
-    const reveal=Number.isFinite(inspectAge)?clamp(Math.min(inspectAge/.27,(3.10-inspectAge)/.34),0,1):0;
-    body.rotation.set(.86-reveal*.79,.19,-2.10+(flourish?.turn||0)+equip*.86);
-    wristAxis.set(.018,-.210,0).multiply(body.scale).applyQuaternion(body.quaternion);
+    const reveal=Number.isFinite(inspectAge)?clamp(Math.min(inspectAge/.15,(KNIFE_TIMING.karambit.inspect-inspectAge)/.20),0,1):0;
+    body.rotation.set(.86-reveal*.79,.19,-2.10+(flourish?.turn??draw.turn));
+    wristAxis.fromArray(KARAMBIT_RING).multiply(body.scale).applyQuaternion(body.quaternion);
     body.position.copy(gripTarget).sub(wristAxis);
   }
-  animateKnife(body,skin,drawAge,inspectAge);
 }
 
 export function animateHands(gun,player,reload,cycle) {
@@ -625,8 +632,10 @@ export class ArenaRenderer {
       if(e.type==='melee'){
         const actor=game.players.find(player=>player.id===e.actor);
         if(actor?.alive&&actor.active==='knife'){
-          const side=e.seq%2?1:-1;this.meleeSwings.set(e.actor,{age:0,side});
-          if(e.actor===focus?.id){this.meleeAge=0;this.meleeSide=side;this.flashTime=0;}
+          const side=e.side??(e.seq%2?1:-1);
+          const age=Number.isFinite(e.at)?clamp(game.elapsed-e.at,0,.55):0;
+          this.meleeSwings.set(e.actor,{age,side});
+          if(e.actor===focus?.id){this.meleeAge=age;this.meleeSide=side;this.flashTime=0;}
         }
       }
       if(e.type==='meleeImpact'&&Number.isFinite(e.ex)){
@@ -764,13 +773,13 @@ export class ArenaRenderer {
           a.loadout.clear();a.loadout.add(held);a.active=p.active;a.knifeSkin=knifeSkin;a.drawAge=0;
         }
         a.loadout.rotation.x=clamp(p.pitch,-.78,.78);
-        const slash=p.active==='knife'?this.meleeSwings.get(p.id):null,cut=knifePose(slash?.age??.55,slash?.side||1);
+        const slash=p.active==='knife'?this.meleeSwings.get(p.id):null,cut=knifePose(slash?.age??.55,slash?.side||1,knifeSkin);
         a.loadout.position.set(.127,p.active==='knife'?1.11:1.166,-.277);
         a.loadout.rotation.y=p.active==='knife'?-.3+cut.ry:0;
         a.loadout.rotation.z=p.active==='knife'?.4+cut.rz:0;
         if(p.active==='knife'){
           a.loadout.rotation.x+=cut.rx-.18;
-          animateKnife(a.loadout.children[0],knifeSkin,a.drawAge,Infinity);a.drawAge+=dt;
+          animateCarriedKnife(a.loadout.children[0],knifeSkin,slash?Infinity:a.drawAge,0);a.drawAge+=dt;
         }
         const speed=p.speed||0; a.gait+=dt*Math.min(speed,9)*2.9;
         const step=p.slide>0?0:Math.sin(a.gait)*Math.min(speed*.113,.55);
@@ -914,11 +923,12 @@ export class ArenaRenderer {
       this.gunRig.rotation.y+=-.20*cycle.grasp-.11*reloadWeight+.020*this.recoil;
       this.gunRig.rotation.z-=.33*cycle.grasp+.73*reloadWeight;
     }
+    const inspectAge=key==='knife'&&this.meleeAge<knifeAttackDuration(knifeSkin)?Infinity:view.inspectAge;
     if(key==='knife'){
-      poseHeldKnife(this.gunRig,weapon,knifeSkin,t-this.knifeEquippedAt,view.inspectAge,
+      poseHeldKnife(this.gunRig,weapon,knifeSkin,t-this.knifeEquippedAt,inspectAge,
         this.meleeAge,this.meleeSide,this.bob,sway,this.lookSwayX);
     }
-    const inspection=inspectionPose(key==='knife'?knifeSkin:key,view.inspectAge);
+    const inspection=inspectionPose(key==='knife'?knifeSkin:key,inspectAge);
     applyInspection(this.gunRig,inspection);
     poseHeldSleeves(weapon,key,inspection?.weight,inspection?.freeHand);
     this.barrelTip.position.set(fit.muzzleX??0,fit.muzzleY,fit.muzzle);

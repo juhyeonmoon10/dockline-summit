@@ -22,6 +22,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/configure-pages@v5
+      - name: Version browser modules and loadout art
+        run: node scripts/prepare-pages.mjs
       - name: Prepare festival server download
         run: |
           zip -qr "$RUNNER_TEMP/dockline-lan.zip" art-source PLAY-KO.txt start-windows.cmd package.json server.mjs dist -x dist/dockline-lan.zip

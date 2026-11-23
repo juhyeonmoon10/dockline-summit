@@ -19,7 +19,7 @@ export const spawnYaw = (player, mapId) => getArena(mapId).spawns[player.team][p
 
 function memory(p) {
   if (!playerMemory.has(p)) {
-    playerMemory.set(p, { holstered: {}, cooldown: 0, melee:null, burstLeft:0, semiLatched:false,
+    playerMemory.set(p, { holstered: {}, cooldown: 0, melee:null, nextSwingSide:1, burstLeft:0, semiLatched:false,
       triggerDown:false, bufferedUntil:0, unlimitedAmmo:p.reserve===null&&!WEAPONS[p.active]?.melee,
       slideCooldown: 0, lastSlide: false, lastJump: false, vx: 0, vz: 0, vy: 0, grounded: true });
   }
@@ -338,7 +338,8 @@ function beginMelee(g,p) {
   const w=WEAPONS[p.active],m=memory(p);
   m.cooldown=w.interval+Math.min(0,m.cooldown);
   m.melee={at:g.elapsed+w.windup};
-  emit(g,'melee',p.id,{weapon:p.active,x:p.x,y:p.y+eyeHeight(p),z:p.z,at:g.elapsed});
+  emit(g,'melee',p.id,{weapon:p.active,knifeSkin:p.knifeSkin,x:p.x,y:p.y+eyeHeight(p),z:p.z,at:g.elapsed,side:m.nextSwingSide});
+  m.nextSwingSide=-m.nextSwingSide;
   if(g.phase==='range')g.range.shots++;
 }
 
@@ -372,7 +373,7 @@ function resolveMelee(g,p,map) {
   m.melee=null;
   const contact=meleeContact(g,p,map);if(!contact)return;
   const {x,y,z,ex,ey,ez,target}=contact;
-  emit(g,'meleeImpact',p.id,{weapon:'knife',x,y,z,ex,ey,ez,target:target?.id||null,at:g.elapsed});
+  emit(g,'meleeImpact',p.id,{weapon:'knife',knifeSkin:p.knifeSkin,x,y,z,ex,ey,ez,target:target?.id||null,at:g.elapsed});
   if(target){
     if(g.phase==='range')g.range.hits++;
     applyHit(g,p,target,WEAPONS.knife.damage,false);
@@ -488,7 +489,7 @@ function tick(g, inputs, dt, map) {
     // Remember a fresh tap just before readiness, even if its release arrives
     // in the next network packet. Holding fire keeps the authored cadence.
     const fire=!!input.fire;
-    if(fire&&!m.triggerDown&&!m.burstLeft&&p.ammo>0&&Math.max(m.cooldown,p.reload)<=.09)
+    if(fire&&!m.triggerDown&&!m.burstLeft&&(p.ammo>0||WEAPONS[p.active].melee)&&Math.max(m.cooldown,p.reload)<=.09)
       m.bufferedUntil=g.elapsed+.09;
     m.triggerDown=fire;
     if(!fire)m.semiLatched=false;

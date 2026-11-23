@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ArenaSound} from '../dist/match-audio.js';
 import {prepareShot,prepareAction,makeHandlingFoley} from '../dist/weapon-sound.js';
+import {KNIFE_TIMING} from '../dist/knife-types.js';
 import {reloadClips} from '../dist/weapon-foley.js';
 import {RELOAD_CONTACT, SNIPER_RELOAD_CONTACT, SHOT_MECHANIC} from '../dist/weapon-view.js';
 
@@ -68,17 +69,60 @@ test('a knife inspect schedules its contacts once and cancels unplayed catches o
     calls.push({id,delay,options});audio.voices.add({id,...options});
   };
   audio.stop=voice=>audio.voices.delete(voice);
-  audio.handling(actor,Infinity,1);assert.ok(calls.some(c=>c.id==='hingeCatch'));
+  audio.handling(actor,Infinity,1);assert.ok(calls.some(c=>c.id==='hingeOpen'));
   audio.handling(actor,0,2);audio.handling(actor,.016,2.016);
-  assert.deepEqual([...audio.voices].filter(v=>v.id==='hingeCatch').map(v=>v.handling),['inspect','inspect']);
-  const catches=calls.filter(c=>c.id==='hingeCatch'&&c.options.handling==='inspect');
-  assert.deepEqual(catches.map(c=>c.delay),[1.50,2.68]);
+  const catches=calls.filter(c=>['hingeFold','hingeOpen'].includes(c.id)&&c.options.handling==='inspect');
+  assert.deepEqual(catches.map(c=>[c.id,c.delay]),[['hingeFold',KNIFE_TIMING.balisong.inspectFold],['hingeOpen',KNIFE_TIMING.balisong.inspectOpen]]);
+  assert.ok([...audio.voices].every(v=>v.handling==='inspect'));
   audio.event({type:'melee',actor:actor.id,weapon:'knife',seq:1},{players:[actor]},actor);
   assert.equal([...audio.voices].filter(v=>v.handling).length,0);
   audio.handling(actor,0,3);actor.active='pistol';audio.handling(actor,Infinity,3.1);
   assert.ok(![...audio.voices].some(v=>v.handling==='inspect'||v.handling==='draw'&&v.weapon==='knife'));
   audio.cancelHandling();audio.handling(actor,Infinity,3.11);
   assert.ok(![...audio.voices].some(v=>v.handling));
+});
+
+test('the karambit uses one palm catch, and a late balisong inspection starts at its current movement',()=>{
+  const {audio,calls}=listen(),actor={...player('local','knife'),knifeSkin:'karambit'};
+  audio.handling(actor,0,3);
+  assert.deepEqual(calls.filter(c=>c.id==='ringCatch').map(c=>c.delay),[KNIFE_TIMING.karambit.inspectCatch]);
+  assert.ok(calls.every(c=>c.delay<KNIFE_TIMING.karambit.inspect));
+  calls.length=0;actor.knifeSkin='balisong';audio.handling(actor,.59,4);
+  assert.ok(!calls.some(c=>c.id==='hingeFold'));
+  near(calls.find(c=>c.id==='hingeOpen').delay,KNIFE_TIMING.balisong.inspectOpen-.59);
+});
+
+test('authoritative swipes skip stale attacks and catch up immediately without waiting for gun downloads',()=>{
+  const {audio,calls}=listen(),actor={...player('local','knife'),knifeSkin:'karambit'},game={players:[actor],elapsed:10};
+  audio.pending.push({event:{type:'shot',actor:'someone',weapon:'rifle'},actor,view:actor,at:performance.now()});
+  const event={type:'melee',actor:actor.id,knifeSkin:'balisong',at:9.96,seq:1};
+  audio.event(event,game,actor);
+  assert.equal(audio.pending.length,1);assert.equal(calls[0].id,'flipSwing');near(calls[0].options.offset,.04);
+  calls.length=0;audio.event({...event,at:9.58},game,actor);assert.equal(calls.length,0);
+  audio.ctx.state='suspended';audio.event({...event,at:10},game,actor);
+  assert.equal(audio.pending.length,1);
+});
+
+test('delayed earlier melee confirmations leave a newer inspection playing',()=>{
+  const {audio}=listen(),actor={...player('local','knife'),knifeSkin:'balisong'},game={players:[actor],elapsed:10};
+  audio.held={actor:actor.id,item:'balisong'};audio.inspectClock=performance.now()/1000;
+  const started=audio.inspectClock;
+  audio.event({type:'melee',actor:actor.id,at:9.92},game,actor);
+  assert.equal(audio.inspectClock,started);
+  audio.event({type:'melee',actor:actor.id,at:9.60},game,actor);
+  assert.equal(audio.inspectClock,started);
+  audio.event({type:'melee',actor:actor.id,at:10},game,actor);
+  assert.equal(audio.inspectClock,null);
+});
+
+test('resuming the same knife after pause or muting does not replay its draw catches',()=>{
+  const {audio,calls}=listen(),actor={...player('local','knife'),knifeSkin:'balisong'};
+  audio.handling(actor,Infinity,1);calls.length=0;
+  audio.clear(true);audio.handling(actor,Infinity,2);
+  assert.deepEqual(calls,[]);
+  audio.enabled=false;actor.knifeSkin='karambit';audio.handling(actor,Infinity,3);
+  audio.enabled=true;audio.handling(actor,Infinity,4);assert.deepEqual(calls,[]);
+  audio.clear();audio.handling(actor,Infinity,5);assert.ok(calls.some(c=>c.id==='ringCatch'));
 });
 
 test('contact audio comes from the impact point and the two swings have different takes',()=>{

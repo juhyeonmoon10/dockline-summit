@@ -56,11 +56,13 @@ export function prepareAction(ctx,source,weapon,cue){
 const foley={
   gloveShift:{ms:160,bands:[1700,420],noise:.72,tones:[]},
   gripSet:{ms:93,bands:[1150,250],noise:.39,tones:[[156,.015,.51],[403,.011,.16]]},
-  ringSlip:{ms:148,bands:[2900,680],noise:.37,tones:[[1190,.028,.11],[3700,.016,.034]]},
-  hingeFlick:{ms:110,bands:[5100,1100],noise:.51,tones:[[2380,.012,.25],[3730,.008,.11]]},
-  hingeCatch:{ms:102,bands:[4700,760],noise:.46,tones:[[955,.023,.33],[2520,.020,.19],[4050,.012,.08]]},
-  hookSwing:{ms:192,bands:[4700,510],noise:1,tones:[]},
-  flipSwing:{ms:154,bands:[5600,740],noise:1,tones:[]},
+  ringSlip:{ms:86,bands:[2950,760],noise:.58,tones:[[1630,.015,.032]]},
+  ringCatch:{ms:87,bands:[2600,310],noise:.47,tones:[[238,.014,.37],[1194,.017,.12],[2810,.008,.051]]},
+  hingeFlick:{ms:57,bands:[5100,1100],noise:.55,tones:[[2380,.007,.13],[3730,.006,.07]]},
+  hingeFold:{ms:72,bands:[3400,550],noise:.48,tones:[[704,.017,.32],[1725,.012,.18],[3295,.009,.07]]},
+  hingeOpen:{ms:84,bands:[5700,860],noise:.42,tones:[[1070,.023,.29],[2680,.018,.23],[4130,.011,.12]]},
+  hookSwing:{ms:169,bands:[4150,460],noise:1,tones:[]},
+  flipSwing:{ms:151,bands:[5450,690],noise:1,tones:[]},
   bladeHit:{ms:123,bands:[2370,215],noise:.71,tones:[[164,.019,.48],[327,.013,.17]]},
   bladeWall:{ms:195,bands:[5500,740],noise:.73,tones:[[594,.033,.24],[1810,.039,.18],[3315,.019,.13]]}
 };
@@ -75,7 +77,10 @@ export function makeHandlingFoley(ctx){
       state=(Math.imul(1664525,state)+1013904223)>>>0;const noise=state/2147483648-1;
       const sweep=swing?1.18-.73*u:1;
       wide+=(noise-wide)*coeff(s.bands[0]*sweep,rate);lower+=(wide-lower)*highK;
-      const envelope=swing||rub?Math.sin(Math.PI*u)**(swing?2.4:1.3):Math.exp(-t/.023)*Math.min(1,t/.0013);
+      // Air cuts crest just before the 100 ms gameplay contact. Glove cloth and
+      // positive metal stops have separate, much shorter attack characteristics.
+      const envelope=swing?(t<.093?(t/.093)**1.65:Math.exp(-(t-.093)/.020)):
+        rub?Math.sin(Math.PI*u)**1.3:Math.exp(-t/.023)*Math.min(1,t/.0013);
       let v=(wide-lower)*s.noise*envelope;
       for(const [freq,decay,level] of s.tones){
         v+=Math.sin(2*Math.PI*freq*t)*Math.exp(-t/decay)*Math.min(1,t/.0015)*level;

@@ -2,7 +2,8 @@ import * as T from './assets/three.module.min.js';
 import {PRIMARY_WEAPONS,WEAPONS} from './balance.js';
 import {blasterMesh} from './blaster.js';
 import {knifeMesh,animateKnife} from './knife.js';
-import {KNIFE_LABELS} from './knife-types.js';
+import {KARAMBIT_RING,KNIFE_LABELS,KNIFE_TIMING} from './knife-types.js';
+import {ringFlourish} from './view-inspect.js';
 import {createCanvasPreview} from './armory-canvas.js';
 import {studioReflection} from './weapon-light.js';
 
@@ -95,6 +96,7 @@ function makeStage(host,preferLite,onZoom){
   const camera=new T.OrthographicCamera(-1,1,1,-1,.01,20);camera.position.z=4;
   scene.add(orbit);orbit.add(mount);mount.add(normalised);stageLights(scene);
   const bounds=new T.Box3(),center=new T.Vector3(),size=new T.Vector3(),point=new T.Vector3();
+  const restPosition=new T.Vector3(),ringCenter=new T.Vector3(...KARAMBIT_RING);
   // A sparse convex envelope follows crooked blades as well as long barrels.
   // A rotated bounding box leaves too much empty space around a curved blade.
   const directions=[],surface=[];
@@ -141,23 +143,23 @@ function makeStage(host,preferLite,onZoom){
     drawWorkbench(bench);
     const dt=lastTime?Math.min((time-lastTime)/1000,.05):0;lastTime=time;
     if(rotating&&!drag)yaw+=dt*.60;
-    let inspectRoll=0,inspectTilt=0;
     if(inspectTime!==null){
       const age=(time-inspectTime)/1000;
       animateKnife(model,id,Infinity,age);
       if(id==='karambit'){
-        const t=bound(age/2.35,0,1),smooth=t*t*(3-2*t);
-        inspectRoll=2*Math.PI*smooth;inspectTilt=.23*Math.sin(t*Math.PI*2);
+        model.rotation.z=ringFlourish(age)?.turn||0;
+        point.copy(ringCenter).applyQuaternion(model.quaternion);
+        model.position.copy(restPosition).add(ringCenter).sub(point);
       }
-      if(age>=3.25){animateKnife(model,id);inspectTime=null;}
+      if(age>=KNIFE_TIMING[id].inspect){animateKnife(model,id);inspectTime=null;}
     }
-    orbit.rotation.set(pitch+inspectTilt,yaw+inspectRoll,0,'XYZ');
+    orbit.rotation.set(pitch,yaw,0,'XYZ');
     orbit.position.set(0,0,0);
-    const folded=id==='balisong'&&inspectTime!==null;
-    units=fit(folded)/zoom;
+    const animated=inspectTime!==null;
+    units=fit(animated)/zoom;
     const w=Math.max(1,host.clientWidth),h=Math.max(1,host.clientHeight),aspect=w/h;
     // Pan is stored in viewport fractions so resizing retains the point of interest.
-    if(folded)bounds.getCenter(point);else point.set(0,0,0);
+    if(animated)bounds.getCenter(point);else point.set(0,0,0);
     orbit.position.set(panX*units-point.x,panY*units/aspect-point.y,0);
     if(gl){
       const dpr=Math.min(window.devicePixelRatio||1,2);
@@ -174,7 +176,7 @@ function makeStage(host,preferLite,onZoom){
   }
   function request(){if(!disposed&&!frame)frame=requestAnimationFrame(paint);}
   function reset(){yaw=0;pitch=0;panX=panY=0;zoom=1;rotating=false;inspectTime=null;
-    if(model&&isKnife(id))animateKnife(model,id);
+    if(model&&isKnife(id)){animateKnife(model,id);model.position.copy(restPosition);model.rotation.z=0;}
     onZoom(zoom,rotating);request();
   }
   function setZoom(value,px=0,py=0){
@@ -201,7 +203,7 @@ function makeStage(host,preferLite,onZoom){
         }
       }
     });
-    model.position.sub(center);normalised.add(model);normalised.scale.setScalar(1/extent);
+    model.position.sub(center);restPosition.copy(model.position);normalised.add(model);normalised.scale.setScalar(1/extent);
     mount.position.set(0,0,0);
     mount.rotation.set(isKnife(id)?.11:.24,isKnife(id)?-.23:Math.PI/2+.32,isKnife(id)?1.23:-.075,'ZXY');
     orbit.position.set(0,0,0);orbit.rotation.set(0,0,0);orbit.updateMatrixWorld(true);

@@ -9,6 +9,7 @@ import { pelletTrails, pelletSpan, clipBarrelOrigin, visibleTraceEnd, exitsForwa
 import { classifyImpact, ImpactParticlePool, SURFACE_FX } from './surface-fx.js';
 import { buildSwitchyard, paintSwitchyardGround, paintSwitchyardPanel, switchyardPaints } from './switchyard-art.js';
 import { normalizeKnifeSkin } from './knife-types.js';
+import { knifePose,knifeDrawPose,knifeAttackDuration } from './knife-motion.js';
 
 // 640×360 snapshots of the same two-handed rigs used by the WebGL view.
 const blasterRows={rifle:0,shotgun:1,sniper:2,pistol:3};
@@ -279,12 +280,6 @@ function addZoneRing(geo,{x,y,z,r}) {
   }
 }
 
-function knifeMotion(age){
-  if(age<0||age>=.55)return {cut:0,wind:0};
-  if(age<.06)return {cut:0,wind:Math.sin(age/.06*Math.PI*.5)};
-  if(age<.18)return {cut:Math.sin((age-.06)/.12*Math.PI*.5),wind:1-(age-.06)/.12};
-  return {cut:Math.cos((age-.18)/.37*Math.PI*.5)**2,wind:0};
-}
 function fallbackOperator(dst,p,clock,swing) {
   const h=eyeHeight(p)/1.55,y=p.y,x=p.x,z=p.z,yaw=p.yaw,sy=Math.sin(yaw),cy=Math.cos(yaw);
   const color=p.team===0?0x369fde:0xeb754b,dark=0x263d49;
@@ -296,10 +291,11 @@ function fallbackOperator(dst,p,clock,swing) {
   part(0,1.30,0,.45,.39,.43,color);part(0,1.43,-.206,.42,.115,.035,0x1b2c39);
   part(.1,1.45,-.232,.13,.024,.02,0xbfedef);
   if(p.active==='knife'){
-    const {cut}=knifeMotion(clock-(swing?.at??-10)),handX=.27-cut*.20,handY=1.02+cut*.04,handZ=-.35-cut*.16;
+    const age=clock-(swing?.at??-10),pose=knifePose(age,swing?.side,p.knifeSkin);
+    const handX=.27+pose.x*.62,handY=1.02+pose.y*.44,handZ=-.35+pose.z*.85;
     part(handX,handY-.10,handZ,.105,.17,.11,0x263641);
     const grip=[x+handX*cy-handZ*sy,y+handY*h,z+handX*sy+handZ*cy];
-    return heldEquipment(dst,p,grip,clock-(swing?.at??-10));
+    return heldEquipment(dst,p,grip,age,swing?.side);
   }else{
     const grip=[x+.24*cy+.24*sy,y+.93*h,z+.24*sy-.24*cy];
     return heldEquipment(dst,p,grip,0);
@@ -312,11 +308,11 @@ const carriedGuns={
   lmg:[.52,.24,.15],pistol:[.19,.035,.075],
 };
 
-function heldEquipment(dst,p,[x,y,z],age){
+function heldEquipment(dst,p,[x,y,z],age,side=1){
   const sy=Math.sin(p.yaw),cy=Math.cos(p.yaw);
-  const knife=p.active==='knife',cut=knife?knifeMotion(age).cut:0;
+  const knife=p.active==='knife',swing=knife?knifePose(age,side,p.knifeSkin):null;
   const angle=Math.max(-.78,Math.min(.78,p.pitch||0));
-  const tilt=angle+(knife?-.2-cut*.82:0),co=Math.cos(tilt),si=Math.sin(tilt);
+  const tilt=angle+(knife?-.2+swing.rx-.40*Math.abs(swing.rz):0),co=Math.cos(tilt),si=Math.sin(tilt);
   const transform=(lx,ly,lz)=>{
     const yy=ly*co-lz*si,zz=ly*si+lz*co;
     return [x+lx*cy-zz*sy,y+yy,z+lx*sy+zz*cy];
@@ -331,7 +327,8 @@ function heldEquipment(dst,p,[x,y,z],age){
     const face=(pts,z,col)=>quad(dst,pts.map(([x,y])=>transform(x,y,z)),col);
     if(p.knifeSkin==='balisong'){
       body(-.022,-.13,0,.034,.20,.037,0x394247);
-      body(.022,-.13,0,.034,.20,.037,0x917e63);
+      body(.022,-.13,0,.034,.20,.037,0x515b60);
+      body(.022,.038,0,.031,.023,.042,0xe49444);
       face([[-.024,.072],[.031,.070],[.022,.237],[-.011,.319]],0,0xafb8ba);
       face([[.031,.070],[.041,.099],[.022,.237],[-.011,.319]],.004,0xd6dddd);
     }else{
@@ -340,7 +337,7 @@ function heldEquipment(dst,p,[x,y,z],age){
       face([[.002,.208],[.038,.165],[.024,.229],[-.054,.249]],0,0xd7dfdd);
       for(let i=0;i<10;i++){
         const ring=(k,r)=>[.012+r*Math.cos(k*Math.PI/5),-.116+r*Math.sin(k*Math.PI/5)];
-        face([ring(i,.042),ring(i+1,.042),ring(i+1,.026),ring(i,.026)],.002,0x829a91);
+        face([ring(i,.042),ring(i+1,.042),ring(i+1,.026),ring(i,.026)],.002,i<3?0x93e0d1:0x687c81);
       }
     }
     return;
@@ -429,7 +426,10 @@ export class LiteRenderer {
     for(const event of game.events||[]){
       if(event.seq<=this.lastMeleeSeq)continue;this.lastMeleeSeq=event.seq;
       if(event.type==='round'){this.meleeSwings.clear();this.meleeImpacts=[];}
-      if(event.type==='melee')this.meleeSwings.set(event.actor,{at:now,side:event.seq%2?1:-1});
+      if(event.type==='melee'){
+        const age=Number.isFinite(event.at)?Math.max(0,Math.min(.55,game.elapsed-event.at)):0;
+        this.meleeSwings.set(event.actor,{at:now-age,side:event.side??(event.seq%2?1:-1)});
+      }
       if(event.type==='meleeImpact'&&[event.ex,event.ey,event.ez].every(Number.isFinite)){
         this.meleeImpacts.push({event,until:now+.10});
         if(this.meleeImpacts.length>16)this.meleeImpacts.shift();
@@ -437,7 +437,7 @@ export class LiteRenderer {
     }
     for(const [id,swing] of this.meleeSwings){
       const actor=game.players.find(v=>v.id===id);
-      if(!actor?.alive||actor.active!=='knife'||now-swing.at>=.55)this.meleeSwings.delete(id);
+      if(!actor?.alive||actor.active!=='knife'||now-swing.at>=knifeAttackDuration(actor.knifeSkin))this.meleeSwings.delete(id);
     }
     this.meleeImpacts=this.meleeImpacts.filter(impact=>impact.until>now);
     const skin=normalizeKnifeSkin(p.knifeSkin);
@@ -611,7 +611,7 @@ export class LiteRenderer {
     const model=team.model;let state=this.operatorStates.get(player.id);
     if(!state){state={};this.operatorStates.set(player.id,state);}
     const world=posedOperator(model,player,clock,swing,state);
-    const tip=heldEquipment(gear,player,operatorGrip(world,player),clock-(swing?.at??-10));
+    const tip=heldEquipment(gear,player,operatorGrip(world,player),clock-(swing?.at??-10),swing?.side);
     if(tip)this.remoteMuzzles.set(player.id,{tip,player});
     if(behind)return;
     if(!state.camera||state.camera.length!==model.count){
@@ -776,14 +776,19 @@ export class LiteRenderer {
       if(p.active==='knife'){
         // Immediate equip silhouette while the 3D renderer loads on a cold connection.
         const c=this.ctx,h=this.height,flip=p.knifeSkin==='balisong';
-        const {cut}=knifeMotion(t-(this.meleeSwings.get(p.id)?.at??-10));
-        c.save();c.translate(this.width*.70-cut*h*.25,h*.81);c.scale(h*.20,h*.20);c.rotate(-.40-cut);
+        const swing=this.meleeSwings.get(p.id),slash=knifePose(t-(swing?.at??-10),swing?.side,p.knifeSkin);
+        const draw=knifeDrawPose(p.knifeSkin,t-this.knifeEquippedAt);
+        c.save();c.translate(this.width*.70+h*(slash.x+draw.x)*.8,h*(.81-slash.y-draw.y));
+        c.scale(h*.20,h*.20);c.rotate(-.40+slash.rz+draw.rz);
         c.fillStyle='#39443f';c.beginPath();c.moveTo(-.12,-.04);c.lineTo(.15,-.08);
         c.lineTo(1,1.18);c.lineTo(.54,1.24);c.lineTo(-.13,.31);c.fill();
         c.fillStyle='#b3c3c2';c.beginPath();c.moveTo(-.10,-.10);c.lineTo(.13,-.10);
         if(flip){c.lineTo(.085,-.95);c.lineTo(-.061,-1.28);}
         else{c.quadraticCurveTo(.35,-.68,-.24,-1.08);c.quadraticCurveTo(.02,-.71,-.10,-.38);}
-        c.closePath();c.fill();c.restore();return;
+        c.closePath();c.fill();
+        if(flip){c.fillStyle='#ed9f51';c.fillRect(-.095,-.08,.14,.095);}
+        else{c.strokeStyle='#8fd6c8';c.lineWidth=.06;c.beginPath();c.arc(.02,.14,.13,0,Math.PI*2);c.stroke();}
+        c.restore();return;
       }
     }
     if(!pose)return; // The shared HUD draws the magnified scope.
