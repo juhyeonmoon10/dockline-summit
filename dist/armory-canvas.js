@@ -9,7 +9,7 @@ for(let i=0;i<=1024;i++){
 }
 const channel=x=>gamma[Math.min(1024,Math.max(0,Math.round(x*1024)))];
 
-export function createCanvasPreview(canvas){
+export function createCanvasPreview(canvas,{studio=false}={}){
   const ctx=canvas.getContext('2d');
   if(!ctx)throw new Error('Canvas 2D unavailable');
   const projected=new WeakMap();
@@ -63,7 +63,8 @@ export function createCanvasPreview(canvas){
       for(const group of groups){
         const material=Array.isArray(mesh.material)?mesh.material[group.materialIndex]:mesh.material;
         if(!material?.visible)continue;
-        const base=material.color;
+        const base=material.color,roughness=material.roughness??.76,metal=material.metalness??0;
+        const studioLit=studio&&!material.isMeshBasicMaterial;
         for(let offset=group.start,end=group.start+group.count;offset+2<end;offset+=3){
           const a=ix?ix[offset]:offset,b=ix?ix[offset+1]:offset+1,c=ix?ix[offset+2]:offset+2;
           const lx=nor?nor.getX(a)+nor.getX(b)+nor.getX(c):0;
@@ -76,7 +77,20 @@ export function createCanvasPreview(canvas){
           const light=material.isMeshBasicMaterial?1:.68+.86*key+.42*rim;
           const shine=material.isMeshBasicMaterial?0:.12*Math.pow(Math.max(0,(-.26*nx+.37*ny+.89*nz)/length),18);
           const r=base.r*(col?col.getX(a):1),g=base.g*(col?col.getY(a):1),blue=base.b*(col?col.getZ(a):1);
-          const ink=0xff000000|(channel(blue*light+shine)<<16)|(channel(g*light+shine)<<8)|channel(r*light+shine);
+          let redOut=r*light+shine,greenOut=g*light+shine,blueOut=blue*light+shine;
+          if(studioLit){
+            // Different panel reflections on rough polymer and bright blade bevels.
+            const x=nx/length,y=ny/length,z=nz/length;
+            const rx=2*z*x,ry=2*z*y,rz=2*z*z-1;
+            const strip=Math.max(0,1-Math.abs(ry-.63-rx*.08)/(.09+roughness*.34))*
+              Math.max(0,1-Math.abs(rx+.15)/1.22)*Math.max(.12,rz);
+            const reflect=(.025+.38*metal)*(1.05-roughness*.66)*strip;
+            const fill=.49+.16*(1+y);
+            redOut=r*(fill+1.02*key+.28*rim)+.80*reflect+shine*.53;
+            greenOut=g*(fill+.89*key+.42*rim)+.93*reflect+shine*.56;
+            blueOut=blue*(fill+.76*key+.64*rim)+reflect+shine*.67;
+          }
+          const ink=0xff000000|(channel(blueOut)<<16)|(channel(greenOut)<<8)|channel(redOut);
           triangle(a*3,b*3,c*3,points,ink,w,h);
         }
       }

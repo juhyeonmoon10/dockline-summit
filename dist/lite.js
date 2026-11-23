@@ -793,7 +793,7 @@ export class LiteRenderer {
     this.activeGun=p?.active;this.recoil=Number.isFinite(this.shotAge)?shotKickResponse(this.shotAge,p.active):0;
     const held=mode&&canAim(p,p.id===selfId?view.ads??p.ads:p.ads);
     const ads=mode&&scopeAfterShot(p.active,held,this.shotWeapon===p.active?this.shotAge:Infinity);
-    this.aim=mode&&this.aimFocus===p.id?approachAim(this.aim,ads,dt):Number(ads);
+    this.aim=mode&&this.aimFocus===p.id?approachAim(this.aim,ads,dt,p.active):Number(ads);
     this.scopeActive=!!(mode&&sniperScopeVisible(p.active,this.aim,ads));
     this.aimFocus=p?.id;
     this.viewFov=mode?weaponFov(p.active,this.aim,p.slide>0):58;

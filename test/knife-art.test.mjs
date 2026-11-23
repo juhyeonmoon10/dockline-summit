@@ -7,7 +7,7 @@ import {knifeParts,knifeAngles,knifePartPose} from '../dist/knife-art.js';
 test('the karambit has a through-ring and the balisong has open scale windows on both faces',()=>{
   for(const [id,points] of [
     ['karambit',[[.018,-.210,false],[.058,-.210,true]]],
-    ['balisong',[[-.044,-.100,false],[-.060,-.100,true]]],
+    ['balisong',[[-.050,0,false],[-.063,0,true],[-.061,-.090,true]]],
   ]){
     const model=knifeMesh(id);model.updateMatrixWorld(true);
     for(const [x,y,solid] of points)for(const z of [-1,1]){
@@ -15,6 +15,25 @@ test('the karambit has a through-ring and the balisong has open scale windows on
       assert.equal(ray.intersectObject(model,true).length>0,solid,id+' '+[x,y,z].join(','));
     }
   }
+});
+
+test('steel, cast metal, rubber and both curved inserts keep their own finishes after cloning',()=>{
+  const karambit=knifeMesh('karambit'),balisong=knifeMesh('balisong');
+  const steel=karambit.getObjectByName('blade').material,rubber=karambit.getObjectByName('grip').material;
+  const fasteners=karambit.getObjectByName('fittings').material;
+  const fixed=balisong.getObjectByName('grip'),moving=balisong.getObjectByName('handle');
+  assert.ok(!Array.isArray(steel));
+  assert.ok(steel.metalness>fasteners.metalness&&fasteners.metalness>rubber.metalness);
+  assert.ok(rubber.roughness>steel.roughness);
+  for(const handle of [fixed,moving]){
+    assert.equal(handle.material[0],fasteners);
+    assert.ok(handle.material[1].metalness<fasteners.metalness);
+    assert.ok(handle.material[1].normalMap&&handle.material[1].roughnessMap);
+    const [frame,inlay]=handle.geometry.groups;
+    assert.ok(frame.count>0&&inlay.count>0);
+    assert.equal(inlay.start+inlay.count,handle.geometry.index.count);
+  }
+  assert.ok(steel.normalMap&&steel.roughnessMap&&rubber.normalMap&&rubber.roughnessMap);
 });
 
 test('the independent balisong pivots stay on the moving tang and reset after inspection',()=>{

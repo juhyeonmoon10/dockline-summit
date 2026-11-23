@@ -1,0 +1,12 @@
+DOCKLINE · Customs 04 surface materials
+
+Concrete Floor 02, Wood Planks Dirt, and Rusty Metal 02 are CC0 assets from Poly Haven.
+https://polyhaven.com/a/concrete_floor_02
+https://polyhaven.com/a/wood_planks_dirt
+https://polyhaven.com/a/rusty_metal_02
+https://polyhaven.com/license
+https://creativecommons.org/publicdomain/zero/1.0/
+
+The warehouse/ WebP files are resized versions of the diffuse, OpenGL normal,
+and roughness layers. DOCKLINE mixes the tiled photos with its own painted
+loading-bay stripes, identification marks, tyre tracks and floor lighting.

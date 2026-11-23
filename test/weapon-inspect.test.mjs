@@ -7,7 +7,7 @@ import {inspectDuration,inspectionPose,applyInspection,ringFlourish} from '../di
 
 const camera=new PerspectiveCamera(63,4/3,.012,4);
 const point=new Vector3();
-test('every firearm reveals both sides with the complete weapon inside a 4:3 match view',()=>{
+test('every firearm shows the receiver and top with the full weapon framed during the shoulder roll',()=>{
   for(const key of [...PRIMARY_WEAPONS,'pistol']){
     const rig=new Group(),model=gunModel(key);rig.scale.setScalar(.91);rig.add(model);
     const duration=inspectDuration(key);
@@ -15,7 +15,7 @@ test('every firearm reveals both sides with the complete weapon inside a 4:3 mat
     assert.equal(inspectionPose(key,Infinity),null);
     const side=(fraction)=>{
       const pose=inspectionPose(key,duration*fraction);
-      rig.position.set(0,0,0);rig.rotation.set(0,0,0);applyInspection(rig,pose);
+      rig.position.set(.188,-.174,-.422);rig.rotation.set(.012,.025,-.032);applyInspection(rig,pose);
       poseHeldSleeves(model,key,pose.weight,pose.freeHand);
       rig.updateMatrixWorld(true);
       let furthest=0;
@@ -28,10 +28,13 @@ test('every firearm reveals both sides with the complete weapon inside a 4:3 mat
         }
       });
       assert.ok(furthest<1,`${key} clipped at ${fraction}: ${furthest}`);
-      return new Vector3(1,0,0).applyQuaternion(rig.quaternion).z;
+      const muzzle=new Vector3(0,0,-1).applyQuaternion(rig.quaternion);
+      assert.ok(muzzle.x<-.35,key+' keeps the barrel on the left throughout the roll');
+      return new Vector3(1,0,0).applyQuaternion(rig.quaternion);
     };
-    const front=side(.26),back=side(.76);
-    assert.ok(front<-.70&&back>.70,key+' shows opposite cheeks');
+    const first=side(.26),second=side(.76);
+    for(const fraction of [.14,.37,.51,.57,.62,.69,.84])side(fraction);
+    assert.ok(first.dot(second)<.66,key+' reveals a different surface');
     poseHeldSleeves(model,key);
     assert.equal(model.userData.supportMount.position.length(),0);
   }
@@ -40,12 +43,18 @@ test('every firearm reveals both sides with the complete weapon inside a 4:3 mat
 test('the karambit ring tracks its contact through the spin and cancellation restores the grip',()=>{
   const holder=new Group(),gun=gunModel('knife','karambit'),body=gun.userData.body;
   holder.add(gun);
-  for(const age of [.37,.50,.68,.85,1.01]){
+  for(const age of [0,.11,.25,.37,.50,.68,.85,1.01,2.1,Infinity]){
     poseHeldKnife(holder,gun,'karambit',2,age,.55,1);
-    const {grip}=ringFlourish(age);
-    point.set(.018,-.210,0).applyQuaternion(body.quaternion).add(body.position);
-    assert.ok(point.distanceTo(new Vector3(.018-.012*grip,-.210+.171*grip,-.006*grip))<1e-8);
+    const attachment=gun.userData.hand.userData.fingers[0].b.localToWorld(new Vector3(-.020,0,0));
+    body.localToWorld(point.set(.018,-.210,0));
+    assert.ok(point.distanceTo(attachment)<1e-8);
   }
-  poseHeldKnife(holder,gun,'karambit',2,Infinity,.55,1);
-  assert.equal(body.rotation.z,0);assert.equal(body.position.length(),0);
+  assert.ok(Math.abs(body.rotation.z+2.10)<1e-8);
+  assert.ok(Math.abs(ringFlourish(.85).turn+Math.PI*2)<.001);
+  const tip=body.localToWorld(new Vector3(-.283,.106,0)).project(camera);
+  const ring=body.localToWorld(new Vector3(.018,-.21,0)).project(camera);
+  assert.ok(tip.x>ring.x+.20&&tip.y>ring.y+.13,'reverse-grip claw exits to the right and curls upwards');
+  poseHeldSleeves(gun,'knife');
+  const guard=gun.userData.support.localToWorld(gun.userData.support.userData.wrist.clone()).project(camera);
+  assert.ok(guard.x<-.20&&guard.x>-.99&&guard.y>-.98,'open off hand fits within the left side of the ready view');
 });

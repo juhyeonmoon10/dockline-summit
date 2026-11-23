@@ -56,7 +56,7 @@ export const WEAPONS = {
   },
   pistol: {
     id:'pistol', label:'권총', mag:13, reserve:91, damage:12, head:15,
-    interval:.13, equip:.20, reload:1.06, spread:.5*degree, aimSpread:.12*degree, moveScale:1,
+    semiAuto:true, interval:.13, equip:.20, reload:1.06, spread:.5*degree, aimSpread:.12*degree, moveScale:1,
     falloff:{start:50*stud, end:125*stud, damage:3, head:4}
   },
   knife: {

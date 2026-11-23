@@ -1,66 +1,74 @@
-// Camera-space choreography for the held models in both match renderers.
-// Side-on holds give the eye time to read the surfaces between wrist movements.
-const guns = {
-  rifle:    {duration:3.4, depth:.62, center:.16, tilt:.06},
-  smg:      {duration:3.0, depth:.49, center:.12, tilt:.11},
-  burst:    {duration:3.4, depth:.66, center:.17, tilt:.11},
-  shotgun:  {duration:3.5, depth:.69, center:.18, tilt:.16},
-  sniper:   {duration:3.8, depth:.84, center:.28, tilt:.13},
-  marksman: {duration:3.7, depth:.78, center:.23, tilt:.10},
-  lmg:      {duration:3.65,depth:.75, center:.20, tilt:.08},
-  pistol:   {duration:2.95,depth:.36, center:.085,tilt:.16}
+// Distances are camera-space metres. Each firearm stays nose-left as its stock
+// rolls on the shoulder. The long holds give the receiver and sights time to read.
+const guns={
+  rifle:    {duration:3.9, depth:.68, x:.164, lift:.26, face:1.20, reveal:.79, cant:1.10},
+  smg:      {duration:3.1, depth:.562,x:.115, lift:.34, face:1.10, reveal:.47, cant:1.24},
+  burst:    {duration:3.65,depth:.68, x:.159, lift:.31, face:1.14, reveal:.68, cant:.97},
+  shotgun:  {duration:3.85,depth:.69, x:.194, lift:.14, face:1.18, reveal:.83, cant:1.24},
+  sniper:   {duration:4.35,depth:.87, x:.275, lift:.24, face:1.03, reveal:.79, cant:.71},
+  marksman: {duration:4.05,depth:.81, x:.219, lift:.28, face:1.09, reveal:.71, cant:.88},
+  lmg:      {duration:4.3, depth:.79, x:.185, lift:.12, face:1.07, reveal:.89, cant:.72},
+  pistol:   {duration:3.15,depth:.405,x:.086, lift:.39, face:1.20, reveal:.43, cant:1.69}
 };
-
-export function inspectDuration(id) {
-  return id==='balisong' ? 3.25 : id==='karambit'||id==='knife' ? 3 : guns[id]?.duration||0;
+export function inspectDuration(id){
+  return id==='balisong'?3.65:id==='karambit'||id==='knife'?3.10:guns[id]?.duration||0;
 }
+const smooth=x=>x*x*(3-2*x);
+const ease=x=>smooth(Math.min(1,Math.max(0,x)));
+const blend=(a,b,t)=>a+(b-a)*t;
 
-// Each key is time, x, y, z, pitch, yaw and roll in the camera frame.
-const karambit = [
-  [0,.17,-.16,-.47,-.18,-.25,.38], [.11,.015,.035,-.77,.02,-.13,.16],
-  [.22,.005,.036,-.91,.07,.08,.23], [.35,.010,.041,-.85,.09,.16,.35],
-  [.46,.040,-.077,-.48,.06,.36,1.14],
-  [.61,.10,-.049,-.46,-.06,1.76,.72], [.76,.10,-.054,-.47,-.04,2.34,.52],
-  [.86,.11,-.065,-.48,.12,2.22,.45], [1,.18,-.17,-.47,-.18,-.25,.38]
+// Camera-space wrist keys: normalized time, x/y/z, and pitch/yaw/roll. The
+// blade, hinge, and the individual fingers are driven separately.
+const hook=[
+  [0,.014,-.080,-.453,-.06,.24,-.12], [.052,.053,-.113,-.451,-.22,-.09,-.40],
+  [.122,.054,-.028,-.555,.06,.24,.23], [.207,.043,-.019,-.585,.11,.30,.35],
+  [.274,.025,-.022,-.525,.17,.36,.54], [.34,.016,-.029,-.472,.19,.54,.72],
+  [.66,.023,-.058,-.50,.09,.56,.55], [.725,.029,-.064,-.484,.08,.83,.57],
+  [.85,.033,-.069,-.481,.075,.89,.61], [.92,.067,-.111,-.467,-.13,.45,.19],
+  [.966,.043,-.098,-.451,-.09,.18,-.17], [1,.014,-.080,-.453,-.06,.24,-.12]
 ];
-const balisong = [
-  [0,.19,-.18,-.50,-.16,-.18,.38], [.11,.05,-.045,-.57,-.12,-.20,.52],
-  [.23,.07,-.005,-.58,.12,.34,-.30], [.36,.07,-.040,-.58,-.03,-.42,.42],
-  [.49,.03,-.015,-.58,.13,.20,-.30], [.64,.02,-.035,-.57,.05,.49,.66],
-  [.78,.05,-.03,-.53,-.12,1.20,.86], [.88,.08,-.055,-.51,-.08,.87,.67],
-  [1,.19,-.18,-.50,-.16,-.18,.38]
+const butterfly=[
+  [0,.123,-.095,-.435,-.06,-.23,.72], [.055,.137,-.111,-.441,-.23,-.37,.86],
+  [.13,.065,-.039,-.487,.20,.08,.36], [.197,.051,-.018,-.521,.32,.31,-.25],
+  [.28,.075,-.063,-.510,-.14,.24,.73], [.36,.057,-.039,-.515,.11,-.18,-.15],
+  [.42,.071,-.035,-.480,.19,.05,.03], [.485,.078,-.038,-.477,.22,.12,.06],
+  [.56,.045,-.023,-.533,.21,.17,-.58], [.64,.076,-.035,-.520,-.12,-.15,.68],
+  [.733,.054,-.024,-.488,.20,.17,.22], [.77,.051,-.033,-.468,.18,.25,.39],
+  [.895,.052,-.040,-.465,.17,.34,.47], [.952,.139,-.112,-.401,-.19,-.21,.88],
+  [1,.123,-.095,-.435,-.06,-.23,.72]
 ];
-const gunKeys = [
-  [0,.78,-.17,.85,.02,.02,-.03], [.16,1,-.110,1,.16,1.13,-.35],
-  [.36,.97,-.096,.98,.20,1.25,-.34], [.47,.72,-.070,1.02,.25,.82,-.62],
-  [.60,-.52,-.095,1.02,.28,-.75,-.42], [.73,-.81,-.094,1,.17,-1.18,-.18],
-  [.84,-.80,-.092,.99,.16,-1.22,-.17], [1,.66,-.17,.90,.02,.02,-.03]
-];
-const smooth=t=>t*t*(3-2*t);
-
+function wristPose(frames,t){
+  let i=1;while(frames[i][0]<t)i++;
+  const a=frames[i-1],b=frames[i],u=ease((t-a[0])/(b[0]-a[0]));
+  return {x:blend(a[1],b[1],u),y:blend(a[2],b[2],u),z:blend(a[3],b[3],u),
+    rx:blend(a[4],b[4],u),ry:blend(a[5],b[5],u),rz:blend(a[6],b[6],u)};
+}
 export function inspectionPose(id,age) {
-  const duration=inspectDuration(id);
-  if(!(age>0&&age<duration))return null;
+  const duration=inspectDuration(id);if(!(age>0&&age<duration))return null;
   const t=age/duration,gun=guns[id];
-  const keys=gun ? gunKeys : id==='balisong' ? balisong : karambit;
-  let end=1;
-  while(keys[end][0]<t)end++;
-  const a=keys[end-1],b=keys[end],f=smooth((t-a[0])/(b[0]-a[0]));
-  const mix=i=>a[i]+(b[i]-a[i])*f;
-  const weight=smooth(Math.min(1,t/.15,(1-t)/.15));
-  const release=id==='pistol'?.03:.36;
-  const freeHand=gun?smooth(Math.max(0,Math.min(1,(t-release)/.13,(1-t)/.09))):0;
-  return {weight,freeHand,x:mix(1)*(gun?gun.center:1),y:mix(2)+(gun ? .075 : 0),z:mix(3)*(gun?-gun.depth:1),
-    rx:mix(4)+(gun?gun.tilt:0),ry:mix(5),rz:mix(6)};
-}
-
-export function ringFlourish(age) {
-  if(!(age>0&&age<1.35))return null;
-  const ease=number=>smooth(Math.max(0,Math.min(1,number)));
+  if(!gun)return {...wristPose(id==='balisong'?butterfly:hook,t),weight:ease(Math.min(t/.055,(1-t)/.065)),freeHand:0};
+  const weight=ease(Math.min(t/.112,(1-t)/.125));
+  const roll=ease((t-.502)/.124),fall=ease((t-.875)/.071);
+  const settle=Math.sin(Math.PI*ease((t-.112)/.074));
+  const settleRoll=Math.sin(Math.PI*ease((t-.625)/.065));
+  const breathe=Math.sin(t*Math.PI*2.4)*.006;
   return {
-    grip:ease((age-.08)/.24)*ease((1.35-age)/.28),
-    turn:-Math.PI*2*ease((age-.34)/.68)
+    weight,freeHand:id==='pistol'?ease(Math.min(t/.12,(1-t)/.10)):0,
+    x:gun.x+.030*roll+.036*fall+.008*settle,
+    y:-.047+.017*roll-.067*fall+.012*settle+breathe,
+    z:-gun.depth+.050*roll+.04*fall,
+    rx:blend(gun.lift,-.035,roll)+.046*settle-.10*fall,
+    ry:blend(gun.face,gun.reveal,roll)+.032*settle-.18*fall,
+    rz:blend(-.38,gun.cant,roll)+.12*settleRoll-.22*fall
   };
+}
+export function ringFlourish(age) {
+  if(!(age>0&&age<1.07))return null;
+  const grip=ease((age-.075)/.146)*ease((1.07-age)/.176);
+  // Brief anticipation, a fast index-led turn, and a small catch overshoot.
+  const turn=.24*ease((age-.035)/.14)-(2*Math.PI+.24)*ease((age-.18)/.51)
+    -.095*Math.sin(Math.PI*ease((age-.685)/.148));
+  return {grip,turn};
 }
 
 export function applyInspection(rig,pose) {

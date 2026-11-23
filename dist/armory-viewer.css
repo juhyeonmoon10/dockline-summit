@@ -2,16 +2,16 @@
   --armory-accent: #ffdc72;
   --armory-line: rgba(197, 222, 233, .13);
   box-sizing: border-box;
-  width: min(1020px, 95vw);
-  height: min(680px, 92dvh);
+  width: min(1336px, 95vw);
+  height: min(835px, 92dvh);
   max-width: 100vw;
   max-height: 100dvh;
   margin: auto;
   padding: 0;
-  border: 1px solid #58707b;
-  border-radius: 8px;
-  color: #f2f6f4;
-  background: #15212a;
+  border: 1px solid #616762;
+  border-radius: 5px;
+  color: #f1f3ed;
+  background: #242a28;
   box-shadow: 0 24px 90px #03090cb8;
   overflow: hidden;
   font-family: inherit;
@@ -25,29 +25,30 @@
 .armory-dialog button { min-width: 0; margin: 0; padding: 0; border-radius: 4px; box-shadow: none; text-shadow: none; cursor: pointer; transition: background-color .13s, color .13s; }
 .armory-dialog button:focus-visible, .armory-dialog select:focus-visible, .armory-canvas:focus-visible { outline: 2px solid var(--armory-accent); outline-offset: -3px; }
 .armory-dialog [hidden] { display: none !important; }
-.armory-header { display: flex; align-items: center; justify-content: space-between; padding: 0 13px 0 22px; min-height: 0; background: #16232b; border-bottom: 1px solid var(--armory-line); }
+.armory-header { display: flex; align-items: center; justify-content: space-between; padding: 0 13px 0 22px; min-height: 0; background: linear-gradient(110deg,#303532,#252c2a 54%,#222a29); border-bottom: 1px solid #626963; }
 .armory-header h2 { margin: 0; padding: 0; color: #eaf0f3; font-family: inherit; font-size: 15px; font-weight: 700; line-height: 1.15; letter-spacing: -.035em; }
 .armory-dialog .armory-close { width: 34px; height: 34px; display: grid; place-items: center; background: transparent; border: 0; color: #c3ced2; }
 .armory-dialog .armory-close:hover { background: #304049; color: #fff; }
 .armory-dialog svg { display: block; width: 17px; height: 17px; flex: 0 0 17px; }
-.armory-body { display: grid; grid-template-columns: 178px minmax(0,1fr); min-height: 0; }
-.armory-rail { display: flex; flex-direction: column; gap: 3px; padding: 8px; background: #162028; min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: #4c626d transparent; border-right: 1px solid var(--armory-line); }
+.armory-body { display: grid; grid-template-columns: clamp(172px,16vw,212px) minmax(0,1fr); min-height: 0; }
+.armory-rail { display: flex; flex-direction: column; gap: 3px; padding: 9px; background: linear-gradient(150deg,#2e3331,#232926 62%); min-height: 0; overflow: auto; scrollbar-width: thin; scrollbar-color: #59615b transparent; border-right: 1px solid #171b18; }
 .armory-dialog .armory-item { position: relative; flex: 0 0 clamp(40px,7.1vh,55px); display: flex; align-items: center; gap: 9px; font-size: 12px; font-weight: 660; text-align: left; background: transparent; border: 1px solid transparent; color: #b6c2c9; padding: 4px 8px; }
-.armory-dialog .armory-item:hover { background: #25343e; color: #fff; }
-.armory-dialog .armory-item[aria-pressed="true"] { background: #303e43; border-color: #52605d; color: #ffe394; }
+.armory-dialog .armory-item:hover { background: #37403b; color: #fff; }
+.armory-dialog .armory-item[aria-pressed="true"] { background: #42453a; border-color: #626451; color: #ffe394; }
 .armory-item[aria-pressed="true"]::before { content: ""; width: 2px; position: absolute; left: 0; top: 9px; bottom: 9px; background: var(--armory-accent); }
 .armory-item img { width: 65px; height: 34px; object-fit: contain; flex-shrink: 0; }
-.armory-display { position: relative; min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr) auto auto auto; isolation: isolate; background: radial-gradient(ellipse farthest-corner at 46% 38%, #728990 0%, #526b75 34%, #344a57 66%, #192b36 100%); }
+.armory-display { position: relative; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0,1fr); grid-template-rows: auto minmax(0,1fr) auto auto auto; isolation: isolate; background: #667068; }
+.armory-bench { grid-area: 1 / 1 / 4 / 2; position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
 .armory-identity { display: flex; justify-content: space-between; align-items: center; padding: clamp(17px,3.4vh,31px) clamp(17px,3vw,34px) 0; min-width: 0; gap: 8px; }
 .armory-kind { margin: 0 0 4px; color: #f5e4ad; font-size: 11px; font-weight: 660; line-height: 1.3; letter-spacing: .005em; }
-.armory-name { color: #f8fbfa; margin: 0; font-family: inherit; font-weight: 800; font-size: clamp(24px,3.5vw,40px); line-height: 1.2; letter-spacing: -.065em; }
+.armory-name { color: #f8fbf5; margin: 0; font-family: inherit; font-weight: 800; font-size: clamp(24px,3.5vw,46px); line-height: 1.2; letter-spacing: -.065em; text-shadow: 0 1px 2px #18201a60; }
 .armory-picker { display: none; }
 .armory-viewport { position: relative; min-height: 0; overflow: hidden; }
 .armory-surface { position: absolute; inset: 0; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
 .armory-surface.dragging { cursor: grabbing; }
-.armory-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.armory-canvas { display: block; width: 100%; height: 100%; touch-action: none; filter: drop-shadow(2px 4px 2px rgba(8,13,11,.43)) drop-shadow(6px 14px 10px rgba(9,15,14,.43)); }
 .armory-tools { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; padding: 4px 8px clamp(10px,2.4vh,20px); gap: 5px; }
-.armory-tools button, .armory-zoom { border: 1px solid #a7c2c34a; color: #e8f0f1; background: #172630; font-weight: 650; }
+.armory-tools button, .armory-zoom { border: 1px solid #a5b1a866; color: #e8f0ec; background: #232b27; font-weight: 650; }
 .armory-tools button { height: 31px; min-width: 32px; display: inline-flex; align-items: center; justify-content: center; color: #e8f0f1; font-size: 11px; }
 .armory-tools :is(.armory-spin,.armory-action) { gap: 5px; padding: 0 9px; }
 .armory-tools button:hover { background: #334954; }
@@ -56,7 +57,7 @@
 .armory-zoom { display: flex; justify-content: center; align-items: center; border-radius: 4px; height: 31px; }
 .armory-zoom output { text-align: center; min-width: 36px; color: #ebf1f2; font-size: 11px; font-variant-numeric: tabular-nums; }
 .armory-zoom button { background: transparent; border: 0; height: 29px; min-width: 26px; }
-.armory-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 65px; padding: 11px clamp(17px,3vw,34px) 5px; border-top: 1px solid #8aabb24a; background: #1c2b35; }
+.armory-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 65px; padding: 11px clamp(17px,3vw,34px) 5px; border-top: 1px solid #79847a66; background: #262e2a; }
 .armory-stats { margin: 0; padding: 0; display: flex; align-items: center; gap: 30px; }
 .armory-stats > div { display: grid; gap: 4px; }
 .armory-stats dt { color: #b9c9cf; font-size: 11px; line-height: 1; }
@@ -64,7 +65,7 @@
 .armory-dialog .armory-equip { border: 1px solid #f9d572; background: var(--armory-accent); color: #212a29; font-family: inherit; font-weight: 750; font-size: 12px; min-width: 83px; height: 34px; padding: 0 12px; }
 .armory-dialog .armory-equip:hover { background: #ffe89b; }
 .armory-dialog .armory-equip:disabled { color: #d7e4e3; background: #273942; border-color: #697e83; cursor: default; opacity: 1; }
-.armory-guide { margin: 0; padding: 4px clamp(17px,3vw,34px) 12px; color: #adbec8; background: #1c2b35; font-size: 10px; line-height: 1.4; }
+.armory-guide { margin: 0; padding: 4px clamp(17px,3vw,34px) 12px; color: #b0bcb3; background: #262e2a; font-size: 10px; line-height: 1.4; }
 @media (max-width: 650px) {
   .armory-body { grid-template-columns: minmax(0,1fr); }
   .armory-rail { display: none; }

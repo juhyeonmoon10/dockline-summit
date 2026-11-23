@@ -20,7 +20,7 @@ export const spawnYaw = (player, mapId) => getArena(mapId).spawns[player.team][p
 function memory(p) {
   if (!playerMemory.has(p)) {
     playerMemory.set(p, { holstered: {}, cooldown: 0, melee:null, burstLeft:0, semiLatched:false,
-      unlimitedAmmo:p.reserve===null&&!WEAPONS[p.active]?.melee,
+      triggerDown:false, bufferedUntil:0, unlimitedAmmo:p.reserve===null&&!WEAPONS[p.active]?.melee,
       slideCooldown: 0, lastSlide: false, lastJump: false, vx: 0, vz: 0, vy: 0, grounded: true });
   }
   return playerMemory.get(p);
@@ -97,6 +97,11 @@ function emit(g, type, actor, fields = {}) {
   if (g.events.length > 40) g.events.splice(0, g.events.length - 40);
 }
 
+export function clearBufferedFire(player) {
+  const m=playerMemory.get(player);
+  if(m){m.bufferedUntil=0;m.triggerDown=false;}
+}
+
 function equipWeapon(p, next, now) {
   const m = memory(p);
   m.holstered[p.active] = {ammo:p.ammo, reserve:p.reserve, readyAt:now+Math.max(0,m.cooldown)};
@@ -105,7 +110,7 @@ function equipWeapon(p, next, now) {
   p.active = next; p.ammo = stock.ammo; p.reserve = stock.reserve;
   m.cooldown = Math.max(gun.equip,stock.readyAt-now);
   m.melee = null;
-  m.burstLeft = 0; m.semiLatched = false;
+  m.burstLeft = 0; m.semiLatched = false; m.bufferedUntil=0;
   p.reload = 0; p.reloadDuration = 0;
 }
 
@@ -124,7 +129,7 @@ function changeSlot(p, slot, now) {
 function beginReload(g, p, continuingShells=false) {
   const w = WEAPONS[p.active];
   if (w.melee || p.reload > 0 || p.ammo >= w.mag || p.reserve === 0) return;
-  memory(p).burstLeft = 0;
+  const m=memory(p);m.burstLeft=0;m.bufferedUntil=0;
   p.reloadDuration = p.ammo===0 ? (w.emptyReload ?? w.reload) : w.reload;
   p.reload = p.reloadDuration;
   if(w.shellReload)p.shellLoop=continuingShells;
@@ -480,8 +485,17 @@ function tick(g, inputs, dt, map) {
     p.ads=!!input.ads && !p.slide && !p.reload && !WEAPONS[p.active].melee;
     movePlayer(p,input,dt,map);
     if(m.melee&&m.melee.at<=g.elapsed+1e-8)meleeContacts.push(p);
-    if (!input.fire) m.semiLatched=false;
-    if ((m.burstLeft || (input.fire && !m.semiLatched)) && m.cooldown<=1e-8 && !p.reload) shooters.push(p);
+    // Remember a fresh tap just before readiness, even if its release arrives
+    // in the next network packet. Holding fire keeps the authored cadence.
+    const fire=!!input.fire;
+    if(fire&&!m.triggerDown&&!m.burstLeft&&p.ammo>0&&Math.max(m.cooldown,p.reload)<=.09)
+      m.bufferedUntil=g.elapsed+.09;
+    m.triggerDown=fire;
+    if(!fire)m.semiLatched=false;
+    const buffered=m.bufferedUntil>0&&g.elapsed<=m.bufferedUntil+1e-8;
+    if((m.burstLeft||((fire||buffered)&&!m.semiLatched))&&m.cooldown<=1e-8&&!p.reload){
+      m.bufferedUntil=0;shooters.push(p);
+    }
   }
   // A paired trigger pull in one server tick allows a trade instead of favoring team order.
   for (const p of shooters)WEAPONS[p.active].melee?beginMelee(g,p):shoot(g,p,map);

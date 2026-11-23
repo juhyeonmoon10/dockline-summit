@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ArenaSound} from '../dist/match-audio.js';
+import {prepareShot,prepareAction,makeHandlingFoley} from '../dist/weapon-sound.js';
 import {reloadClips} from '../dist/weapon-foley.js';
 import {RELOAD_CONTACT, SNIPER_RELOAD_CONTACT, SHOT_MECHANIC} from '../dist/weapon-view.js';
 
@@ -59,4 +60,55 @@ test('a cold buffered shot can sound after a weapon switch without scheduling th
   audio.buffers.set('sniper',true);audio.flushPending();
   assert.deepEqual(calls.map(c=>c.id),['sniper']);
   assert.equal(audio.pending.length,0);
+});
+
+test('a knife inspect schedules its contacts once and cancels unplayed catches on attack or switch',()=>{
+  const {audio,calls}=listen(),actor={...player('local','knife'),knifeSkin:'balisong'};
+  audio.sample=(id,gain,pan,rate,delay,options)=>{
+    calls.push({id,delay,options});audio.voices.add({id,...options});
+  };
+  audio.stop=voice=>audio.voices.delete(voice);
+  audio.handling(actor,Infinity,1);assert.ok(calls.some(c=>c.id==='hingeCatch'));
+  audio.handling(actor,0,2);audio.handling(actor,.016,2.016);
+  assert.deepEqual([...audio.voices].filter(v=>v.id==='hingeCatch').map(v=>v.handling),['inspect','inspect']);
+  const catches=calls.filter(c=>c.id==='hingeCatch'&&c.options.handling==='inspect');
+  assert.deepEqual(catches.map(c=>c.delay),[1.50,2.68]);
+  audio.event({type:'melee',actor:actor.id,weapon:'knife',seq:1},{players:[actor]},actor);
+  assert.equal([...audio.voices].filter(v=>v.handling).length,0);
+  audio.handling(actor,0,3);actor.active='pistol';audio.handling(actor,Infinity,3.1);
+  assert.ok(![...audio.voices].some(v=>v.handling==='inspect'||v.handling==='draw'&&v.weapon==='knife'));
+  audio.cancelHandling();audio.handling(actor,Infinity,3.11);
+  assert.ok(![...audio.voices].some(v=>v.handling));
+});
+
+test('contact audio comes from the impact point and the two swings have different takes',()=>{
+  const {audio,calls}=listen(),view=player('view','rifle',0),actor=player('away','knife',-1.3);
+  for(const skin of ['karambit','balisong']){
+    actor.knifeSkin=skin;audio.playEvent({type:'melee',weapon:'knife',seq:2},actor,view);
+  }
+  assert.deepEqual(calls.map(c=>c.id),['hookSwing','flipSwing']);
+  audio.playEvent({type:'meleeImpact',x:-1.3,z:0,ex:.4,ez:0,seq:2},actor,view);
+  assert.ok(calls[2].pan>0);assert.ok(calls[2].delay>0);
+});
+
+function buffers(rate){
+  return {sampleRate:rate,createBuffer(channels,length,sampleRate){
+    const data=Array.from({length:channels},()=>new Float32Array(length));
+    return {sampleRate,length,numberOfChannels:channels,getChannelData:c=>data[c]};
+  }};
+}
+test('stereo shot reflections preserve the same immediate attack and leave headroom for the mix',()=>{
+  const ctx=buffers(22050),source=ctx.createBuffer(1,6000,ctx.sampleRate);
+  source.getChannelData(0)[4]=.75;
+  for(const id of ['rifle','pistol','shotgun','sniper','smg','burst','marksman','lmg']){
+    const {near,mono}=prepareShot(ctx,source,id),left=near.getChannelData(0),right=near.getChannelData(1);
+    assert.equal(mono.numberOfChannels,1);assert.equal(near.numberOfChannels,2);
+    assert.equal(left[4],right[4]);assert.ok(left[4]>.65);
+    assert.ok(left.some((v,i)=>Math.abs(v-right[i])>.002));assert.ok(left.every(v=>Number.isFinite(v)&&Math.abs(v)<1));
+  }
+  assert.notDeepEqual(prepareAction(ctx,source,'lmg','magSeat').getChannelData(0),prepareAction(ctx,source,'pistol','pistolSeat').getChannelData(0));
+  for(const cue of makeHandlingFoley(ctx).values()){
+    const data=cue.getChannelData(0);
+    assert.ok(data.every(Number.isFinite)&&data.some(v=>Math.abs(v)>.55));assert.equal(Math.abs(data.at(-1)),0);
+  }
 });

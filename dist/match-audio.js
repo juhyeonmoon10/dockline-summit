@@ -1,5 +1,7 @@
 import { RELOAD_CONTACT, SHOT_MECHANIC, SNIPER_RELOAD_CONTACT } from './weapon-view.js';
 import { foleyUrl, unpackFoley, reloadClips } from './weapon-foley.js';
+import { prepareShot, prepareAction, makeHandlingFoley } from './weapon-sound.js';
+import { inspectDuration } from './view-inspect.js';
 
 const shotVolumes={
   rifle:.74,pistol:.64,shotgun:.88,sniper:.94,smg:.62,burst:.69,marksman:.80,lmg:.78,
@@ -29,34 +31,12 @@ function footstepBuffer(ctx,source){
   return buffer;
 }
 
-// Knife and impact feedback are generated locally and use no weapon recordings.
-function meleeBuffer(ctx,kind){
-  const swing=kind==='bladeSwing',wall=kind==='bladeWall',duration=swing?.17:wall?.12:.10;
-  const rate=ctx.sampleRate,buffer=ctx.createBuffer(1,Math.ceil(rate*duration),rate),data=buffer.getChannelData(0);
-  let seed=83921,low=0,previous=0,high=0,phase=0,peak=0;
-  const hp=Math.exp(-2*Math.PI*(swing?480:140)/rate);
-  for(let i=0;i<data.length;i++){
-    const t=i/rate,u=t/duration;
-    seed=(Math.imul(seed,1664525)+1013904223)>>>0;
-    const noise=seed/2147483648-1;
-    high=hp*(high+noise-previous);previous=noise;
-    const cutoff=swing?2900-1900*u:wall?4200:1100;
-    low+=(high-low)*(1-Math.exp(-2*Math.PI*cutoff/rate));
-    const envelope=swing?Math.pow(Math.sin(Math.PI*u),1.8):Math.exp(-t/.024)*(1-Math.exp(-t/.001));
-    phase+=2*Math.PI*(wall?540:170*Math.exp(-t/.045))/rate;
-    const body=swing?0:Math.sin(phase)*.40+(wall?Math.sin(2*Math.PI*2380*t)*Math.exp(-t/.03)*.10:0);
-    data[i]=(low+body)*envelope*Math.min(1,(duration-t)/.012);
-    peak=Math.max(peak,Math.abs(data[i]));
-  }
-  if(peak>0)for(let i=0;i<data.length;i++)data[i]*=.65/peak;
-  return buffer;
-}
-
 export class ArenaSound {
   constructor(){
     this._enabled=true;this.ctx=null;this.ready=null;this.loaded=false;
     this.buffers=new Map();this.stepsFor=new Map();this.voices=new Set();this.pending=[];
     this.downloads=new Map();this.takes=new Map();this.retryAt=0;
+    this.held=null;this.inspectClock=null;this.nextPositionUpdate=0;
   }
   get enabled(){return this._enabled;}
   set enabled(value){this.setEnabled(value);}
@@ -86,7 +66,7 @@ export class ArenaSound {
     if(!this.enabled)return Promise.resolve();
     try{
       if(!this.ctx){
-        const Ctx=window.AudioContext||window.webkitAudioContext;this.ctx=new Ctx();
+        const Ctx=window.AudioContext||window.webkitAudioContext;this.ctx=new Ctx({latencyHint:'interactive'});
         const ctx=this.ctx,bus=ctx.createDynamicsCompressor(),master=ctx.createGain(),ceiling=ctx.createWaveShaper();
         bus.threshold.value=-10;bus.knee.value=6;bus.ratio.value=10;bus.attack.value=.003;bus.release.value=.09;
         // A final soft ceiling catches simultaneous reports before the master volume.
@@ -98,7 +78,7 @@ export class ArenaSound {
         ceiling.curve=curve;master.gain.value=.78;
         bus.connect(ceiling);ceiling.connect(master);master.connect(ctx.destination);
         this.bus=bus;this.master=master;
-        for(const kind of ['bladeSwing','bladeHit','bladeWall'])this.buffers.set(kind,meleeBuffer(ctx,kind));
+        for(const [kind,sound] of makeHandlingFoley(ctx))this.buffers.set(kind,sound);
       }
       const resume=this.ctx.state==='suspended'?this.ctx.resume().catch(()=>{}):Promise.resolve();
       if(!this.ready||this.retryAt&&performance.now()>=this.retryAt){
@@ -119,8 +99,18 @@ export class ArenaSound {
         if(!bytes)return;
         const decoded=await ctx.decodeAudioData(bytes);
         if(id==='foley'){
-          for(const [cue,buffer] of unpackFoley(ctx,decoded))this.buffers.set(cue,buffer);
-        }else this.buffers.set(id,footfalls.includes(id)?footstepBuffer(ctx,decoded):decoded);
+          const actions=unpackFoley(ctx,decoded);
+          for(const [cue,buffer] of actions)this.buffers.set(cue,buffer);
+          for(const weapon of Object.keys(shotVolumes)){
+            const cues=weapon==='shotgun'?['shell','shellAlt','pumpOpen','pumpClose']:Object.values(reloadClips(weapon));
+            if(weapon==='sniper')cues.push('boltOpen','boltClose');
+            for(const cue of cues)this.buffers.set(cue+'@'+weapon,prepareAction(ctx,actions.get(cue),weapon,cue));
+          }
+        }else if(footfalls.includes(id))this.buffers.set(id,footstepBuffer(ctx,decoded));
+        else{
+          const report=prepareShot(ctx,decoded,id.replace(/-2$/,''));
+          this.buffers.set(id,report.mono);this.buffers.set(id+'@near',report.near);
+        }
         this.flushPending();
       }catch(error){console.warn('효과음 해석 실패',id,error);}
       finally{this.downloads.delete(id);}
@@ -157,7 +147,7 @@ export class ArenaSound {
     try{voice.source.stop(now+.008);}catch{}
     this.voices.delete(voice);
   }
-  clear(){this.pending.length=0;this.stepsFor.clear();this.takes.clear();for(const voice of this.voices)this.stop(voice);}
+  clear(){this.pending.length=0;this.stepsFor.clear();this.takes.clear();this.held=null;this.inspectClock=null;this.nextPositionUpdate=0;for(const voice of this.voices)this.stop(voice);}
   connected(source,volume,pan,delay=0,options={}){
     const ctx=this.ctx;if(!this.enabled||ctx?.state!=='running')return;
     const priority=options.priority||1;
@@ -173,19 +163,22 @@ export class ArenaSound {
       const filter=ctx.createBiquadFilter();filter.type='lowpass';filter.frequency.value=options.lowpass;filter.Q.value=.5;
       tail.connect(filter);tail=filter;nodes.push(filter);
     }
+    let stereo;
     if(ctx.createStereoPanner){
-      const stereo=ctx.createStereoPanner();stereo.pan.value=clamp(pan,-.96,.96);
+      stereo=ctx.createStereoPanner();stereo.pan.value=clamp(pan,-.96,.96);
       tail.connect(stereo);tail=stereo;nodes.push(stereo);
     }
     tail.connect(this.bus);
     const at=ctx.currentTime+delay;
-    const voice={source,gain,priority,actor:options.actor,weapon:options.weapon,reload:options.reload,mechanic:options.mechanic,reloadEnd:options.reloadEnd,at};
+    const voice={source,gain,priority,actor:options.actor,weapon:options.weapon,reload:options.reload,mechanic:options.mechanic,
+      reloadEnd:options.reloadEnd,handling:options.handling,viewId:options.viewId,baseGain:volume/(options.attenuation||1),stereo,at};
     this.voices.add(voice);
     source.onended=()=>{this.voices.delete(voice);for(const node of nodes)node.disconnect();};
     source.start(at);return gain;
   }
   sample(id,volume=.5,pan=0,speed=1,delay=0,options={}){
-    const ctx=this.ctx,buffer=this.buffers.get(id);
+    const ctx=this.ctx,key=options.nearReport?id+'@near':options.weapon?id+'@'+options.weapon:id;
+    const buffer=this.buffers.get(key)||this.buffers.get(id);
     if(!this.enabled||ctx?.state!=='running'||!buffer||!Number.isFinite(volume)||volume<.008)return;
     const source=ctx.createBufferSource();source.buffer=buffer;source.playbackRate.value=clamp(speed,.5,2);
     return this.connected(source,volume,pan,delay,options);
@@ -202,8 +195,53 @@ export class ArenaSound {
     const dx=a.x-p.x,dz=a.z-p.z,dist=Math.hypot(dx,dz);
     return {dist,pan:clamp((dx*Math.cos(p.yaw)+dz*Math.sin(p.yaw))/(dist||1),-.94,.94)};
   }
+  cancelHandling(){
+    for(const voice of this.voices)if(voice.handling)this.stop(voice);
+    this.inspectClock=null;
+  }
+  handling(actor,inspectAge,t){
+    if(!actor?.alive||!this.enabled||this.ctx?.state!=='running'){
+      if(this.held){this.cancelHandling();this.held=null;}return;
+    }
+    const weapon=actor.active,item=weapon==='knife'?(actor.knifeSkin==='balisong'?'balisong':'karambit'):weapon;
+    const changed=!this.held||this.held.actor!==actor.id||this.held.item!==item;
+    const inspect=Number.isFinite(inspectAge)&&!actor.reload&&!actor.slide&&!actor.ads;
+    const started=inspect?t-inspectAge:null;
+    const events=(kind,cues,age=0)=>{
+      for(const [delay,id,gain,pitch=1,pan=0] of cues){
+        if(delay<age-.045)continue;
+        this.sample(id,gain,pan,pitch,Math.max(0,delay-age),{actor:actor.id,weapon,priority:2,handling:kind});
+      }
+    };
+    if(changed){
+      this.cancelHandling();this.held={actor:actor.id,item};
+      if(!inspect&&!actor.reload){
+        if(item==='balisong')events('draw',[[0,'gloveShift',.17],[.115,'hingeFlick',.19,1.06,.07],[.49,'hingeCatch',.32,1.02,.06]]);
+        else if(item==='karambit')events('draw',[[.015,'ringSlip',.19,1.03,.06],[.17,'gripSet',.23,.96,.08]]);
+        else events('draw',[[0,'gloveShift',.17],[weapon==='pistol'?.12:.26,'gripSet',weapon==='lmg'?.24:.17,weapon==='pistol'?1.16:.94,.08]]);
+      }
+    }
+    if(!inspect){
+      if(this.inspectClock!==null)this.cancelHandling();
+      return;
+    }
+    if(this.inspectClock!==null&&Math.abs(started-this.inspectClock)<.018)return;
+    this.cancelHandling();this.inspectClock=started;
+    if(item==='balisong'){
+      events('inspect',[[.10,'gloveShift',.12],[.55,'hingeFlick',.15,1.09,.06],[1.50,'hingeCatch',.29,.95,-.08],
+        [1.94,'hingeFlick',.18,.98,-.04],[2.68,'hingeCatch',.32,1.06,.08],[2.87,'gripSet',.14,.98,.08]],inspectAge);
+    }else if(item==='karambit'){
+      events('inspect',[[.09,'gloveShift',.14],[.42,'ringSlip',.21,1.06,-.04],[.66,'hookSwing',.10,1.17,-.07],
+        [1.04,'gripSet',.22,1.08,.08],[2.62,'gloveShift',.13,.96,.06]],inspectAge);
+    }else{
+      const duration=inspectDuration(item);
+      events('inspect',[[duration*.07,'gloveShift',.14,1.05,.06],[duration*.48,'gloveShift',.17,.86,-.06],
+        [duration*.92,'gripSet',item==='lmg'?.19:.13,item==='pistol'?1.16:.98,.08]],inspectAge);
+    }
+  }
   event(event,game,view){
     if(!view||!this.enabled)return;const actor=game.players.find(p=>p.id===event.actor);if(!actor)return;
+    if(actor.id===this.held?.actor&&['shot','reload','melee'].includes(event.type))this.cancelHandling();
     if(event.type==='shot'||event.type==='reload'){
       this.pending=this.pending.filter(c=>!(c.event.actor===event.actor&&c.event.type==='reload'));
     }
@@ -216,11 +254,13 @@ export class ArenaSound {
   }
   playEvent(event,actor,view){
     const own=actor.id===view.id;
-    const origin=['shot','melee','meleeImpact'].includes(event.type)&&Number.isFinite(event.x)&&Number.isFinite(event.z)?event:actor;
+    const origin=event.type==='meleeImpact'&&Number.isFinite(event.ex)&&Number.isFinite(event.ez)?{x:event.ex,z:event.ez}:
+      ['shot','melee','meleeImpact'].includes(event.type)&&Number.isFinite(event.x)&&Number.isFinite(event.z)?event:actor;
     const {dist,pan}=this.relative(origin,view),attenuation=own?1:.65/(1+(dist/9)**1.35),position=own?0:pan;
     const options={priority:own?3:2,lowpass:own?0:Math.max(1800,16000/(1+dist*.12))};
-    if(event.type==='melee')this.sample('bladeSwing',.34*attenuation,position,.96+(event.seq%3)*.04,0,options);
-    if(event.type==='meleeImpact')this.sample(event.target?'bladeHit':'bladeWall',.44*attenuation,position,.98+(event.seq%3)*.025,0,options);
+    const propagation=own?0:Math.min(.12,dist/343),variant=(event.seq||0)%3;
+    if(event.type==='melee')this.sample(actor.knifeSkin==='balisong'?'flipSwing':'hookSwing',.35*attenuation,position,.96+variant*.04,propagation,options);
+    if(event.type==='meleeImpact')this.sample(event.target?'bladeHit':'bladeWall',.49*attenuation,own?pan*.28:pan,.98+variant*.025,propagation,options);
     if(event.type==='shot'&&Object.hasOwn(shotVolumes,event.weapon)){
       const weapon=event.weapon,delay=own?0:Math.min(.12,dist/343);
       let take=weapon;
@@ -229,12 +269,12 @@ export class ArenaSound {
         if(second)take=weapon+'-2';
         this.takes.set(key,!second);
       }
-      this.sample(take,shotVolumes[weapon]*attenuation,position,1,delay,options);
+      this.sample(take,shotVolumes[weapon]*attenuation,position,1,delay,{...options,nearReport:own});
       // Do not leave a queued reload or previous cycle behind a new shot.
       for(const voice of this.voices)if(voice.actor===actor.id&&(voice.reload||voice.mechanic))this.stop(voice);
       const cycle=SHOT_MECHANIC[event.weapon];
       if(cycle&&actor.alive&&actor.active===event.weapon){
-        const mechanicOptions={...options,priority:own?2:1,mechanic:true,actor:actor.id,weapon:event.weapon};
+        const mechanicOptions={...options,priority:own?2:1,mechanic:true,actor:actor.id,weapon:event.weapon,viewId:own?undefined:view.id,attenuation};
         const pump=event.weapon==='shotgun';
         this.sample(pump?'pumpOpen':'boltOpen',(pump?.44:.40)*attenuation,position,1,delay+cycle.open,mechanicOptions);
         this.sample(pump?'pumpClose':'boltClose',(pump?.49:.45)*attenuation,position,1,delay+cycle.close,mechanicOptions);
@@ -245,11 +285,11 @@ export class ArenaSound {
     if(event.type==='reload'){
       for(const voice of this.voices)if((voice.reload||voice.mechanic)&&voice.actor===actor.id)this.stop(voice);
       if(!actor.alive||actor.active!==event.weapon||!(actor.reload>0))return;
-      const reloadOptions={...options,priority:own?2:1,reload:true,actor:actor.id,weapon:event.weapon,reloadEnd:this.ctx.currentTime+actor.reload};
+      const reloadOptions={...options,priority:own?2:1,reload:true,actor:actor.id,weapon:event.weapon,reloadEnd:this.ctx.currentTime+actor.reload,viewId:own?undefined:view.id,attenuation};
       const duration=actor.reloadDuration||actor.reload;
       const cue=(sample,phase,level)=>{
         const when=actor.reload-duration*(1-phase);
-        if(when>=-.035)this.sample(sample,level*attenuation,position,1,Math.max(0,when),reloadOptions);
+        if(when>=-.035)this.sample(sample,level*attenuation,position,1,Math.max(0,when)+propagation,reloadOptions);
       };
       if(event.weapon==='shotgun')cue(actor.ammo%2?'shellAlt':'shell',RELOAD_CONTACT.shell,.51);
       else{
@@ -271,12 +311,21 @@ export class ArenaSound {
         return cue.event.type!=='reload'||(holding&&actor.reload>0);
       });
     }
+    const now=this.ctx?.currentTime||0,updatePositions=now>=this.nextPositionUpdate;
+    if(updatePositions)this.nextPositionUpdate=now+.075;
     for(const voice of this.voices)if(voice.reload||voice.mechanic){
       const actor=game.players.find(p=>p.id===voice.actor);
       // Natural completion may leave a few milliseconds of contact decay.
       // Early cancellation, death or an equip change must silence it instead.
       const canceled=voice.reload&&actor?.reload<=0&&this.ctx.currentTime<voice.reloadEnd-.08;
-      if(!actor?.alive||actor.active!==voice.weapon||canceled)this.stop(voice);
+      if(!actor?.alive||actor.active!==voice.weapon||canceled){this.stop(voice);continue;}
+      if(updatePositions&&voice.viewId){
+        const listener=game.players.find(p=>p.id===voice.viewId);
+        if(!listener)continue;
+        const {dist,pan}=this.relative(actor,listener);
+        voice.stereo?.pan.setTargetAtTime(pan,now,.025);
+        voice.gain.gain.setTargetAtTime(voice.baseGain*.65/(1+(dist/9)**1.35),now,.025);
+      }
     }
   }
   steps(game,view,t){

@@ -19,10 +19,73 @@ const paths={
 const icon=id=>'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="'+paths[id]+'"/></svg>';
 
 function stageLights(scene){
-  scene.add(new T.HemisphereLight(0xebf4ff,0x978574,1.65));
-  for(const [color,intensity,x,y,z] of [[0xffefd9,3.25,-3,4,4],[0xc9ecff,2.65,2,2,-3],[0xe1efff,1.4,2,-.9,3]]){
+  scene.add(new T.HemisphereLight(0xe1edf9,0xa19071,1.38));
+  for(const [color,intensity,x,y,z] of [[0xffe3c1,3.45,-3.6,5.2,4],[0xbbdaff,3.35,2.7,2.2,-3],[0xd4e5fa,.85,2,-.6,3]]){
     const light=new T.DirectionalLight(color,intensity);light.position.set(x,y,z);scene.add(light);
   }
+}
+
+let benchGrain;
+function workbenchTile(){
+  if(benchGrain)return benchGrain;
+  const tile=document.createElement('canvas');tile.width=tile.height=256;
+  const ctx=tile.getContext('2d'),ink=ctx.createImageData(256,256);
+  let state=41307;
+  function random(){state=(Math.imul(1664525,state)+1013904223)>>>0;return state/4294967296;}
+  for(let y=0;y<256;y++)for(let x=0;x<256;x++){
+    const i=4*(y*256+x),value=random(),warp=Math.cos((x*.75+y)*Math.PI/2);
+    const tone=112+65*(value-.5)+8*warp;
+    ink.data[i]=ink.data[i+1]=ink.data[i+2]=tone;ink.data[i+3]=255;
+  }
+  ctx.putImageData(ink,0,0);
+  for(let i=0;i<115;i++){
+    const x=random()*256,y=random()*256,dx=2+random()*6;
+    ctx.strokeStyle=i%3?'rgba(32,31,27,.15)':'rgba(234,229,201,.23)';
+    ctx.lineWidth=.6;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+dx,y+dx*(random()-.62));ctx.stroke();
+  }
+  benchGrain=tile;return tile;
+}
+
+function drawWorkbench(canvas){
+  const w=canvas.clientWidth,h=canvas.clientHeight,dpr=Math.min(window.devicePixelRatio||1,1.5);
+  const pw=Math.round(w*dpr),ph=Math.round(h*dpr);
+  if(!pw||!ph||(canvas.width===pw&&canvas.height===ph))return;
+  canvas.width=pw;canvas.height=ph;
+  const ctx=canvas.getContext('2d');if(!ctx)return;
+  ctx.scale(dpr,dpr);
+  const casing=ctx.createLinearGradient(0,0,w,h);
+  casing.addColorStop(0,'#303536');casing.addColorStop(.57,'#596060');casing.addColorStop(1,'#30383b');
+  ctx.fillStyle=casing;ctx.fillRect(0,0,w,h);
+  const inset=Math.max(10,Math.min(w*.026,27)),right=w-inset,bottom=h-inset*.55;
+  // Rubber bench mat with a cut corner and two pressed perimeter grooves.
+  function mat(gap){
+    const x=right-gap,y=bottom-gap,r=Math.min(w*.067,49);
+    ctx.beginPath();ctx.moveTo(-30,-30);ctx.lineTo(x,-30);ctx.lineTo(x,y-r);
+    ctx.lineTo(x-r,y);ctx.lineTo(-30,y);ctx.closePath();
+  }
+  ctx.save();mat(0);
+  ctx.shadowColor='#0a0d0fd9';ctx.shadowOffsetY=3;ctx.shadowBlur=8;
+  ctx.fillStyle='#48504c';ctx.fill();ctx.restore();
+  ctx.save();mat(0);ctx.clip();
+  const lamp=ctx.createRadialGradient(w*.40,h*.38,4,w*.42,h*.39,Math.max(w*.78,h*.91));
+  lamp.addColorStop(0,'#8f9186');lamp.addColorStop(.36,'#757c74');lamp.addColorStop(.68,'#505b58');lamp.addColorStop(1,'#303c3c');
+  ctx.fillStyle=lamp;ctx.fillRect(0,0,w,h);
+  const falloff=ctx.createLinearGradient(0,0,w*.16,h*.85);
+  falloff.addColorStop(0,'rgba(19,27,31,.70)');falloff.addColorStop(.34,'rgba(27,32,30,.04)');
+  falloff.addColorStop(.70,'rgba(20,25,25,0)');falloff.addColorStop(1,'rgba(16,24,27,.44)');
+  ctx.fillStyle=falloff;ctx.fillRect(0,0,w,h);
+  ctx.globalCompositeOperation='soft-light';ctx.globalAlpha=.64;
+  ctx.fillStyle=ctx.createPattern(workbenchTile(),'repeat');ctx.fillRect(0,0,w,h);
+  ctx.globalCompositeOperation='source-over';ctx.globalAlpha=1;
+  for(const [gap,colour] of [[.8,'rgba(170,177,165,.4)'],[6,'rgba(20,28,26,.51)'],[7.3,'rgba(159,168,151,.23)']]){
+    mat(gap);ctx.strokeStyle=colour;ctx.lineWidth=1.1;ctx.stroke();
+  }
+  // Shallow molded ribs are confined to the corner, outside the working surface.
+  ctx.beginPath();
+  for(let i=0;i<5;i++){
+    const n=i*6;ctx.moveTo(right-20,bottom-55-n);ctx.lineTo(right-54-n,bottom-21);
+  }
+  ctx.lineWidth=2;ctx.strokeStyle='rgba(15,23,22,.27)';ctx.stroke();ctx.restore();
 }
 
 function makeStage(host,preferLite,onZoom){
@@ -38,7 +101,7 @@ function makeStage(host,preferLite,onZoom){
   for(let y=-1;y<=1;y++)for(let x=-1;x<=1;x++)for(let z=-1;z<=1;z++){
     if(x||y||z){directions.push(new T.Vector3(x,y,z));surface.push(new T.Vector3());}
   }
-  const abort=new AbortController(),contacts=new Map();
+  const abort=new AbortController(),contacts=new Map(),bench=host.closest('.armory-display').querySelector('.armory-bench');
   let drag=null;
   function addCanvas(){
     canvas=document.createElement('canvas');canvas.className='armory-canvas';canvas.tabIndex=0;
@@ -46,13 +109,13 @@ function makeStage(host,preferLite,onZoom){
     host.replaceChildren(canvas);
   }
   function software(){
-    addCanvas();soft=createCanvasPreview(canvas);host.dataset.renderer='canvas';
+    addCanvas();soft=createCanvasPreview(canvas,{studio:true});host.dataset.renderer='canvas';
   }
   addCanvas();
   if(!preferLite){
     try{
-      gl=new T.WebGLRenderer({canvas,alpha:true,antialias:true,powerPreference:'low-power'});
-      gl.setClearColor(0,0);scene.environment=studioReflection();host.dataset.renderer='webgl';
+      gl=new T.WebGLRenderer({canvas,alpha:true,antialias:true,powerPreference:'high-performance'});
+      gl.setClearColor(0,0);scene.environment=studioReflection({bench:true});host.dataset.renderer='webgl';
       canvas.addEventListener('webglcontextlost',e=>{
         e.preventDefault();if(disposed)return;
         scene.environment?.dispose();scene.environment=null;
@@ -75,6 +138,7 @@ function makeStage(host,preferLite,onZoom){
   }
   function paint(time){
     frame=0;if(disposed||!model)return;
+    drawWorkbench(bench);
     const dt=lastTime?Math.min((time-lastTime)/1000,.05):0;lastTime=time;
     if(rotating&&!drag)yaw+=dt*.60;
     let inspectRoll=0,inspectTilt=0;
@@ -96,7 +160,7 @@ function makeStage(host,preferLite,onZoom){
     if(folded)bounds.getCenter(point);else point.set(0,0,0);
     orbit.position.set(panX*units-point.x,panY*units/aspect-point.y,0);
     if(gl){
-      const dpr=Math.min(window.devicePixelRatio||1,1.6);
+      const dpr=Math.min(window.devicePixelRatio||1,2);
       if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr))gl.setSize(Math.round(w*dpr),Math.round(h*dpr),false);
       camera.left=-units/2;camera.right=units/2;camera.top=units/aspect/2;camera.bottom=-camera.top;
       camera.updateProjectionMatrix();gl.render(scene,camera);
@@ -185,7 +249,7 @@ function makeStage(host,preferLite,onZoom){
     }else return;
     e.preventDefault();request();
   },options);
-  const observer=new ResizeObserver(request);observer.observe(host);
+  const observer=new ResizeObserver(request);observer.observe(host);observer.observe(bench);
   return {
     select,reset,zoom:multiplier=>setZoom(zoom*multiplier),
     spin(){rotating=!rotating;onZoom(zoom,rotating);request();},
@@ -206,6 +270,7 @@ export function openArmoryViewer({weapon='rifle',equippedPrimary='rifle',equippe
     <div class="armory-body">
       <aside class="armory-rail" aria-label="무기 선택">${choices}</aside>
       <section class="armory-display" aria-label="선택한 무기">
+        <canvas class="armory-bench" aria-hidden="true"></canvas>
         <div class="armory-identity"><div><p class="armory-kind"></p><h3 class="armory-name"></h3></div><select class="armory-picker" aria-label="다른 무기 보기">${options}</select></div>
         <div class="armory-viewport"><div class="armory-surface"></div></div>
         <div class="armory-tools">

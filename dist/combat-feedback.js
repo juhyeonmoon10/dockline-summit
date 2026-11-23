@@ -1,5 +1,5 @@
 import { WEAPONS } from './balance.js';
-import { weaponFov } from './weapon-view.js';
+import { gunPresentation, weaponFov } from './weapon-view.js';
 
 const hitDuration = { body: .16, head: .23, kill: .32 };
 const hitPriority = { body: 0, head: 1, kill: 2 };
@@ -118,7 +118,7 @@ export class CombatFeedback {
   frame(now, yaw) {
     if (this.lastShot > -Infinity) {
       const weight = Math.max(0, 1 - (now - this.lastShot) / .16);
-      const pixels = this.reticleWeapon === this.shotWeapon ? Math.round(5 * weight * weight) : 0;
+      const pixels = this.reticleWeapon === this.shotWeapon ? Math.round(gunPresentation(this.shotWeapon).reticle * weight * weight) : 0;
       if (pixels !== this.lastPulse) {
         this.sight.style.setProperty('--kick', pixels + 'px');
         this.lastPulse = pixels;

@@ -2,7 +2,7 @@ import * as T from './assets/three.module.min.js';
 import { blasterMesh, gunFit, sniperContacts } from './blaster.js';
 import { PRIMARY_WEAPONS } from './balance.js';
 import { eyeHeight, WEAPONS } from './sim.js';
-import { approachAim, canAim, weaponFov, reloadPose, shotKickResponse, shotCycle, shotFlashDuration, LOCAL_IGNITION_LIFE, scopeAfterShot, sniperScopeVisible, emptySniperBolt, emptySniperGrasp, RELOAD_CONTACT } from './weapon-view.js';
+import { approachAim, gunPresentation, canAim, weaponFov, reloadPose, shotKickResponse, shotCycle, shotFlashDuration, LOCAL_IGNITION_LIFE, scopeAfterShot, sniperScopeVisible, emptySniperBolt, emptySniperGrasp, RELOAD_CONTACT } from './weapon-view.js';
 import { makeYard, sky, Parts, glowMaterial } from './yard-art.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { PelletRenderer } from './pellet-render.js';
@@ -11,6 +11,8 @@ import { knifeMesh,knifeFit,knifePose,animateKnife } from './knife.js';
 import { normalizeKnifeSkin } from './knife-types.js';
 import { inspectionPose,applyInspection,ringFlourish } from './view-inspect.js';
 import { studioReflection } from './weapon-light.js';
+import { EjectedCases } from './ejected-cases.js';
+import { articulatedGlove,flexGlove } from './view-hands.js';
 import { loadOperators,operatorAvailable,createOperator,updateOperator,disposeOperator,heldMuzzleWorld } from './operator.js';
 
 const PI=Math.PI;
@@ -19,19 +21,30 @@ const damp=(from,to,rate,dt)=>from+(to-from)*(1-Math.exp(-rate*dt));
 const weaponNames=[...PRIMARY_WEAPONS,'pistol','knife'];
 const pose=new T.Vector3(),direction=new T.Vector3(),endpoint=new T.Vector3();
 const forwardAxis=new T.Vector3(0,0,-1),beamStart=new T.Vector3(),beamEnd=new T.Vector3();
-const knifeShoulder=new T.Vector3(.50,-.55,-.14);
+const knifeShoulder=new T.Vector3(.405,-.354,-.135);
+const offShoulder=new T.Vector3(-.425,-.296,-.13),offRotation=new T.Quaternion();
+const offAngles=new T.Euler(),handRotation=new T.Quaternion();
+function gloveFrame(back,heel){
+  const x=new T.Vector3(...back).normalize(),z=new T.Vector3(...heel);
+  z.addScaledVector(x,-x.dot(z)).normalize();
+  return new T.Quaternion().setFromRotationMatrix(new T.Matrix4().makeBasis(x,z.clone().cross(x),z));
+}
+const openLeftFrame=gloveFrame([-.48,-.25,-.84],[-.74,-.35,.57]);
+const reverseRightFrame=new T.Quaternion().setFromEuler(new T.Euler(1.90,1.02,2.06));
 const vertical=new T.Vector3(0,1,0);
 const teamColors=['#168bc9','#ed7040'];
 const teamLights=[0x66dcff,0xff975e];
 
-// Each detachable magazine has its own clearance and wrist angle in the viewmodel.
+// Grip points lie on the near face of the actual detachable mesh in its bind pose.
+// Apex and feed are fractions of the reload; release and seating are the shared Foley contacts.
+const palmPad=new T.Vector3(-.008,-.070,.010);
 const magazineHandling={
-  rifle:   {drop:.20, side:-.062, turn:.14, roll:.39, center:.042},
-  smg:     {drop:.15, side:-.048, turn:.12, roll:.27, center:.013},
-  burst:   {drop:.19, side:-.058, turn:.18, roll:.35, center:.026},
-  marksman:{drop:.21, side:-.075, turn:.21, roll:.47, center:-.008},
-  lmg:     {drop:.17, side:-.158, turn:.49, roll:.55, center:-.025},
-  pistol:  {drop:.14, side:-.032, turn:.09, roll:.51, center:-.068},
+  rifle:   {grip:[-.0226,-.1740,-.2483],  apex:.405,feed:.51,drop:.190,side:-.072,back:.055,pitch:-.22,turn:.28,wrist:.39,roll:.39,center:.042},
+  smg:     {grip:[-.0335,-.1241,-.15647], apex:.354,feed:.49,drop:.142,side:-.058,back:.031,pitch:.12,turn:.20,wrist:.32,roll:.27,center:.013},
+  burst:   {grip:[-.0252,-.1713,-.21214], apex:.389,feed:.50,drop:.170,side:-.066,back:.049,pitch:-.11,turn:.33,wrist:.45,roll:.35,center:.026},
+  marksman:{grip:[-.0246,-.1771,-.25707], apex:.430,feed:.53,drop:.154,side:-.082,back:.041,pitch:.25,turn:.38,wrist:.50,roll:.47,center:-.008},
+  lmg:     {grip:[-.1245,-.14219,-.17672],apex:.454,feed:.55,drop:.116,side:-.123,back:.092,pitch:.30,turn:.54,wrist:.70,roll:.55,center:-.025},
+  pistol:  {grip:[-.0203,-.11646,.00752],  apex:.352,feed:.52,drop:.156,side:-.026,back:.023,pitch:-.07,turn:.13,wrist:.53,roll:.51,center:-.068},
   sniper:  {drop:.15, side:-.083, turn:.20, roll:.39, center:.042},
 };
 
@@ -134,57 +147,18 @@ function limb(parts,a,b,from,to,hue) {
     new T.Quaternion().setFromUnitVectors(vertical,axis.normalize()),new T.Vector3(1,1,1));
   parts.append(geo,matrix,hue);geo.dispose();
 }
-function glove(support,fit,handOnly=false) {
-  const parts=new Parts(),group=new T.Group();
-  const side=support?-1:1, center=support?fit.support:0, grip=support?-.066:fit.grip;
-  const elbow=[side*(support?.188:.235),support?-.258:-.258,center+(support?.50:.36)];
-  const cuff=[side*(support?.065:.069),grip-.048,center+.03];
-  const joint=f=>elbow.map((n,i)=>n+(cuff[i]-n)*f);
-  if(!handOnly){
-    const cloth=new Parts();
-    // The guard's cuff and reinforcement panels sit inside the existing hand envelope.
-    limb(cloth,elbow,joint(.74),.065,.050,'#323f44');
-    limb(cloth,joint(.41),joint(.61),.058,.053,'#3c494b');
-    limb(cloth,joint(.62),joint(.66),.0535,.0525,'#49524c');
-    limb(cloth,joint(.70),cuff,.049,.039,'#292f31');
-    limb(cloth,joint(.78),joint(.86),.049,.045,'#3c4340');
-    // Store the sleeve along +Y from the cuff so the elbow can follow the shoulder
-    // during inspection while the wrist remains fastened to the grip.
-    const sleeve=cloth.mesh(),restElbow=new T.Vector3(...elbow),wrist=new T.Vector3(...cuff);
-    const axis=restElbow.clone().sub(wrist),length=axis.length();
-    sleeve.quaternion.setFromUnitVectors(vertical,axis.normalize());sleeve.position.copy(wrist);
-    sleeve.geometry.translate(-wrist.x,-wrist.y,-wrist.z);
-    sleeve.geometry.applyQuaternion(sleeve.quaternion.clone().invert());
-    group.add(sleeve);
-    group.userData={restElbow,wrist,sleeve,length};
-    pod(parts,side*.057,grip,center+.004,.077,.091,.122,'#353b38',-.23,0,side*.10);
-    pod(parts,side*.081,grip+.009,center+.009,.034,.056,.071,'#4b5049',-.24);
-    // Stagger the fingertip pads, dark binding and cuff stitching so the hand reads in silhouette.
-    for(let i=0;i<3;i++){
-      const y=grip+.023-i*.025,z=center-.041+i*.002;
-      pod(parts,side*.032,y,z,.085-i*.002,.024,.036,'#434942',-.10,-side*.17);
-      pod(parts,side*.071,y+.001,z+.007,.029,.022,.028,'#55594e',-.18);
-      pod(parts,side*.051,y-.001,z-.009,.014,.021,.025,'#303734',-.10,-side*.18);
-    }
-    pod(parts,side*.042,grip+.039,center+.030,.035,.046,.073,'#454d44',-.40,side*.35);
-    for(let i=0;i<4;i++)parts.cube(side*.095,grip-.005+i*.006,center+.015-i*.005,.002,.0028,.005,'#676957');
-    group.add(parts.mesh());return group;
-  }
-  pod(parts,.043,grip-.005,.001,.073,.108,.083,'#343d38',-.18,.09,.10);
-  pod(parts,.069,grip+.001,-.006,.027,.073,.061,'#4c554b',-.20);
-  // Separate proximal pads and curled ends wrap across the front of the handle.
-  for(let i=0;i<4;i++){
-    const y=grip+.037-i*.022,short=i===3?.012:0;
-    pod(parts,.042,y,.031,.047,.025,.041,'#475047',-.17,-.36,.06);
-    pod(parts,.012+short*.5,y-.005,.039,.052-short,.020,.027,'#393f38',-.11,.04,.17);
-    pod(parts,-.011+short,y-.010,.030,.021,.017,.025,'#4a5147',-.17,.28,.26);
-    pod(parts,.053,y+.003,.034,.023,.020,.025,'#555c50',-.20);
-  }
-  pod(parts,.032,grip+.044,-.018,.035,.047,.059,'#4c544b',-.40,.35,-.25);
-  pod(parts,.009,grip+.055,-.020,.045,.029,.042,'#424a42',-.19,.23,-.16);
-  group.add(parts.mesh());return group;
+function glove(support,fit) {
+  const group=new T.Group(),hand=articulatedGlove(support);
+  const side=support?-1:1,center=support?fit.support:0,grip=support?-.066:fit.grip;
+  hand.position.set(0,grip+.067,center);
+  if(support)hand.rotation.set(.14,.08,.12);
+  flexGlove(hand,support?.13:0);group.add(hand);
+  hand.updateMatrix();
+  const wrist=hand.userData.wrist.clone().applyMatrix4(hand.matrix);
+  const restElbow=new T.Vector3(side*(support?.188:.235),-.258,center+(support?.50:.36));
+  group.userData={restElbow,wrist,hand,elbow:new T.Vector3(),sleeve:hand.userData.sleeve};
+  return group;
 }
-
 // The origin of each glove is a point on the surface it holds. Wrist and
 // sleeve are separate so reaching for the magazine never translates an elbow.
 function sniperGlove(front) {
@@ -232,8 +206,7 @@ const inspectLeftShoulder=new T.Vector3(-.25,-.43,-.14),inspectRightShoulder=new
 function placeSleeve(gun,hand,shoulder) {
   const {sleeve,elbow,wrist}=hand.userData;
   gun.worldToLocal(elbow.copy(shoulder));
-  wristAxis.copy(wrist).applyQuaternion(hand.quaternion).add(hand.position);
-  if(hand.parent!==gun)wristAxis.add(hand.parent.position);
+  gun.worldToLocal(hand.localToWorld(wristAxis.copy(wrist)));
   wristAxis.sub(elbow);
   sleeve.position.copy(elbow);
   sleeve.scale.y=wristAxis.length();
@@ -257,13 +230,10 @@ function placeSniperHands(data,reach,grasp) {
 
 export function gunModel(type,skin='karambit') {
   if(type==='knife'){
-    const group=new T.Group(),body=knifeMesh(skin),hand=glove(false,knifeFit,true),support=new T.Group();
-    const sleeve=new Parts();
-    limb(sleeve,[0,0,0],[0,.68,0],.081,.055,'#37413e');
-    limb(sleeve,[0,.65,0],[0,1,0],.056,.040,'#3d4742');
-    limb(sleeve,[0,.86,0],[0,.98,0],.047,.041,'#262d2c');
-    hand.userData={wrist:new T.Vector3(.057,-.120,.043),elbow:new T.Vector3(),sleeve:sleeve.mesh()};
-    group.add(body,hand,support,hand.userData.sleeve);
+    const group=new T.Group(),body=knifeMesh(skin),hand=articulatedGlove(),support=articulatedGlove(true);
+    hand.scale.setScalar(1.17);support.scale.setScalar(1.13);flexGlove(support,.96);
+    body.scale.setScalar(skin==='karambit'?.66:.76);
+    group.add(body,hand,support,hand.userData.sleeve,support.userData.sleeve);
     group.userData={fit:knifeFit,body,support,hand,skin};return group;
   }
   const group=new T.Group(),body=blasterMesh(type),fit=gunFit[type];
@@ -284,8 +254,8 @@ export function gunModel(type,skin='karambit') {
   supportMount.add(support);group.add(body,strong,supportMount);
   group.userData={fit,body,strong,support,supportMount,magazine,contact,shell,handling:magazineHandling[type],
     pump:body.getObjectByName('pump'),bolt:body.getObjectByName('bolt')};
+  group.add(support.userData.sleeve,strong.userData.sleeve);
   if(sniper){
-    group.add(support.userData.sleeve,strong.userData.sleeve);
     group.userData.magGrip=contact.clone();
     group.userData.magGrip.x=magBounds.min.x+.002;
     placeSniperHands(group.userData,0,0);
@@ -297,7 +267,17 @@ export function gunModel(type,skin='karambit') {
 const loweredHand=new T.Vector3(-.29,-.46,-.37);
 export function poseHeldSleeves(weapon,key,weight=0,freeHand=0) {
   const {strong,support,hand,supportMount}=weapon.userData;
-  if(key==='knife'){placeSleeve(weapon,hand,knifeShoulder);return;}
+  if(key==='knife'){
+    const {walkShift=0,guard=0}=weapon.userData;
+    // Off hand stays in camera space as the right wrist turns. Knuckles and
+    // then the cuff pass below the frame when the player raises an item to look.
+    support.position.set(-.147-walkShift*.65-weight*.041,-.162+walkShift*.35-weight*.088-guard*.025,-.408+weight*.012);
+    weapon.worldToLocal(support.position);
+    offAngles.set(weight*.10,guard*.13,weight*.14);
+    offRotation.setFromEuler(offAngles).premultiply(openLeftFrame);
+    weapon.getWorldQuaternion(handRotation);support.quaternion.copy(handRotation.invert()).multiply(offRotation);
+    placeSleeve(weapon,hand,knifeShoulder);placeSleeve(weapon,support,offShoulder);return;
+  }
   if(freeHand){
     weapon.worldToLocal(gripTarget.copy(loweredHand));
     wristAxis.copy(support.userData.wrist).applyQuaternion(support.quaternion).add(support.position);
@@ -307,40 +287,52 @@ export function poseHeldSleeves(weapon,key,weight=0,freeHand=0) {
     placeSleeve(weapon,support,gripTarget.copy(leftShoulder).lerp(inspectLeftShoulder,weight));
     placeSleeve(weapon,strong,gripTarget.copy(rightShoulder).lerp(inspectRightShoulder,weight));return;
   }
-  // Reset once on cancellation so reload and ADS resume their original sleeve pose.
-  if(!weight&&!weapon.userData.inspected)return;
-  weapon.userData.inspected=weight>0;
   for(const [glove,shoulder] of [[support,inspectLeftShoulder],[strong,inspectRightShoulder]]){
-    const {sleeve,restElbow,wrist,length}=glove.userData;
-    glove.worldToLocal(gripTarget.copy(shoulder));
-    wristAxis.copy(restElbow).lerp(gripTarget,weight).sub(wrist);
-    sleeve.scale.y=wristAxis.length()/length;
-    sleeve.quaternion.setFromUnitVectors(vertical,wristAxis.normalize());
+    const {restElbow,hand}=glove.userData;
+    // At rest the sleeve follows the authored arm and reload cycle; while raised,
+    // its upper end returns to the player's shoulder, leaving the hand on the prop.
+    glove.localToWorld(gripTarget.copy(restElbow)).lerp(shoulder,weight);
+    placeSleeve(weapon,glove,gripTarget);
+    if(glove===support)flexGlove(hand,.13+freeHand*.69);
   }
 }
 
 export function poseHeldKnife(rig,weapon,skin,drawAge,inspectAge,cut,side,step=0,walk=0,swayX=0) {
   const slash=knifePose(cut,side);
-  const equip=Math.max(0,1-drawAge/.31)**2, butterfly=skin==='balisong';
-  rig.position.set(.221+slash.x+Math.sin(step)*.008*walk-swayX,
-    (butterfly?-.20:-.18)+slash.y-Math.abs(Math.cos(step))*.007*walk-equip*.17,-.49+slash.z);
-  rig.rotation.set(-.14+slash.rx-equip*.32,-.21+slash.ry,(butterfly?.36:.70)+slash.rz+equip*.42);
-  const body=weapon.userData.body;
-  animateKnife(body,skin,drawAge,inspectAge);
-  if(!butterfly){
-    // During the flourish the actual hole in the pommel stays over the index
-    // pad. Rotate its offset about that contact and slip back into the grip.
-    const flourish=ringFlourish(inspectAge);
-    if(flourish){
-      const {grip,turn}=flourish,c=Math.cos(turn),s=Math.sin(turn),x=.018,y=-.210;
-      body.rotation.z=turn;
-      body.position.set(x*(1-c)+s*y-.012*grip, y*(1-c)-x*s+.171*grip,-.006*grip);
-    }else{body.rotation.z=0;body.position.set(0,0,0);}
+  const equip=Math.max(0,1-drawAge/.27)**2,butterfly=skin==='balisong';
+  const catchBeat=Number.isFinite(drawAge)?Math.exp(-(((drawAge-.29)/.064)**2)):0;
+  const walkShift=Math.sin(step)*.006*walk,guard=Math.abs(slash.x)*2.8;
+  weapon.userData.walkShift=walkShift;weapon.userData.guard=guard;
+  rig.position.set((butterfly?.123:.014)+slash.x*.79+walkShift-swayX,
+    (butterfly?-.095:-.080)+slash.y*.70-Math.abs(Math.cos(step))*.005*walk-equip*.135+catchBeat*.006,
+    (butterfly?-.435:-.453)+slash.z*.59-equip*.029);
+  rig.rotation.set(-.06+slash.rx*.65-equip*.34,(butterfly?-.23:.24)+slash.ry*.74,
+    (butterfly?.72:-.12)+slash.rz*.88+equip*.49-catchBeat*.065);
+  const {body,hand}=weapon.userData;
+  const flourish=butterfly?null:ringFlourish(inspectAge);
+  if(butterfly){
+    const age=Number.isFinite(inspectAge)?inspectAge:drawAge;
+    const hinge=Number.isFinite(inspectAge)?Math.sin(Math.min(1,Math.max(0,(age-.35)/2.47))*Math.PI):Math.sin(Math.min(1,Math.max(0,age/.56))*Math.PI);
+    hand.rotation.set(-.09,.37+hinge*.15,.12+hinge*.21);
+    flexGlove(hand,.12+hinge*.54);
+    body.position.set(.012,-.019,.002);
+  }else{
+    hand.quaternion.copy(reverseRightFrame);hand.rotateY((flourish?.grip||0)*.28);
+    flexGlove(hand,(flourish?.grip||0)*.94,true);
+    const index=hand.userData.fingers[0].b;
+    // Keep the centre of the actual metal ring on the index segment, including
+    // during draw, wrist roll, and the loosen/regrip around the single spin.
+    weapon.worldToLocal(index.localToWorld(gripTarget.set(-.020,0,0)));
+    const reveal=Number.isFinite(inspectAge)?clamp(Math.min(inspectAge/.27,(3.10-inspectAge)/.34),0,1):0;
+    body.rotation.set(.86-reveal*.79,.19,-2.10+(flourish?.turn||0)+equip*.86);
+    wristAxis.set(.018,-.210,0).multiply(body.scale).applyQuaternion(body.quaternion);
+    body.position.copy(gripTarget).sub(wristAxis);
   }
+  animateKnife(body,skin,drawAge,inspectAge);
 }
 
 export function animateHands(gun,player,reload,cycle) {
-  const {fit,strong,support,magazine,contact,shell,pump,bolt}=gun.userData;
+  const {fit,strong,support,body,magazine,shell,pump,bolt,handling}=gun.userData;
   if(!strong)return;
   const pull=reload.travel,reach=reload.reach;
   if(pump){
@@ -356,12 +348,9 @@ export function animateHands(gun,player,reload,cycle) {
     shell.rotation.set(-.24*pull,.20*reach,0);
     return;
   }
-  const {drop,side,turn}=gun.userData.handling ?? magazineHandling.rifle;
-  if(magazine){
-    magazine.position.set(side*pull,-drop*pull,.056*pull);
-    magazine.rotation.z=pull*turn;
-  }
   if(bolt){
+    magazine.position.set(handling.side*pull,-handling.drop*pull,.056*pull);
+    magazine.rotation.z=pull*handling.turn;
     const empty=emptySniperBolt(player);
     const lift=Math.max(cycle.lift,empty),stroke=Math.max(cycle.stroke,empty);
     bolt.position.set(.006*lift,.025*lift,.115*stroke);
@@ -369,9 +358,26 @@ export function animateHands(gun,player,reload,cycle) {
     placeSniperHands(gun.userData,reach,Math.max(cycle.grasp,emptySniperGrasp(player)));
     return;
   }
-  support.position.set((contact.x+.025)*reach+side*pull,(contact.y+.042)*reach-drop*pull,
-    (contact.z-fit.support)*reach+.056*pull);
-  support.rotation.x=-.09*pull;
+  if(!magazine||!handling)return;
+  const t=player.reload>0&&player.reloadDuration>0?1-player.reload/player.reloadDuration:0;
+  const smooth=T.MathUtils.smoothstep;
+  const travel=smooth(t,RELOAD_CONTACT.release,handling.apex)*(1-smooth(t,handling.feed,RELOAD_CONTACT.seat));
+  const clear=smooth(travel,.12,.92);
+  magazine.rotation.set(handling.pitch*clear,handling.turn*.21*clear,handling.turn*clear);
+  // Pivot the magazine around the gloved hand as it clears the well.
+  gripTarget.fromArray(handling.grip);
+  magazine.position.copy(gripTarget).sub(wristAxis.copy(gripTarget).applyQuaternion(magazine.quaternion));
+  magazine.position.x+=handling.side*clear;magazine.position.y-=handling.drop*travel;
+  magazine.position.z+=handling.back*travel;
+  magazine.updateMatrix();body.updateMatrix();
+  gripTarget.applyMatrix4(magazine.matrix).applyMatrix4(body.matrix);
+  // Keep the pad inside the glove on that face throughout extraction, the hold
+  // and insertion. The transient side arc keeps the reaching palm clear of the body.
+  support.rotation.set(reach*(-.18+handling.pitch*clear),-.17*reach,reach*(handling.wrist+handling.turn*clear));
+  const hand=support.userData.hand;hand.updateMatrix();
+  wristAxis.copy(palmPad).applyMatrix4(hand.matrix).applyQuaternion(support.quaternion);
+  support.position.copy(gripTarget).sub(wristAxis).multiplyScalar(reach);
+  support.position.x-=.036*4*reach*(1-reach);
 }
 
 function operatorTemplate(team) {
@@ -478,13 +484,14 @@ function lightScene(scene,world=false) {
 export class ArenaRenderer {
   constructor(canvas,map,context) {
     this.canvas=canvas;this.map=map;
-    this.gl=new T.WebGLRenderer({canvas,context,antialias:true,alpha:false,powerPreference:'low-power',stencil:false});
+    this.gl=new T.WebGLRenderer({canvas,context,antialias:true,alpha:false,powerPreference:'high-performance',stencil:false});
     this.gl.outputColorSpace=T.SRGBColorSpace;
     this.gl.shadowMap.enabled=true;this.gl.shadowMap.type=T.PCFSoftShadowMap;
     this.gl.shadowMap.autoUpdate=false;this.gl.shadowMap.needsUpdate=true;
     this.gl.autoClear=false;
     this.scene=new T.Scene();this.scene.background=new T.Color('#c7e7f2');
     this.scene.fog=new T.Fog('#c7e7f2',63,146);
+    this.cases=new EjectedCases(this.scene);
     this.worldCamera=new T.PerspectiveCamera(72,1,.055,205);
     this.gunScene=new T.Scene();this.gunCamera=new T.PerspectiveCamera(63,1,.012,4);
     this.gunScene.environment=studioReflection();
@@ -580,7 +587,11 @@ export class ArenaRenderer {
     const canvas=this.canvas;
     const w=Math.max(1,canvas.clientWidth||window.innerWidth), h=Math.max(1,canvas.clientHeight||window.innerHeight);
     const scale=view.quality==='low'?.62:this.performanceScale;
-    const ratio=Math.min(window.devicePixelRatio||1,1.25,1440/w,900/h)*scale;
+    const dpr=window.devicePixelRatio||1;
+    const hardwareLimit=this.gl.capabilities.maxTextureSize;
+    const ratio=view.quality==='high'
+      ? Math.min(Math.max(1,dpr),hardwareLimit/w,hardwareLimit/h)
+      : Math.min(dpr,1.25,1440/w,900/h)*scale;
     const rw=Math.max(1,Math.floor(w*ratio)), rh=Math.max(1,Math.floor(h*ratio));
     if(rw===this.res.w && rh===this.res.h)return;
     this.res={w:rw,h:rh};this.gl.setSize(rw,rh,false);
@@ -658,7 +669,7 @@ export class ArenaRenderer {
     p.mesh.scale.setScalar(size);p.mesh.visible=true;
   }
   resetShot() {
-    this.shotAge=Infinity;this.shotWeapon=null;this.shotStrength=0;
+    this.shotAge=Infinity;this.shotWeapon=null;this.shotStrength=0;this.shotRun=0;this.kickSide=1;
     this.recoil=0;this.flashTime=0;this.scopeActive=false;
   }
 
@@ -705,7 +716,10 @@ export class ArenaRenderer {
       if(e.type!=='shot'||!Number.isFinite(e.ex))continue;
       const mine=e.actor===focus?.id;
       if(mine && focus.alive && e.weapon===focus.active){
-        this.shotStrength=(gunFit[e.weapon]?.flash||1)+Math.min(.18,Math.max(0,.13-this.shotAge));
+        const continuous=this.shotWeapon===e.weapon&&this.shotAge<.24;
+        this.shotRun=continuous?this.shotRun+1:0;
+        this.kickSide=Math.cos(this.shotRun*2.19+.45);
+        this.shotStrength=1+.05*Math.min(this.shotRun,5);
         this.shotAge=0;this.shotWeapon=e.weapon;
         this.flashTime=e.blocked?0:LOCAL_IGNITION_LIFE;
       }
@@ -725,7 +739,7 @@ export class ArenaRenderer {
     }
   }
   clearShotEffects(){
-    this.clearRemoteFlashes();this.shotTrails.clear();this.shotsThisFrame.length=0;
+    this.cases.clear();this.clearRemoteFlashes();this.shotTrails.clear();this.shotsThisFrame.length=0;
     this.flash.visible=false;this.flashTime=0;
     for(const t of this.tracers){t.ttl=0;t.mesh.visible=t.flightMesh.visible=false;}
   }
@@ -863,7 +877,7 @@ export class ArenaRenderer {
   }
   draw(game,selfId,view={}) {
     const dt=clamp(view.dt||1/60,.002,.13), t=Number.isFinite(view.t)?view.t:performance.now()/1000;
-    if(!view.lobby&&game&&view.quality!=='low'){
+    if(!view.lobby&&game&&view.quality==='auto'){
       this.sampleSeconds+=dt;this.sampleFrames++;
       if(this.sampleSeconds>=1.8){
         const average=this.sampleSeconds/this.sampleFrames;
@@ -905,7 +919,7 @@ export class ArenaRenderer {
     const held=canAim(focus,playerView?view.ads??focus.ads:focus.ads);
     const age=this.shotWeapon===focus.active ? this.shotAge : Infinity;
     const ads=scopeAfterShot(focus.active,held,age);
-    this.aim=first?Number(ads):approachAim(this.aim,ads,dt);
+    this.aim=first?Number(ads):approachAim(this.aim,ads,dt,focus.active);
     this.scopeActive=sniperScopeVisible(focus.active,this.aim,ads);
     const height=eyeHeight(focus);
     this.eye=first||playerView?height:damp(this.eye,height,19,dt);
@@ -946,24 +960,26 @@ export class ArenaRenderer {
     const gunX=(.188+Math.sin(this.bob)*.009*sway-this.lookSwayX)*hip;
     const gunY=(-.174-Math.abs(Math.cos(this.bob))*.009*sway-this.lookSwayY)*hip-(fit.sight*.91+.009)*this.aim;
     const gunZ=(key==='pistol'?-.35:-.422)+.029*this.aim;
-    const handling=weapon.userData.handling;
+    const handling=weapon.userData.handling,profile=gunPresentation(key);
+    const kick=this.recoil*(.64+.36*hip),lateral=kick*this.kickSide;
     this.gunRig.position.set(gunX+reloadWeight*(handling?.center??.042),gunY+reloadWeight*.059+reload.bump*.008-this.equip*.12,
-      gunZ-reloadWeight*.17+this.recoil*(.030+.017*hip));
-    this.gunRig.rotation.set(this.recoil*(.057+.040*hip)+hip*.012+reloadWeight*.088-this.equip*.18,
-      .025*hip+reloadWeight*.10+this.lookSwayX*.55,-.032*hip+reloadWeight*(handling?.roll??.39)+reload.bump*.028+this.recoil*.014);
+      gunZ-reloadWeight*.17+kick*profile.push);
+    this.gunRig.rotation.set(kick*profile.pitch+hip*.012+reloadWeight*.088-this.equip*.18,
+      .025*hip+reloadWeight*.10+this.lookSwayX*.55+lateral*profile.yaw,
+      -.032*hip+reloadWeight*(handling?.roll??.39)+reload.bump*.028+lateral*profile.roll);
     if(key==='shotgun'){
       this.gunRig.position.x-=.098*reloadWeight;
       this.gunRig.position.y-=.038*cycle.stroke;
-      this.gunRig.position.z+=.10*reloadWeight+.055*this.recoil;
-      this.gunRig.rotation.x+=.072*this.recoil-.085*cycle.stroke;
+      this.gunRig.position.z+=.10*reloadWeight;
+      this.gunRig.rotation.x-=.085*cycle.stroke;
       this.gunRig.rotation.y-=.24*reloadWeight;
       this.gunRig.rotation.z+=.32*reloadWeight-.09*cycle.stroke;
     }else if(sniper){
       // Roll the long receiver toward the viewer during the bolt cycle.
       this.gunRig.position.x+=.035*hip-.074*cycle.grasp-.084*reloadWeight;
       this.gunRig.position.y+=.061*reloadWeight-.025*cycle.grasp;
-      this.gunRig.position.z+=.066*cycle.grasp+.092*this.recoil;
-      this.gunRig.rotation.x+=.082*this.recoil-.060*cycle.stroke;
+      this.gunRig.position.z+=.066*cycle.grasp;
+      this.gunRig.rotation.x-=.060*cycle.stroke;
       this.gunRig.rotation.y+=-.20*cycle.grasp-.11*reloadWeight+.020*this.recoil;
       this.gunRig.rotation.z-=.33*cycle.grasp+.73*reloadWeight;
     }
@@ -984,6 +1000,11 @@ export class ArenaRenderer {
     this.viewMuzzle.x*=lens;this.viewMuzzle.y*=lens;this.viewMuzzle.applyQuaternion(cam.quaternion).add(cam.position);
     this.viewForward.copy(forwardAxis).transformDirection(this.barrelTip.matrixWorld);
     this.viewForward.x*=lens;this.viewForward.y*=lens;this.viewForward.applyQuaternion(cam.quaternion).normalize();
+    if(first||!focus.alive||view.quality==='low')this.cases.clear();
+    if(focus.alive&&view.quality!=='low'){
+      for(const {event,mine} of this.shotsThisFrame)if(mine&&event.weapon===key)this.cases.queue(event,t);
+      this.cases.frame(key,weapon,cam,lens,t,shotDt);
+    }
     this.renderShots(game,focus,cam);
     this.shotTrails.draw(cam,this.res.h);
     this.gl.clear();this.gl.render(this.scene,cam);

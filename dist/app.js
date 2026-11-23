@@ -1,4 +1,4 @@
-import { createRange, stepGame, spawnYaw, TEAM_SIZES } from './sim.js';
+import { createRange, stepGame, spawnYaw, clearBufferedFire, TEAM_SIZES } from './sim.js';
 import { ARENAS, getArena } from './arena-map.js';
 import { MAX_HP, WEAPONS, PRIMARY_WEAPONS as primary } from './balance.js';
 import { LiteRenderer } from './lite.js';
@@ -34,7 +34,7 @@ const teamName=t=>t===0?'블루':'오렌지';
 let chosenArena=getArena(read('mapId',ARENAS[0].id));
 const savedSize=read('size',2);
 let size=TEAM_SIZES.includes(savedSize)?savedSize:2, selected=primary.includes(read('weapon','rifle'))?read('weapon','rifle'):'rifle';
-let sensitivity=clamp(Number(read('sensitivity',1))||1,.1,3),quality=read('quality','auto'),nickname=String(read('name','')).slice(0,16);
+let sensitivity=clamp(Number(read('sensitivity',1))||1,.1,3),quality=read('quality','high'),nickname=String(read('name','')).slice(0,16);
 let selectedKnife=normalizeKnifeSkin(read('knifeSkin')), inspectChoice=selected;
 audio.enabled=read('sound',true);
 let canvas=$('arena'),renderer,game=null,client=null,selfId='local',room=null,screen='home',modal='',lan=false;
@@ -43,7 +43,7 @@ let roundKey='',eventFeed=[],pendingFire=false,heldFire=false,ads=false,paused=f
 let lastResult='',spectatorIndex=0,frameTime=performance.now(),hudStamp=0,roundFlash=0,clockStamp=0;
 let prevNet=null,netAt=0,lastNotice='',noticeTimer;
 let joining=false,joinAttempt=0;
-let inspectStart=null, inspectDeadline=0, inspectedItem=null;
+let inspectStart=null, inspectDeadline=0, inspectedItem=null, controlsUnderstood=false;
 const keys=new Set(), pressed=new Set();
 function notify(msg){$('toast').textContent=msg;$('toast').classList.add('show');clearTimeout(noticeTimer);noticeTimer=setTimeout(()=>$('toast').classList.remove('show'),2800);}
 function drawSound(){const el=$('soundBtn');el.innerHTML=svg(audio.enabled?'sound':'mute');el.title=el.ariaLabel=audio.enabled?'소리 끄기':'소리 켜기';}
@@ -81,7 +81,11 @@ function showPanel(kind,title,html){
   if(!panel.open)panel.showModal();panel.scrollTop=0;
 }
 function closePanel(){modal='';if(panel.open)panel.close();}
-function clearInput(){keys.clear();pressed.clear();heldFire=ads=pendingFire=false;dragX=dragY=null;inspectedItem=null;}
+function clearInput(){
+  keys.clear();pressed.clear();heldFire=ads=pendingFire=false;dragX=dragY=null;inspectedItem=null;
+  if(game&&!client)clearBufferedFire(game.players.find(p=>p.id===selfId));
+  audio.cancelHandling();
+}
 function release(){if(document.pointerLockElement)document.exitPointerLock();clearInput();}
 function attemptLock(){
   if(screen!=='game'||modal)return;
@@ -126,7 +130,7 @@ function bindSensitivity(){
   draw();
 }
 function settings(){
-  showPanel('settings','게임 설정',sensitivityControls()+'<label class="setting">그래픽 <select id="graphics"><option value="auto">기본</option><option value="low">저사양</option></select></label><div class="setting"><span>효과음</span><button id="soundToggle" class="minor"></button></div><div class="row"><button id="settingsDone" class="primary">완료</button></div>');
+  showPanel('settings','게임 설정',sensitivityControls()+'<label class="setting">그래픽 <select id="graphics"><option value="high">최고 화질</option><option value="auto">자동</option><option value="low">저사양</option></select></label><div class="setting"><span>효과음</span><button id="soundToggle" class="minor"></button></div><div class="row"><button id="settingsDone" class="primary">완료</button></div>');
   bindSensitivity();
   $('graphics').value=quality;$('graphics').onchange=e=>{quality=e.target.value;save('quality',quality);};
   const sound=$('soundToggle');sound.textContent=audio.enabled?'켜짐':'꺼짐';sound.onclick=()=>{setSound();sound.textContent=audio.enabled?'켜짐':'꺼짐';};$('settingsDone').onclick=returnFromPanel;
@@ -134,6 +138,7 @@ function settings(){
   credits.onclick=()=>showPanel('credits','제작 자료',
     '<p>기본 총기와 선수 모델은 <a href="https://quaternius.com/packs/toonshootergamekit.html" target="_blank" rel="noopener">Quaternius · Toon Shooter Game Kit</a>(CC0)를 수정했습니다. 스키퍼·트라이던트·글라스핀·캐프스턴은 Kenney Blaster Kit(CC0)를 바탕으로 제작했습니다. 칼과 전자 표적 더미는 도크라인 전용 모델입니다.</p>'+
     '<p>맵의 컨테이너·금속 화물 케이스·공장·급수탑·설비는 Kenney의 <a href="https://kenney.nl/assets/city-kit-industrial" target="_blank" rel="noopener">City Kit Industrial</a>, <a href="https://kenney.nl/assets/factory-kit" target="_blank" rel="noopener">Factory Kit</a>, <a href="https://kenney.nl/assets/blaster-kit" target="_blank" rel="noopener">Blaster Kit</a>(모두 CC0)를 수정했습니다.</p>'+
+    '<p>세관 창고의 콘크리트·목재·금속 표면에는 Poly Haven의 CC0 재질을 사용했습니다. <a href="./assets/warehouse-CREDITS.txt" target="_blank" rel="noopener">재질별 원본과 제작자</a></p>'+
     '<p>봇의 표적 선택과 측면 회피는 <a href="https://github.com/Mugen87/dive/tree/7176136cf6c29eddfd620df2bf0d09a532680763" target="_blank" rel="noopener">Michael Herzog · Dive</a>(MIT)의 코드를 수정했습니다.</p>'+
     '<p>온라인 연결은 <a href="https://peerjs.com/" target="_blank" rel="noopener">PeerJS</a> 1.5.5(MIT)를 사용합니다. 방장의 브라우저에서 경기를 진행하며, 공용 연결 서비스와 네트워크 상태에 영향을 받습니다.</p>'+
     '<p>효과음은 <a href="https://github.com/DeathByDenim/openspades-free-pak/blob/1e6b28721a2e5e51f84a572d101079bf186c66d5/License/Credits-pak001-Free.md" target="_blank" rel="noopener">OpenSpades Free Pak</a>과 <a href="https://github.com/buddingmonkey/FreeFirearmsSFXLibrary/tree/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b" target="_blank" rel="noopener">The Free Firearm Sound Library</a>의 녹음을 편집했습니다. 산탄총은 Mike Koenig (CC BY 3.0), 달리기는 Disagree (CC BY 4.0), 나머지 녹음은 CC0입니다. 재생 시 음량·피치·필터·잔향·좌우 위치를 조절합니다.</p>'+
@@ -147,7 +152,7 @@ function enterGame(state,id){
   $('rangeStats').hidden=!inRange;
   for(const id of ['scoreboard','living','health','feed'])$(id).hidden=inRange;
   feedback.reset();
-  game=state;selfId=id;paused=false;lastEvent=0;lastResult=roundKey='';eventFeed=[];slot=1;lastNotice='';spectatorIndex=0;clearInput();
+  game=state;selfId=id;paused=false;lastEvent=0;lastResult=roundKey='';eventFeed=[];slot=1;lastNotice='';spectatorIndex=0;controlsUnderstood=false;clearInput();
   const me=state.players.find(p=>p.id===id);yaw=me?.yaw||0;pitch=me?.pitch||0;
   audio.unlock();firstFrame=true;roundFlash=0;frameTime=performance.now();hudStamp=0;canvas.focus();
 }
@@ -324,7 +329,8 @@ function showHUD(now){
   else if(game.phase==='overtime'){text='중앙 거점 점령';sub=game.capture?.team==null?'거점에서 3초 버티기':teamName(game.capture.team)+' 점령 중 '+Math.round(game.capture.progress*100)+'%';}
   else if(roundFlash>now){text='라운드 '+game.round;sub=teamName(me.team)+' 팀';}
   if(!pointerMode&&!modal&&!spectating&&game.phase!=='between')hint='경기 화면 클릭 · 마우스 조작 시작';
-  if(me.alive&&['range','warmup','round','overtime'].includes(game.phase))hint+=(hint?' · ':'')+'F  자세히 보기';
+  if(me.alive&&!controlsUnderstood&&['range','warmup','round','overtime'].includes(game.phase))hint+=(hint?' · ':'')+'F  자세히 보기';
+  if(controlsUnderstood&&['range','round','overtime'].includes(game.phase))hint='';
   const key=text+'|'+sub;if(key!==roundKey){roundKey=key;$('banner').innerHTML=text?'<strong>'+esc(text)+'</strong><small>'+esc(sub)+'</small>':'';}
   $('contextHint').textContent=hint;$('feed').innerHTML=eventFeed.filter(f=>now-f.at<4).map(f=>'<div>'+esc(f.text)+'</div>').join('');
 }
@@ -370,11 +376,17 @@ function aim(dx,dy){
   yaw+=dx*scale;pitch=clamp(pitch-dy*scale,-1.40,1.40);
 }
 function bindCanvas(){
+  canvas.addEventListener('webglcontextlost',e=>{
+    if(e.currentTarget!==canvas||renderer instanceof LiteRenderer)return;
+    e.preventDefault();
+    switchToLite();
+    notify('그래픽 연결이 끊겨 경량 화면으로 경기를 계속합니다.');
+  },{once:true});
   canvas.addEventListener('contextmenu',e=>e.preventDefault());
   canvas.addEventListener('mousedown',e=>{
     if(screen!=='game'||modal)return;e.preventDefault();audio.unlock();
     if(!pointerMode){attemptLock();dragX=e.clientX;dragY=e.clientY;}
-    if(e.button===0||e.button===2)inspectedItem=null;
+    if(e.button===0||e.button===2){inspectedItem=null;controlsUnderstood=true;}
     if(e.button===0)heldFire=pendingFire=true;if(e.button===2&&slot!==3&&!WEAPONS[watchPlayer()?.active]?.melee)ads=true;
   });
 }
@@ -394,6 +406,7 @@ document.addEventListener('keydown',e=>{
   const used=['KeyW','KeyA','KeyS','KeyD','KeyR','KeyQ','KeyC','KeyF','Space','Digit1','Digit2','Digit3','Tab','Escape'];
   if(!used.includes(e.code))return;e.preventDefault();keys.add(e.code);if(e.repeat)return;
   pressed.add(e.code);
+  if(['KeyW','KeyA','KeyS','KeyD','KeyF'].includes(e.code))controlsUnderstood=true;
   if(e.code==='KeyF'){inspectWeapon();return;}
   if(['KeyC','KeyR','KeyQ','Digit1','Digit2','Digit3'].includes(e.code))inspectedItem=null;
   if(e.code==='Escape'){showPause();return;}
@@ -453,6 +466,7 @@ function frame(ms){
     pendingFire=false;pressed.clear();receiveEvents(t);audio.reconcile(game);const p=watchPlayer();if(!paused)audio.steps(game,p,t);
     const visual=visualState(ms),watch=p?.id!==selfId;
     const inspectAge=inspectionAge(p,t);
+    if(!paused&&!modal)audio.handling(p,inspectAge,t);
     $('weaponHud').toggleAttribute('data-inspecting',Number.isFinite(inspectAge));
     try{renderer.draw(visual,selfId,{lobby:false,ads:watch?!!p?.ads:aiming(),quality,yaw:watch?p?.yaw:yaw,pitch:watch?p?.pitch:pitch,spectatorId:watch?p?.id:undefined,inspectAge,t,dt});}
     catch(err){console.error(err);if(!(renderer instanceof LiteRenderer))switchToLite();else throw err;}
@@ -468,7 +482,7 @@ async function startArena(){
   const forceLite=new URLSearchParams(location.search).has('lite');
   try{
     if(!forceLite){
-      const attributes={antialias:true,alpha:false,powerPreference:'low-power',stencil:false};
+      const attributes={antialias:true,alpha:false,powerPreference:'high-performance',stencil:false};
       const context=canvas.getContext('webgl2',attributes)||canvas.getContext('webgl',attributes);
       if(context){
         const {ArenaRenderer}=await import('./render.js');

@@ -11,9 +11,24 @@ export function canAim(player, held) {
   return Boolean(held && player?.alive && player.active !== 'knife' && !player.reload && !player.slide);
 }
 
-export function approachAim(previous, aimed, dt) {
+// Camera-space poses for the game's eight viewmodels. Translation, wrist rotation
+// and the time to bring up the sights are independent of the muzzle flash.
+const presentation = {
+  rifle:    {push:.072, pitch:.123, yaw:.018, roll:.030, aimSpeed:16, reticle:5},
+  smg:      {push:.041, pitch:.076, yaw:.032, roll:.048, aimSpeed:23, reticle:4},
+  burst:    {push:.061, pitch:.102, yaw:.012, roll:.018, aimSpeed:18, reticle:4},
+  marksman: {push:.085, pitch:.142, yaw:.014, roll:.032, aimSpeed:12, reticle:6},
+  lmg:      {push:.078, pitch:.101, yaw:.039, roll:.056, aimSpeed:10, reticle:7},
+  pistol:   {push:.049, pitch:.219, yaw:.025, roll:.065, aimSpeed:25, reticle:4},
+  shotgun:  {push:.133, pitch:.166, yaw:.041, roll:.072, aimSpeed:14, reticle:8},
+  sniper:   {push:.146, pitch:.174, yaw:.018, roll:.038, aimSpeed:11, reticle:6}
+};
+export function gunPresentation(id) {return presentation[id] ?? presentation.rifle;}
+
+export function approachAim(previous, aimed, dt, weapon='rifle') {
   const target = Number(aimed);
-  const remaining = (previous - target) * Math.exp(-14 * dt);
+  const rate=gunPresentation(weapon).aimSpeed*(aimed?1:1.25);
+  const remaining = (previous - target) * Math.exp(-rate * dt);
   return Math.abs(remaining) < .001 ? target : target + remaining;
 }
 

@@ -63,7 +63,7 @@ test('distance reduces damage after the weapon’s effective range', t => {
   assert.equal(fireAt('range','sniper',34,1.12).damage,50);
 });
 
-test('full-auto fire cadence stays consistent across 30 and 60 Hz and fractional pistol intervals', () => {
+test('held rifle fire and repeated pistol taps keep their cadence at 30 and 60 Hz', () => {
   for(const [gun,interval,clip] of [['rifle',.10,20],['pistol',.13,13]]){
     for(const hz of [30,60]){
       const game=createRange(), player=game.players[0], slot=gun==='pistol'?2:1;
@@ -72,7 +72,8 @@ test('full-auto fire cadence stays consistent across 30 and 60 Hz and fractional
       const timestamps=[];
       for(let i=0;i<2.5*hz && timestamps.length<12;i++){
         const before=game.range.shots;
-        stepGame(game,{[player.id]:{slot,fire:true,pitch:1}},1/hz);
+        const fire=gun==='rifle'||i%2===0;
+        stepGame(game,{[player.id]:{slot,fire,pitch:1}},1/hz);
         if(game.range.shots!==before)timestamps.push(game.elapsed);
       }
       assert.equal(timestamps.length,12);

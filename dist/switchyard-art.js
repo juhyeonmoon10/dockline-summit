@@ -11,7 +11,7 @@ function generators(seed){
   return ()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed/4294967296;};
 }
 
-export function paintSwitchyardGround(c,width,height,map){
+export function paintSwitchyardGround(c,width,height,map,skylight=false){
   const W=map.width,D=map.depth,noise=generators(4019);
   c.save();c.scale(width/W,height/D);c.translate(W/2,D/2);
   const rect=(x,z,w,d,color)=>{c.fillStyle=color;c.fillRect(x,z,w,d);};
@@ -64,6 +64,21 @@ export function paintSwitchyardGround(c,width,height,map){
     c.save();c.scale(s,s);
     const g=c.createLinearGradient(0,24,0,12.9);g.addColorStop(0,'rgba(255,245,213,.68)');g.addColorStop(.63,'rgba(244,226,183,.25)');g.addColorStop(1,'rgba(255,242,205,0)');
     c.fillStyle=g;c.beginPath();c.moveTo(-5.5,24);c.lineTo(5.5,24);c.lineTo(2.4,12.9);c.lineTo(-6.1,12.9);c.closePath();c.fill();c.restore();
+  }
+  if(skylight){
+    // The glazed ridge projects a long strip onto the eastern apron. Each roof
+    // truss interrupts the light, with softer edges further from the opening.
+    const bays=[-D/2,-19.9,-12.4,-4.9,2.6,10.1,17.6,D/2];
+    for(let i=1;i<bays.length;i++){
+      const a=bays[i-1]+.11,b=bays[i]-.13,len=b-a;
+      if(len<=0)continue;
+      const beam=c.createLinearGradient(3.0,0,8.1,0);
+      beam.addColorStop(0,'rgba(252,244,215,0)');beam.addColorStop(.16,'rgba(252,238,197,.20)');
+      beam.addColorStop(.34,'rgba(255,240,198,.36)');beam.addColorStop(.78,'rgba(255,241,204,.33)');
+      beam.addColorStop(1,'rgba(252,240,202,0)');
+      c.save();c.beginPath();c.moveTo(3.0,a+.38);c.lineTo(8.1,a);c.lineTo(8.1,b);c.lineTo(3.0,b+.38);
+      c.closePath();c.fillStyle=beam;c.fill();c.restore();
+    }
   }
   // Layered footprints approximate short-range contact occlusion in both paths.
   for(const b of map.boxes.filter(b=>!b.base)){
@@ -335,7 +350,8 @@ export function buildSwitchyard(map,face,{lite=false}={}){
   for(const b of map.boxes){
     if(['trailer','cab','hood'].includes(b.kind)){truck(b);continue;}
     const y=b.base||0,[side,top,end]=walls[b.kind];
-    box(b.x,y,b.z,b.w,b.h-y,b.d,side,top,end,y>0);
+    const timberTop=!lite&&(b.kind==='crate'||b.kind==='pallet');
+    box(b.x,y,b.z,b.w,b.h-y,b.d,side,timberTop?'timberTop':top,end,y>0);
     if(b.kind==='dock')for(const s of [-1,1]){
       const x=b.x+s*(b.w*.5-.11),h=b.h+.009;
       surface([[x-.045,h,b.z+b.d/2],[x+.045,h,b.z+b.d/2],[x+.045,h,b.z-b.d/2],[x-.045,h,b.z-b.d/2]],0xc6ae75);

@@ -298,22 +298,79 @@ function serviceFans(parts) {
     for(let i=2;i<points.length;i++)parts.indices.push(offset,offset+i-1,offset+i);
   }
 }
+const warehousePhotos=new Map();
+const surfaceProfiles={
+  concrete:{tile:3.25,gains:[4.8,5.8,7.6],strength:.46,relief:.29,roughness:1,metalness:0},
+  timber:{tile:2.5,gains:[4.4,5.6,6.4],strength:.83,relief:.58,roughness:.97,metalness:0},
+  metal:{tile:3.8,gains:[2.1,2.6,4.1],strength:.19,relief:.24,roughness:.88,metalness:.13}
+};
+function warehousePhotoSet(kind){
+  if(!warehousePhotos.has(kind)){
+    const loader=new T.TextureLoader();
+    const promise=Promise.all(['color','normal','surface'].map(async layer=>{
+      const url=new URL('./assets/warehouse/'+kind+'-'+layer+'.webp',import.meta.url).href;
+      const t=await loader.loadAsync(url);
+      t.colorSpace=layer==='color'?T.SRGBColorSpace:T.NoColorSpace;
+      t.wrapS=t.wrapT=T.RepeatWrapping;t.anisotropy=4;t.channel=1;
+      return t;
+    })).catch(()=>null);
+    warehousePhotos.set(kind,promise);
+  }
+  return warehousePhotos.get(kind);
+}
+// UV0 contains markings, baked pools of light and cover contact. UV1 carries
+// the repeating photo and its aligned normal/roughness maps at world scale.
+// Keep the painted resident material while the local images are in flight.
+function detailSurface(mesh,kind,strength=surfaceProfiles[kind].strength){
+  const profile=surfaceProfiles[kind];
+  warehousePhotoSet(kind).then(photos=>{
+    if(!photos)return;
+    const [color,normalMap,roughnessMap]=photos,previous=mesh.material;
+    const mat=new T.MeshStandardMaterial({map:previous.map,color:previous.color,normalMap,roughnessMap,
+      normalScale:new T.Vector2(profile.relief,profile.relief),roughness:profile.roughness,metalness:profile.metalness});
+    mat.name='warehouse-'+kind;
+    mat.onBeforeCompile=shader=>{
+      shader.uniforms.surfacePhotograph={value:color};
+      shader.uniforms.surfaceBalance={value:new T.Vector3(...profile.gains)};
+      shader.uniforms.surfaceStrength={value:strength};
+      shader.fragmentShader=shader.fragmentShader
+        .replace('#include <common>','#include <common>\nuniform sampler2D surfacePhotograph; uniform vec3 surfaceBalance; uniform float surfaceStrength;')
+        .replace('#include <map_fragment>',`#include <map_fragment>
+          vec3 photograph = texture2D(surfacePhotograph, vNormalMapUv).rgb * surfaceBalance;
+          diffuseColor.rgb *= mix(vec3(1.0), clamp(photograph, 0.16, 2.15), surfaceStrength);`);
+    };
+    mesh.material=mat;previous.dispose();
+  });
+}
 function switchyardScene(scene,map) {
-  scene.add(new T.AmbientLight(0xf4f2e5,.53));
+  scene.add(new T.AmbientLight(0xeae8dc,.39));
   const [floorCanvas,floorContext]=canvas(1024,1024);
-  paintSwitchyardGround(floorContext,1024,1024,map);
+  paintSwitchyardGround(floorContext,1024,1024,map,true);
   const floor=new T.Mesh(new T.PlaneGeometry(map.width,map.depth),new T.MeshLambertMaterial({map:texture(floorCanvas)}));
+  const uv=floor.geometry.attributes.uv.clone(),tile=surfaceProfiles.concrete.tile;
+  for(let i=0;i<uv.count;i++)uv.setXY(i,uv.getX(i)*map.width/tile,uv.getY(i)*map.depth/tile);
+  floor.geometry.setAttribute('uv1',uv);detailSurface(floor,'concrete');
   floor.rotation.x=-PI/2;floor.receiveShadow=true;scene.add(floor);
   const batches=new Map(),tint=new T.Color();
   buildSwitchyard(map,(points,paint,shade,uv)=>{
     const textured=typeof paint==='string',key=textured?paint:'solid';
-    if(!batches.has(key))batches.set(key,{pos:[],uv:[],colors:[],indices:[]});
+    if(!batches.has(key))batches.set(key,{pos:[],uv:[],uv1:[],colors:[],indices:[]});
     const batch=batches.get(key),first=batch.pos.length/3;
     for(const point of points)batch.pos.push(...point);
     batch.indices.push(first,first+1,first+2,first,first+2,first+3);
     if(textured){
       if(uv)for(const [u,v] of uv)batch.uv.push(u,1-v);
       else batch.uv.push(0,0,1,0,1,1,0,1);
+      const kind=key==='crate'||key==='pallet'||key==='timberTop'?'timber':key==='concrete'?'concrete':key==='metal'||key==='deck'?'metal':null;
+      if(kind){
+        batch.profile=kind;
+        const span=axis=>Math.max(...points.map(p=>p[axis]))-Math.min(...points.map(p=>p[axis]));
+        const top=span(1)<.001,onX=span(0)<span(2),tile=surfaceProfiles[kind].tile;
+        for(const [x,y,z] of points){
+          const u=(top||!onX?x:z)/tile,v=(top?-z:y)/tile;
+          if(kind==='timber')batch.uv1.push(v,u);else batch.uv1.push(u,v);
+        }
+      }
     }
     else{tint.setHex(paint);for(let i=0;i<4;i++)batch.colors.push(tint.r,tint.g,tint.b);}
   });
@@ -325,7 +382,8 @@ function switchyardScene(scene,map) {
       geo.setAttribute('color',new T.Float32BufferAttribute(batch.colors,3));material=new T.MeshLambertMaterial({vertexColors:true});
     }else{
       const [c,g]=canvas(key==='customs'?1024:512,256);
-      paintSwitchyardPanel(g,c.width,c.height,key);
+      if(key==='timberTop'){g.fillStyle='#ae987a';g.fillRect(0,0,c.width,c.height);}
+      else paintSwitchyardPanel(g,c.width,c.height,key);
       geo.setAttribute('uv',new T.Float32BufferAttribute(batch.uv,2));
       const params={map:texture(c)};
       if(['display','clerestory'].includes(key))material=new T.MeshBasicMaterial(params);
@@ -335,6 +393,10 @@ function switchyardScene(scene,map) {
       }else material=new T.MeshLambertMaterial(params);
     }
     const mesh=new T.Mesh(geo,material);
+    if(batch.profile){
+      geo.setAttribute('uv1',new T.Float32BufferAttribute(batch.uv1,2));
+      detailSurface(mesh,batch.profile,key==='concrete'?.24:surfaceProfiles[batch.profile].strength);
+    }
     mesh.castShadow=!['solid','clerestory'].includes(key);
     mesh.receiveShadow=true;scene.add(mesh);
   }
