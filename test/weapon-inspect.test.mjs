@@ -54,7 +54,34 @@ test('the karambit ring tracks its contact through the spin and cancellation res
   const tip=body.localToWorld(new Vector3(-.283,.106,0)).project(camera);
   const ring=body.localToWorld(new Vector3(.018,-.21,0)).project(camera);
   assert.ok(tip.x>ring.x+.20&&tip.y>ring.y+.13,'reverse-grip claw exits to the right and curls upwards');
-  poseHeldSleeves(gun,'knife');
-  const guard=gun.userData.support.localToWorld(gun.userData.support.userData.wrist.clone()).project(camera);
-  assert.ok(guard.x<-.20&&guard.x>-.99&&guard.y>-.98,'open off hand fits within the left side of the ready view');
+});
+
+test('knife draws, inspection and alternating slashes show only the blade assembly and right arm',()=>{
+  const rig=new Group(),rifle=gunModel('rifle');
+  function visibleMeshes(root){
+    const ids=[];
+    root.traverseVisible(node=>{if(node.isMesh)ids.push(node.id);});
+    return ids;
+  }
+  for(const skin of ['karambit','balisong']){
+    const knife=gunModel('knife',skin),{body,hand}=knife.userData,sleeve=hand.userData.sleeve;
+    assert.equal(hand.userData.left,false);
+    rig.clear();rig.add(knife);
+    for(const [draw,inspect,cut,side] of [[0,Infinity,Infinity,1],[.12,Infinity,Infinity,1],
+      [Infinity,Infinity,Infinity,1],[Infinity,.37,Infinity,1],[Infinity,Infinity,.10,1],[Infinity,Infinity,.10,-1]]){
+      poseHeldKnife(rig,knife,skin,draw,inspect,cut,side,1,.6);
+      const pose=inspectionPose(skin,inspect);
+      applyInspection(rig,pose);poseHeldSleeves(knife,'knife',pose?.weight,pose?.freeHand);
+      const meshes=visibleMeshes(rig);
+      for(const part of [body.getObjectByName('blade'),hand,sleeve]){
+        assert.ok(visibleMeshes(part).some(id=>meshes.includes(id)),skin+' must show its blade and right arm');
+      }
+      const expected=[body,hand,sleeve].flatMap(visibleMeshes);
+      assert.deepEqual(new Set(meshes),new Set(expected),skin+' must not show a second glove or a detached sleeve');
+    }
+    rig.clear();rig.add(rifle);poseHeldSleeves(rifle,'rifle');
+    const visible=visibleMeshes(rig),support=rifle.userData.support;
+    assert.ok(visibleMeshes(support).some(id=>visible.includes(id)));
+    assert.ok(visible.includes(support.userData.sleeve.id));
+  }
 });

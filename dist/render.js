@@ -29,14 +29,6 @@ const weaponNames=[...PRIMARY_WEAPONS,...SECONDARY_WEAPONS,'knife'];
 const pose=new T.Vector3(),direction=new T.Vector3(),endpoint=new T.Vector3();
 const forwardAxis=new T.Vector3(0,0,-1),beamStart=new T.Vector3(),beamEnd=new T.Vector3();
 const knifeShoulder=new T.Vector3(.405,-.354,-.135);
-const offShoulder=new T.Vector3(-.425,-.296,-.13),offRotation=new T.Quaternion();
-const offAngles=new T.Euler(),handRotation=new T.Quaternion();
-function gloveFrame(back,heel){
-  const x=new T.Vector3(...back).normalize(),z=new T.Vector3(...heel);
-  z.addScaledVector(x,-x.dot(z)).normalize();
-  return new T.Quaternion().setFromRotationMatrix(new T.Matrix4().makeBasis(x,z.clone().cross(x),z));
-}
-const openLeftFrame=gloveFrame([-.48,-.25,-.84],[-.74,-.35,.57]);
 const reverseRightFrame=new T.Quaternion().setFromEuler(new T.Euler(1.90,1.02,2.06));
 const vertical=new T.Vector3(0,1,0);
 const teamColors=['#168bc9','#ed7040'];
@@ -163,11 +155,11 @@ function placeSniperHands(data,reach,grasp) {
 
 export function gunModel(type,skin='karambit') {
   if(type==='knife'){
-    const group=new T.Group(),body=knifeMesh(skin),hand=articulatedGlove(),support=articulatedGlove(true);
-    hand.scale.setScalar(1.17);support.scale.setScalar(1.13);flexGlove(support,.96);
+    const group=new T.Group(),body=knifeMesh(skin),hand=articulatedGlove();
+    hand.scale.setScalar(1.17);
     body.scale.setScalar(skin==='karambit'?.66:.76);
-    group.add(body,hand,support,hand.userData.sleeve,support.userData.sleeve);
-    group.userData={fit:knifeFit,body,support,hand,skin};return group;
+    group.add(body,hand,hand.userData.sleeve);
+    group.userData={fit:knifeFit,body,hand,skin};return group;
   }
   const group=new T.Group(),body=blasterMesh(type),fit=gunFit[type];
   const sniper=type==='sniper';
@@ -204,18 +196,10 @@ export function gunModel(type,skin='karambit') {
 
 const loweredHand=new T.Vector3(-.29,-.46,-.37);
 export function poseHeldSleeves(weapon,key,weight=0,freeHand=0) {
-  const {strong,support,hand,supportMount}=weapon.userData;
   if(key==='knife'){
-    const {walkShift=0,guard=0}=weapon.userData;
-    // Off hand stays in camera space as the right wrist turns. Knuckles and
-    // then the cuff pass below the frame when the player raises an item to look.
-    support.position.set(-.147-walkShift*.65-weight*.041,-.162+walkShift*.35-weight*.088-guard*.025,-.408+weight*.012);
-    weapon.worldToLocal(support.position);
-    offAngles.set(weight*.10,guard*.13,weight*.14);
-    offRotation.setFromEuler(offAngles).premultiply(openLeftFrame);
-    weapon.getWorldQuaternion(handRotation);support.quaternion.copy(handRotation.invert()).multiply(offRotation);
-    placeSleeve(weapon,hand,knifeShoulder);placeSleeve(weapon,support,offShoulder);return;
+    placeSleeve(weapon,weapon.userData.hand,knifeShoulder);return;
   }
+  const {strong,support,supportMount}=weapon.userData;
   if(freeHand){
     weapon.worldToLocal(gripTarget.copy(loweredHand));
     wristAxis.copy(support.userData.wrist).applyQuaternion(support.quaternion).add(support.position);
@@ -240,8 +224,7 @@ export function poseHeldKnife(rig,weapon,skin,drawAge,inspectAge,cut,side,step=0
   if(striking)inspectAge=Infinity;
   if(striking||Number.isFinite(inspectAge))drawAge=Infinity;
   const slash=knifePose(cut,side,skin),draw=knifeDrawPose(skin,drawAge);
-  const walkShift=Math.sin(step)*.006*walk,guard=Math.abs(slash.x)*2.8;
-  weapon.userData.walkShift=walkShift;weapon.userData.guard=guard;
+  const walkShift=Math.sin(step)*.006*walk;
   rig.position.set((butterfly?.123:.014)+draw.x+slash.x*.88+walkShift-swayX,
     (butterfly?-.095:-.080)+draw.y+slash.y*.84-Math.abs(Math.cos(step))*.005*walk,
     (butterfly?-.435:-.453)+draw.z+slash.z*.80);
