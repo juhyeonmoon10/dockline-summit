@@ -6,7 +6,8 @@ import { approachAim, gunPresentation, canAim, weaponFov, reloadPose, shotKickRe
 import { makeYard, sky, Parts, glowMaterial } from './yard-art.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { PelletRenderer } from './pellet-render.js';
-import { clipBarrelOrigin,visibleTraceEnd,exitsForward,muzzleDeparture,flightSlices,singleShotSpan,SHOT_TRAIL_LIFE } from './shot-path.js';
+import { clipBarrelOrigin,visibleTraceEnd,exitsForward,muzzleDeparture,flightSlices,singleShotSpan,pelletSpan,SHOT_TRAIL_LIFE } from './shot-path.js';
+import { WorldImpacts } from './world-impacts.js';
 import { knifeMesh,knifeFit,knifePose,animateKnife } from './knife.js';
 import { normalizeKnifeSkin } from './knife-types.js';
 import { inspectionPose,applyInspection,ringFlourish } from './view-inspect.js';
@@ -34,6 +35,7 @@ const reverseRightFrame=new T.Quaternion().setFromEuler(new T.Euler(1.90,1.02,2.
 const vertical=new T.Vector3(0,1,0);
 const teamColors=['#168bc9','#ed7040'];
 const teamLights=[0x66dcff,0xff975e];
+const tracerColors={pistol:0xffdbab,smg:0xffcc8e,rifle:0xffe2a9,burst:0xffe4b5,lmg:0xffca85,marksman:0xffeecf,sniper:0xfff5e3};
 
 // Grip points lie on the near face of the actual detachable mesh in its bind pose.
 // Apex and feed are fractions of the reload; release and seating are the shared Foley contacts.
@@ -47,92 +49,6 @@ const magazineHandling={
   pistol:  {grip:[-.0203,-.11646,.00752],  apex:.352,feed:.52,drop:.156,side:-.026,back:.023,pitch:-.07,turn:.13,wrist:.53,roll:.51,center:-.068},
   sniper:  {drop:.15, side:-.083, turn:.20, roll:.39, center:.042},
 };
-
-// Only place decals on the rendered area of a plane. The map's enclosing hit boundary
-// extends vertically above the physical arena wall; shots reaching that air leave no mark.
-function surfaceNormal(map,e,dir,out) {
-  const x=e.ex,y=e.ey,z=e.ez,margin=.105,tol=.035;
-  let best=0;
-  const face=(distance,nx,ny,nz)=>{
-    if(distance>tol)return;
-    const facing=-(dir.x*nx+dir.y*ny+dir.z*nz);
-    if(facing>.035 && facing>best){best=facing;out.set(nx,ny,nz);}
-  };
-  face(Math.abs(y),0,1,0);
-  if(y>margin && y<1.20){
-    if(Math.abs(z)<map.depth/2-margin)face(Math.abs(Math.abs(x)-map.width/2),-Math.sign(x),0,0);
-    if(Math.abs(x)<map.width/2-margin)face(Math.abs(Math.abs(z)-map.depth/2),0,0,-Math.sign(z));
-  }
-  for(const b of map.boxes){
-    const dx=x-b.x,dz=z-b.z,base=b.base||0;
-    const inX=Math.abs(dx)<b.w/2-margin,inZ=Math.abs(dz)<b.d/2-margin;
-    if(inX&&inZ){
-      face(Math.abs(y-b.h),0,1,0);
-      if(base>0)face(Math.abs(y-base),0,-1,0);
-    }
-    if(y>base+margin&&y<b.h-margin){
-      if(inZ)face(Math.abs(Math.abs(dx)-b.w/2),Math.sign(dx),0,0);
-      if(inX)face(Math.abs(Math.abs(dz)-b.d/2),0,0,Math.sign(dz));
-    }
-  }
-  for(const r of map.ramps||[]){
-    const dx=x-r.x,dz=z-r.z,alongX=r.axis==='x',along=alongX?dx:dz,across=alongX?dz:dx;
-    const length=alongX?r.w:r.d,width=alongX?r.d:r.w;
-    const slope=r.h*r.sign/length,top=r.h*.5+along*slope;
-    if(Math.abs(along)<length/2-margin&&Math.abs(across)<width/2-margin){
-      const inv=1/Math.hypot(slope,1);
-      face(Math.abs(y-top)*inv,alongX?-slope*inv:0,inv,alongX?0:-slope*inv);
-    }
-    if(y>margin&&y<top-margin){
-      if(Math.abs(along)<length/2-margin)face(Math.abs(Math.abs(across)-width/2),alongX?0:Math.sign(dx),0,alongX?Math.sign(dz):0);
-      if(Math.abs(across)<width/2-margin)face(Math.abs(along-r.sign*length/2),alongX?r.sign:0,0,alongX?0:r.sign);
-    }
-  }
-  return best>0;
-}
-
-class ImpactMarks {
-  constructor(scene) {
-    this.capacity=128;this.cursor=0;this.time=new Float32Array(this.capacity);
-    const geo=new T.PlaneGeometry(.18,.18);
-    this.opacity=new T.InstancedBufferAttribute(new Float32Array(this.capacity),1).setUsage(T.DynamicDrawUsage);
-    geo.setAttribute('markOpacity',this.opacity);
-    const material=new T.ShaderMaterial({
-      transparent:true,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2,
-      vertexShader:'attribute float markOpacity;varying vec2 point;varying float opacity;void main(){point=uv*2.-1.;opacity=markOpacity;gl_Position=projectionMatrix*modelViewMatrix*instanceMatrix*vec4(position,1.);}',
-      fragmentShader:`varying vec2 point;varying float opacity;
-        void main(){float angle=atan(point.y,point.x);float r=length(point)*(1.+.095*sin(5.*angle)+.045*cos(9.*angle));
-          float alpha=(1.-smoothstep(.46,.9,r))*opacity;if(alpha<.02)discard;
-          vec3 color=mix(vec3(.030,.049,.066),vec3(.275,.292,.294),smoothstep(.33,.55,r));
-          gl_FragColor=vec4(color,alpha);
-          #include <colorspace_fragment>
-        }`
-    });
-    this.mesh=new T.InstancedMesh(geo,material,this.capacity);this.mesh.instanceMatrix.setUsage(T.DynamicDrawUsage);
-    this.mesh.frustumCulled=false;this.mesh.visible=false;this.mesh.renderOrder=1;
-    this.normal=new T.Vector3();this.forward=new T.Vector3(0,0,1);this.stamp=new T.Object3D();scene.add(this.mesh);
-  }
-  add(map,e,dir) {
-    if(!surfaceNormal(map,e,dir,this.normal))return false;
-    const i=this.cursor++%this.capacity,o=this.stamp;
-    o.position.set(e.ex,e.ey,e.ez).addScaledVector(this.normal,.006);
-    o.quaternion.setFromUnitVectors(this.forward,this.normal);o.rotateZ(e.seq*2.4);
-    const size=e.weapon==='shotgun'?.40:e.weapon==='sniper'?1.21:e.weapon==='pistol'?.82:1;
-    o.scale.set(size,size*.9,1);o.updateMatrix();this.mesh.setMatrixAt(i,o.matrix);
-    this.mesh.instanceMatrix.needsUpdate=true;this.time[i]=e.weapon==='shotgun'?3:7;this.mesh.visible=true;return true;
-  }
-  step(dt) {
-    if(!this.mesh.visible)return;
-    let active=false,changed=false;
-    for(let i=0;i<this.capacity;i++)if(this.time[i]>0){
-      this.time[i]=Math.max(0,this.time[i]-dt);active||=this.time[i]>0;
-      const alpha=Math.min(.80,this.time[i]*.72);
-      if(Math.abs(this.opacity.array[i]-alpha)>.001||!this.time[i]){this.opacity.setX(i,alpha);changed=true;}
-    }
-    if(changed)this.opacity.needsUpdate=true;this.mesh.visible=active;
-  }
-  clear(){this.time.fill(0);this.opacity.array.fill(0);this.opacity.needsUpdate=true;this.mesh.visible=false;}
-}
 
 // Sleeves, articulated gloves and suits use a handful of baked vertex-colour meshes.
 const orb=new T.SphereGeometry(.5,12,8);
@@ -552,11 +468,16 @@ export class ArenaRenderer {
     this.lookSwayX=0;this.lookSwayY=0;this.lastYaw=null;this.lastPitch=null;this.equip=0;this.active=null;
     this.tracers=[];this.shotsThisFrame=[];this.viewMuzzle=new T.Vector3();this.actorMuzzle=new T.Vector3();
     this.viewForward=new T.Vector3();this.actorForward=new T.Vector3();this.actorRotation=new T.Quaternion();
-    this.spark=[];this.marks=new ImpactMarks(this.scene);this.res={w:0,h:0};this.performanceScale=1;
+    this.spark=[];this.impacts=new WorldImpacts(this.scene,id=>this.flashPlate(id));this.res={w:0,h:0};this.performanceScale=1;
     this.shotTrails=new PelletRenderer(this.scene);
-    const beamGeo=new T.CylinderGeometry(1,1,1,5,1,true);
+    const beamGeo=new T.CylinderGeometry(1,.39,1,6,1,true),tints=[];
+    for(let i=0;i<beamGeo.attributes.position.count;i++){
+      const head=beamGeo.attributes.position.getY(i)+.5;
+      tints.push(.46+.54*head,.34+.66*head,.26+.74*head);
+    }
+    beamGeo.setAttribute('color',new T.Float32BufferAttribute(tints,3));
     for(let i=0;i<16;i++){
-      const mesh=new T.Mesh(beamGeo,new T.MeshBasicMaterial({color:0xffdd91,transparent:true,depthWrite:false}));
+      const mesh=new T.Mesh(beamGeo,new T.MeshBasicMaterial({color:0xffdd91,vertexColors:true,transparent:true,depthWrite:false}));
       const flightMesh=mesh.clone();mesh.visible=flightMesh.visible=false;
       this.scene.add(mesh,flightMesh);
       this.tracers.push({mesh,flightMesh,ttl:0,start:new T.Vector3(),end:new T.Vector3()});
@@ -579,7 +500,6 @@ export class ArenaRenderer {
     for(const entry of this.yards.values())entry.group.visible=entry===yard;
     this.map=map;this.ring=yard.ring;
     this.gl.shadowMap.needsUpdate=true;
-    this.marks?.clear();
     if(this.shotsThisFrame)this.clearShotEffects();
     this.lastFocus=null;this.lastSeq=0;this.lastElapsed=-1;
   }
@@ -668,6 +588,13 @@ export class ArenaRenderer {
     p.velocity.set(vx,vy,vz);p.ttl=p.life=life;p.size=size;
     p.mesh.scale.setScalar(size);p.mesh.visible=true;
   }
+  flashPlate(id){
+    const plate=this.plates.get(id);
+    if(!plate)return;
+    plate.userData.hit=.18;
+    const face=plate.userData.face;
+    if(face){face.rotation.x=.081;face.material.emissive.setRGB(.342,.164,.038);}
+  }
   resetShot() {
     this.shotAge=Infinity;this.shotWeapon=null;this.shotStrength=0;this.shotRun=0;this.kickSide=1;
     this.recoil=0;this.flashTime=0;this.scopeActive=false;
@@ -681,20 +608,20 @@ export class ArenaRenderer {
       const actor=game.players.find(player=>player.id===id);swing.age+=dt;
       if(!actor?.alive||actor.active!=='knife'||swing.age>=.55)this.meleeSwings.delete(id);
     }
-    this.shotTrails.step(dt);
+    this.shotTrails.step(shotDt);this.impacts.step(shotDt);
     this.shotAge+=shotDt;this.recoil=this.shotStrength*shotKickResponse(this.shotAge,this.shotWeapon);
     this.flashTime=Math.max(0,this.flashTime-shotDt);
     if(this.flashTime>0 && this.shotWeapon){
       this.flash.scale.setScalar(.91*gunFit[this.shotWeapon].flash*this.flashTime/LOCAL_IGNITION_LIFE);
     }
-    if(game.seq<this.lastSeq || game.elapsed<this.lastElapsed){this.lastSeq=0;this.marks.clear();this.clearShotEffects();this.meleeAge=.55;this.meleeSwings.clear();this.resetShot();}
+    if(game.seq<this.lastSeq || game.elapsed<this.lastElapsed){this.lastSeq=0;this.clearShotEffects();this.meleeAge=.55;this.meleeSwings.clear();this.resetShot();}
     this.lastElapsed=game.elapsed;
     const events=game.events||[];
     for(let i=0;i<events.length;i++){
       const e=events[i];
       if(e.seq<=this.lastSeq)continue;
       this.lastSeq=e.seq;
-      if(e.type==='round'){this.marks.clear();this.clearShotEffects();this.meleeAge=.55;this.meleeSwings.clear();this.resetShot();}
+      if(e.type==='round'){this.clearShotEffects();this.meleeAge=.55;this.meleeSwings.clear();this.resetShot();}
       if(e.type==='melee'){
         const actor=game.players.find(player=>player.id===e.actor);
         if(actor?.alive&&actor.active==='knife'){
@@ -705,8 +632,8 @@ export class ArenaRenderer {
       if(e.type==='meleeImpact'&&Number.isFinite(e.ex)){
         for(let k=0;k<3;k++)this.burst(e.ex,e.ey,e.ez,e.target?0xf4dfb5:0xffc56a,.10+k*.022,.035+k*.009,(k-1)*.65,.3+k*.2,.10*(k-1));
       }
-      if(e.type==='hit'&&this.plates.has(e.target))this.plates.get(e.target).userData.hit=.18;
-      if(e.type==='kill'&&e.target!==focus?.id){
+      if(e.type==='hit'&&e.weapon==='knife')this.flashPlate(e.target);
+      if(e.type==='kill'&&e.weapon==='knife'&&e.target!==focus?.id){
         const fallen=game.players.find(p=>p.id===e.target) || game.targets?.find(v=>v.kind==='dummy'&&v.id===e.target);
         if(fallen)for(let k=0;k<7;k++){
           const angle=(k/7)*PI*2+e.seq*.25,dx=Math.cos(angle),dz=Math.sin(angle);
@@ -726,7 +653,6 @@ export class ArenaRenderer {
       const hit=events[i+1]?.type==='hit'&&events[i+1].actor===e.actor?events[i+1]:null;
       this.shotsThisFrame.push({event:e,mine,hit});
     }
-    this.marks.step(dt);
     for(const tracer of this.tracers)if(tracer.ttl>0) {
       tracer.ttl=Math.max(0,tracer.ttl-shotDt);
       if(!tracer.ttl)tracer.mesh.visible=tracer.flightMesh.visible=false;
@@ -740,6 +666,7 @@ export class ArenaRenderer {
   }
   clearShotEffects(){
     this.cases.clear();this.clearRemoteFlashes();this.shotTrails.clear();this.shotsThisFrame.length=0;
+    this.impacts.clear();
     this.flash.visible=false;this.flashTime=0;
     for(const t of this.tracers){t.ttl=0;t.mesh.visible=t.flightMesh.visible=false;}
   }
@@ -747,10 +674,16 @@ export class ArenaRenderer {
   renderShots(game,focus,cam){
     for(const {event:e,mine,hit} of this.shotsThisFrame){
       const actor=game.players.find(p=>p.id===e.actor);
-      const held=mine ? focus.alive&&focus.active===e.weapon : this.remoteMuzzle(e.actor,e.weapon,this.actorMuzzle,this.actorRotation);
+      const held=mine ? focus.alive&&focus.active===e.weapon : actor&&this.remoteMuzzle(e.actor,e.weapon,this.actorMuzzle,this.actorRotation);
       let origin=e,forward=null;
       endpoint.set(e.ex,e.ey,e.ez);
-      if(held&&!e.blocked){
+      if(e.blocked){
+        // The simulation shortened the start against a near wall or target.
+        // There is contact here even though there is no visible flight or flash.
+        this.impacts.schedule(this.map,e,{ex:e.ex,ey:e.ey,ez:e.ez,target:hit?.target||e.pellets?.[0]?.target},e.weapon,e.seq,0);
+        continue;
+      }
+      if(held){
         const eye=mine?cam.position:{x:actor.x,y:actor.y+eyeHeight(actor),z:actor.z};
         const tip=mine?this.viewMuzzle:this.actorMuzzle;
         const clipped=clipBarrelOrigin(eye,tip,this.map);
@@ -758,7 +691,7 @@ export class ArenaRenderer {
         if(clipped.blocked){
           if(mine){this.flash.visible=false;this.flashTime=0;}
           const {x,y,z}=clipped.impact;
-          this.burst(x,y,z,0xffe5af,.092,.07);
+          this.impacts.schedule(this.map,eye,{ex:x,ey:y,ez:z},e.weapon,e.seq,0);
           continue;
         }
         forward=mine?this.viewForward:this.actorForward.copy(forwardAxis).applyQuaternion(this.actorRotation);
@@ -771,32 +704,30 @@ export class ArenaRenderer {
           this.flash.visible=this.flashTime>0;
         }else this.flashRemote(e.actor,e.weapon,e.seq,origin);
       }
-      if(e.weapon==='shotgun'&&!e.blocked){
+      if(e.weapon==='shotgun'){
         const trails=this.shotTrails.add(e,mine,origin,this.map,forward);
         trails.forEach((trail,index)=>{
-          direction.set(trail.dx,trail.dy,trail.dz).normalize();
-          trail.contact=!!trail.target||this.marks.add(this.map,{...trail,weapon:'shotgun',seq:e.seq*10+index},direction);
+          this.impacts.schedule(this.map,trail.departure||origin,trail,e.weapon,e.seq*10+index,pelletSpan(trail).arrivalTime);
         });
-        this.traceIndex++;continue;
+        continue;
       }
-      direction.set(e.ex-e.x,e.ey-e.y,e.ez-e.z).normalize();
-      const landed=!hit&&this.marks.add(this.map,e,direction);
-      if(!e.blocked){
-        const end=visibleTraceEnd(origin,endpoint,this.map);
-        const t=this.tracers[this.traceIndex++%this.tracers.length];
-        t.start.copy(origin);t.end.copy(end);t.length=t.start.distanceTo(t.end);
-        t.departure=muzzleDeparture(origin,end,forward,this.map);
-        t.weapon=e.weapon;t.ttl=t.length>.012&&exitsForward(origin,end,forward)?SHOT_TRAIL_LIFE:0;
-        t.mesh.visible=t.flightMesh.visible=false;t.mesh.material.color.setHex(mine?0xffdf9e:0xffad7b);
-      }
-      const target=hit&&game.players.find(p=>p.id===hit.target);
-      if(landed||hit)this.burst(e.ex,e.ey,e.ez,target?teamLights[target.team]:0xffe5af,hit?.14:.092,hit?.16:.085);
+      const end=visibleTraceEnd(origin,endpoint,this.map);
+      const t=this.tracers[this.traceIndex++%this.tracers.length];
+      t.start.copy(origin);t.end.copy(end);t.length=t.start.distanceTo(t.end);
+      t.departure=muzzleDeparture(origin,end,forward,this.map);
+      t.weapon=e.weapon;t.ttl=t.length>.012&&exitsForward(origin,end,forward)?SHOT_TRAIL_LIFE:0;
+      t.mesh.visible=t.flightMesh.visible=false;t.mesh.material.color.setHex(tracerColors[e.weapon]||0xffdf9e);
+      t.own=mine;
+      const pathLength=t.departure?.length??t.length;
+      this.impacts.schedule(this.map,t.departure||origin,{ex:end.x,ey:end.y,ez:end.z,target:end===endpoint?hit?.target:null},
+        e.weapon,e.seq,singleShotSpan(pathLength,0,e.weapon).arrivalTime);
     }
     const pixel=2*Math.tan(cam.fov*PI/360)/this.res.h;
     for(const t of this.tracers){
       if(t.ttl<=0)continue;
       const span=singleShotSpan(t.departure?.length??t.length,SHOT_TRAIL_LIFE-t.ttl,t.weapon);
       t.mesh.visible=t.flightMesh.visible=false;
+      if(span.alpha<=.005)continue;
       flightSlices(t.length,t.departure,span.tail,span.head,(exit,a,b)=>{
         const mesh=exit||!t.departure?t.mesh:t.flightMesh;
         const from=exit||!t.departure?t.start:t.departure,to=exit?t.departure:t.end;
@@ -804,12 +735,13 @@ export class ArenaRenderer {
         mesh.position.copy(beamStart).lerp(beamEnd,.5);
         const length=direction.subVectors(beamEnd,beamStart).length();
         if(length<.0001)return;
-        const radius=Math.max(t.weapon==='sniper'?.008:.005,cam.position.distanceTo(mesh.position)*pixel*.55);
+        const radius=span.width*Math.max(.0037,cam.position.distanceTo(mesh.position)*pixel*.64);
         mesh.scale.set(radius,length,radius);mesh.quaternion.setFromUnitVectors(vertical,direction.divideScalar(length));
         mesh.visible=true;
       });
-      t.mesh.material.opacity=span.alpha;
+      t.mesh.material.opacity=span.alpha*(t.own?1:.82);
     }
+    this.impacts.draw();
   }
   updateModels(players,focusId,dt) {
     const ids=new Set();
@@ -863,7 +795,6 @@ export class ArenaRenderer {
   lobby(t) {
     this.meleeAge=.55;this.meleeSwings.clear();
     this.clearShotEffects();
-    if(this.marks.mesh.visible)this.marks.clear();
     for(const plate of this.plates.values())plate.visible=false;
     for(const a of this.models.values()){a.group.visible=false;a.shadow.visible=false;a.wasAlive=false;}
     for(const e of [...this.tracers,...this.spark]){e.ttl=0;e.mesh.visible=false;}

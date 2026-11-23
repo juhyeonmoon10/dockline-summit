@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as T from '../dist/assets/three.module.min.js';
 import {ArenaRenderer} from '../dist/render.js';
 import {PelletRenderer} from '../dist/pellet-render.js';
+import {WorldImpacts} from '../dist/world-impacts.js';
 import {flightSlices,muzzleDeparture,exitsForward,SHOT_TRAIL_LIFE} from '../dist/shot-path.js';
 import {shotKickResponse} from '../dist/weapon-view.js';
 
@@ -17,7 +18,7 @@ test('a visible shot leaves the rendered cap along the bore before recoil, even 
     const tracer={mesh,flightMesh:mesh.clone(),ttl:0,start:v(0,0,0),end:v(0,0,0)};
     const renderer=Object.assign(Object.create(ArenaRenderer.prototype),{
       map,flash:new T.Group(),sightFlare:new T.Group(),flashTime:.016,viewMuzzle:cap,viewForward:bore,res:{h:600},tracers:[tracer],traceIndex:0,
-      marks:{add:()=>false},shotTrails:new PelletRenderer(scene),
+      impacts:new WorldImpacts(scene,()=>{}),shotTrails:new PelletRenderer(scene),
     });
     const camera=new T.PerspectiveCamera();camera.position.set(0,1.55,0);camera.updateMatrixWorld();
     const player={id:'self',active:weapon,alive:true};

@@ -4,6 +4,8 @@ import {readFileSync} from 'node:fs';
 import {LiteRenderer} from '../dist/lite.js';
 import {decodeLiteOperator,liteOperator} from '../dist/lite-operator.js';
 import {fieldViews} from '../dist/assets/field-frames.js';
+import {ImpactParticlePool} from '../dist/surface-fx.js';
+import {singleShotSpan} from '../dist/shot-path.js';
 
 test('every carried gun emits at the centre of a face on its posed barrel',()=>{
   const team=liteOperator(0),previous=team.model;
@@ -57,8 +59,37 @@ test('Lite releases from the resting cap, follows its pictured axis and keeps th
     const behind={...path,ex:0,ey:1.5,ez:-.16};
     scene.trails=[];scene.pelletIndex=0;scene.shotImpacts=[];
     scene.addShot(behind,focus,cam,muzzle,Boolean(aim),3,pose);
-    assert.equal(scene.shotImpacts.length,1);assert.equal(scene.trails.length+scene.pelletIndex,0);
+    assert.equal(scene.shotImpacts.length,0,'no wall or target at this point in empty space');
+    assert.equal(scene.trails.length+scene.pelletIndex,0);
   }
+});
+
+test('Lite fires the contact once at the clipped wall when a frame jumps beyond trail expiry',()=>{
+  const scene=Object.assign(Object.create(LiteRenderer.prototype),{
+    map:{width:40,depth:40,ramps:[],boxes:[{x:0,z:-5,w:3,d:1,h:3,kind:'crate'}]},
+    shotImpacts:[],trails:[],dummyHits:new Map(),remoteMuzzles:new Map(),remoteFlashes:new Map(),
+    surfaceMarks:[{until:0}],nextMark:0,surfaceParticles:new ImpactParticlePool(16),
+  });
+  const shot={actor:'remote',seq:12,weapon:'pistol',x:0,y:1.2,z:0,ex:0,ey:1.2,ez:-9};
+  scene.addShot(shot,{id:'local'},null,null,false,2,null,'target-behind-crate');
+  assert.equal(scene.shotImpacts.length,1);const contact=scene.shotImpacts[0];
+  assert.equal(contact.hit.kind,'wood');assert.equal(contact.end.target,null);
+  assert.equal(contact.due,2+singleShotSpan(4.5,0,'pistol').arrivalTime);
+  scene.releaseImpacts(contact.due-.001);assert.equal(scene.nextMark,0);
+  scene.releaseImpacts(2.16);assert.equal(scene.nextMark,1);assert.ok(scene.surfaceParticles.particles.some(p=>p.active));
+  scene.releaseImpacts(2.25);assert.equal(scene.nextMark,1);assert.equal(scene.shotImpacts.length,0);
+  assert.equal(scene.dummyHits.size,0);
+});
+
+test('Lite pairs a target contact with the confirmed shot and flashes the dummy on arrival',()=>{
+  const scene=Object.assign(Object.create(LiteRenderer.prototype),{
+    map:{width:35,depth:42,ramps:[],boxes:[]},surfaceParticles:new ImpactParticlePool(12),
+    shotImpacts:[],trails:[],dummyHits:new Map(),remoteMuzzles:new Map(),remoteFlashes:new Map(),surfaceMarks:[],nextMark:0,
+  });
+  const shot={actor:'self',seq:1,weapon:'sniper',x:0,y:1.4,z:0,ex:0,ey:1.4,ez:-9};
+  scene.addShot(shot,{id:'self',active:'sniper'},null,null,true,1,null,'dummy');
+  const due=scene.shotImpacts[0].due;scene.releaseImpacts(due-.001);assert.equal(scene.dummyHits.size,0);
+  scene.releaseImpacts(due);assert.ok(scene.dummyHits.get('dummy')>due);assert.equal(scene.nextMark,0);
 });
 
 test('calibrated first-person cap pixels and their depth survive camera pitch and aspect',()=>{

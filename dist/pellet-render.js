@@ -19,7 +19,7 @@ export class PelletRenderer {
           float x=abs(ink.x),y=ink.y,alpha,core;
           if(ink.w>.5){
             float v=abs(y*2.-1.);
-            alpha=max(exp(-x*x*48.-v*v*5.),exp(-v*v*48.-x*x*5.));
+            alpha=max(exp(-x*x*8.-v*v*23.),.40*exp(-x*x*33.-v*v*7.));
             core=exp(-(x*x+v*v)*15.);
           }else{
             alpha=pow(max(0.,1.-x),.65)*(.65+.35*smoothstep(0.,.23,y))*(1.-smoothstep(.93,1.,y));
@@ -70,7 +70,7 @@ export class PelletRenderer {
     this.right.setFromMatrixColumn(camera.matrixWorld,0);this.up.setFromMatrixColumn(camera.matrixWorld,1);
     for(const trail of this.trails){
       if(trail.length<.04)continue;
-      const {tail,head,alpha,contactAlpha}=pelletSpan(trail);
+      const span=pelletSpan(trail),{tail,head,alpha,contactAlpha}=span;
       this.end.set(trail.ex,trail.ey,trail.ez);
       const departure=trail.departure,join=departure?departure.exit/departure.length:0;
       if(trail.showFlight)flightSlices(trail.length,departure,tail,head,(exit,a,b)=>{
@@ -79,19 +79,23 @@ export class PelletRenderer {
         this.view.copy(camera.position).sub(this.a);
         this.side.copy(this.b).sub(this.a).cross(this.view);
         if(this.side.lengthSq()<1e-8)this.side.copy(this.right);else this.side.normalize();
-        const width=Math.min(.045,Math.max(.004,this.view.length()*scale*1.20));
+        const width=Math.min(.045,Math.max(.004,this.view.length()*scale*1.20))*span.width;
         const split=Math.min(1,Math.max(0,(join-tail)/(head-tail)));
         this.quad(this.a,this.b,this.side,width,alpha*(trail.own?.84:.60),false,exit?0:split,exit?split:1);
       });
       // Contact follows the moving streak and never covers the target with a cloud.
       if(contactAlpha>0&&trail.contact){
         this.a.set(trail.ex,trail.ey,trail.ez);
-        const distance=this.a.distanceTo(camera.position),size=Math.min(.095,Math.max(.028,distance*scale*2.2));
+        const distance=this.a.distanceTo(camera.position),size=Math.min(.068,Math.max(.015,distance*scale*1.7))*span.width;
         this.view.copy(camera.position).sub(this.a).normalize();
         this.a.addScaledVector(this.view,.018);
-        this.b.copy(this.a).addScaledVector(this.up,size);
-        this.a.addScaledVector(this.up,-size);
-        this.quad(this.a,this.b,this.right,size,contactAlpha*.85,true);
+        const angle=(trail.pelletRank??0)*1.94;
+        const sin=Math.sin(angle),cos=Math.cos(angle);
+        this.side.copy(this.right).multiplyScalar(cos).addScaledVector(this.up,sin);
+        this.view.copy(this.up).multiplyScalar(cos).addScaledVector(this.right,-sin);
+        this.b.copy(this.a).addScaledVector(this.view,size);
+        this.a.addScaledVector(this.view,-size);
+        this.quad(this.a,this.b,this.side,size,contactAlpha,true);
       }
     }
     this.position.needsUpdate=true;this.shape.needsUpdate=true;

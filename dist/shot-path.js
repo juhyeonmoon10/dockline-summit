@@ -55,28 +55,58 @@ export function flightSlices(directLength,departure,tail,head,emit){
   if(b>exit)emit(false,Math.max(0,(a-exit)/rest),Math.min(1,(b-exit)/rest));
 }
 
+// Length is in arena metres, width is relative to a standard screen stroke.
+// Each profile is purely visual; the host has already resolved the impact.
+const streaks={
+  __proto__:null,
+  pistol:   {speed:600,length:.85, width:.78,alpha:.58,fade:.016},
+  smg:      {speed:760,length:1.10,width:.86,alpha:.62,fade:.016},
+  burst:    {speed:790,length:1.45,width:.94,alpha:.72,fade:.020},
+  rifle:    {speed:820,length:1.70,width:1,  alpha:.78,fade:.022},
+  lmg:      {speed:750,length:1.85,width:1.10,alpha:.79,fade:.024},
+  marksman: {speed:920,length:2.50,width:.91,alpha:.84,fade:.026},
+  sniper:   {speed:1050,length:3.90,width:.82,alpha:.94,fade:.032},
+};
+
+function streakSpan(length,age,arrivalTime,visibleLength,launchLength,fadeTime,alpha,width){
+  if(length<=0)return {head:1,tail:1,alpha:0,width,arrivalTime:0,arrived:true};
+  const progress=clamp(age/arrivalTime,0,1),arrived=age>=arrivalTime;
+  const fade=clamp((age-arrivalTime)/fadeTime,0,1);
+  const launch=Math.min(launchLength,visibleLength*.78)/length;
+  const head=arrived?1:launch+(1-launch)*progress;
+  const tail=Math.max(0,head-visibleLength/length*(1-fade));
+  return {head,tail,alpha:alpha*(1-.18*progress)*(1-fade),width,arrivalTime,arrived};
+}
+
 export function singleShotSpan(length,age,weapon){
-  const speed=weapon==='sniper' ? 980 : 740;
-  const visible=weapon==='sniper' ? 6 : 3.8;
-  const flight=clamp(length/speed,.030,.075);
-  const head=Math.min(1,.62/Math.max(length,.62)+age/flight);
-  const fade=clamp((age-flight)/(SHOT_TRAIL_LIFE-flight),0,1);
-  const tail=Math.max(0,head-visible/Math.max(length,.01)*(1-fade));
-  return {head,tail,alpha:(1-fade)*(.92-.30*Math.min(1,age/flight))};
+  const style=streaks[weapon]??streaks.rifle;
+  const arrivalTime=clamp(length/style.speed,.018,.070);
+  const visibleLength=Math.min(style.length,length*.24);
+  return streakSpan(length,age,arrivalTime,visibleLength,.55,style.fade,style.alpha,style.width);
 }
 export function pelletTrails(event,own,ads=false,origin=event){
   const pellets=event.pellets?.length?event.pellets:[event];
   const {x,y,z}=origin;
-  return pellets.slice(0,10).filter(p=>[p.ex,p.ey,p.ez].every(Number.isFinite)).map(p=>{
+  const trails=[];
+  for(let index=0;index<Math.min(10,pellets.length);index++){
+    const p=pellets[index];
+    if(!p||![p.ex,p.ey,p.ez].every(Number.isFinite))continue;
     const dx=p.ex-x,dy=p.ey-y,dz=p.ez-z,length=Math.hypot(dx,dy,dz);
-    return {x,y,z,dx,dy,dz,length,ex:p.ex,ey:p.ey,ez:p.ez,target:p.target||null,own,age:0};
-  });
+    // A shell has two strong strands and eight lighter ones. Rotate their
+    // positions by shot sequence so all clients render the same recorded fan.
+    const pelletRank=((event.seq??0)+7*index)%10;
+    trails.push({x,y,z,dx,dy,dz,length,ex:p.ex,ey:p.ey,ez:p.ez,target:p.target||null,own,age:0,pelletRank});
+  }
+  return trails;
 }
 export function pelletSpan(trail){
   const length=trail.departure?.length??trail.length;
-  const flight=clamp(length/400,.035,.075);
-  const head=Math.min(1,Math.min(.20,.7/(length||1))+trail.age/flight);
-  const finish=clamp((trail.age-flight)/(PELLET_LIFE-flight),0,1);
-  const span=Math.min(.62,3.6/(length||1))*(1-finish*.85);
-  return {head,tail:Math.max(0,head-span),alpha:Math.pow(Math.max(0,1-trail.age/PELLET_LIFE),.8),contactAlpha:head>=1?Math.max(0,1-(trail.age-flight)/.065):0};
+  const rank=trail.pelletRank??0,weight=1-rank/9;
+  const arrivalTime=clamp(length/560,.025,.069)*(1+.045*(1-weight));
+  const visibleLength=Math.min(.54+1.20*weight,length*(.11+.12*weight));
+  const alpha=rank<2?.92:.38+.25*weight;
+  const span=streakSpan(length,trail.age,arrivalTime,visibleLength,.40+.18*weight,.020,alpha,.68+.40*weight);
+  const contactAge=trail.age-span.arrivalTime;
+  span.contactAlpha=span.arrived&&length>0?(.48+.45*weight)*clamp(1-contactAge/.045,0,1):0;
+  return span;
 }
