@@ -14,7 +14,8 @@ function renderer(width,height,aim){
 }
 
 test('reflex sprites retain the projected opening through all five raise poses',()=>{
-  assert.equal(ids.length,7);assert.equal(fieldViews.sniper.glass,undefined);
+  assert.deepEqual(ids.sort(),['burst','lmg','marksman','pistol','rifle','smg']);
+  for(const ironOrScope of ['shotgun','revolver','sniper'])assert.equal(fieldViews[ironOrScope].glass,undefined);
   for(const active of ids){
     const entry=fieldViews[active],p={active,speed:0,reload:0};
     for(const [width,height] of [[425,239],[320,240],[455,185]]){
@@ -44,10 +45,43 @@ test('the software red dot is drawn at the camera centre after clipping to the g
   const c=new Proxy({canvas:{width:425,height:239},createRadialGradient(...args){
     calls.push(['gradient',...args]);return {addColorStop(){}};
   }},{get(target,key){return key in target?target[key]:(...args)=>calls.push([key,...args]);}});
-  const p={active:'shotgun',speed:4,reload:0},pose=scene.gunPose(p,2);
+  const p={active:'rifle',speed:4,reload:0},pose=scene.gunPose(p,2);
   drawReflexDot(c,pose,768);
   assert.equal(calls.filter(([kind])=>kind==='lineTo').length,REFLEX_APERTURE.length-1);
   assert.ok(calls.findIndex(([kind])=>kind==='clip')<calls.findIndex(([kind])=>kind==='setTransform'));
   const [,x,y,,x2,y2]=calls.find(([kind])=>kind==='gradient');
   assert.deepEqual([x,y,x2,y2],[212.5,119.5,212.5,119.5]);
+});
+
+test('iron sights use their own still, fire and reload tiles throughout a complete cycle',()=>{
+  for(const active of ['shotgun','revolver']){
+    const entry=fieldViews[active],p={active,speed:0,reload:0,ammo:0,reserve:1};
+    const scene=renderer(425,239,0);
+    scene.stillAtlases[active]=sheet;scene.motionAtlas[active]=sheet;
+    for(const [i,aim] of entry.aimStops.entries()){
+      scene.aim=aim;
+      const pose=scene.gunPose(p,0);
+      assert.equal(pose.uv,entry.muzzles[i]);assert.equal(pose.glass,undefined);
+      const compact=active==='shotgun'&&i>0&&i<entry.aimStops.length-1;
+      assert.equal(pose.sw,compact?384:640);
+      assert.equal(pose.sx,active==='revolver'?640*i:compact?(i-1)*384:i===0?0:640);
+    }
+    scene.shotWeapon=active;
+    for(const aimed of [false,true]){
+      scene.aim=Number(aimed);
+      for(const [i,age] of entry.shotTimes.entries()){
+        scene.shotAge=age||.00001;
+        assert.deepEqual(scene.gunPose(p,1).uv,entry.poses[aimed?'fireADS':'fire'][i].slice(1));
+      }
+    }
+    p.reloadDuration=2;
+    for(const [i,t] of entry.reloadTimes.entries()){
+      p.reload=Math.max(.00001,(1-t)*p.reloadDuration);
+      assert.deepEqual(scene.gunPose(p,2).uv,entry.poses.reload[i].slice(1));
+    }
+    scene.fieldAtlas=scene.stillAtlases[active]=scene.motionAtlas[active]={naturalWidth:0};
+    p.reload=0;p.speed=5;scene.aim=1;scene.recoil=0;
+    const cold=scene.gunPose(p,2);
+    assert.equal(cold.x,212.5);assert.ok(Math.abs(cold.iron.tipY-119.5)<1e-8);
+  }
 });

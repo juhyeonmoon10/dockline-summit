@@ -1,7 +1,8 @@
 import * as T from './assets/three.module.min.js';
 import { clone } from './assets/SkeletonUtils.js';
 import { blasterMesh, gunFit } from './blaster.js';
-import { PRIMARY_WEAPONS } from './balance.js';
+import { PRIMARY_WEAPONS,SECONDARY_WEAPONS } from './balance.js';
+import {poseRevolver,revolverAction} from './revolver.js';
 import { knifeMesh,knifePose,animateCarriedKnife } from './knife.js';
 import { knifeAttackDuration,knifeClipPhase } from './knife-motion.js';
 import { normalizeKnifeSkin } from './knife-types.js';
@@ -51,7 +52,7 @@ export function createOperator(team){
  // Both wardrobe meshes are authored at 1.80 m, facing +Z.
  model.rotation.y=Math.PI;
  const loadout=new T.Group(),loadouts={};loadout.scale.setScalar(.86);group.add(loadout);
- for(const key of [...PRIMARY_WEAPONS,'pistol','knife']){const mesh=key==='knife'?knifeMesh():blasterMesh(key);loadouts[key]=mesh;mesh.visible=false;loadout.add(mesh);}
+ for(const key of [...PRIMARY_WEAPONS,...SECONDARY_WEAPONS,'knife']){const mesh=key==='knife'?knifeMesh():blasterMesh(key);loadouts[key]=mesh;mesh.visible=false;loadout.add(mesh);}
  let hand;const aimArms=[];
  model.traverse(object=>{
    if(!object.isBone)return;
@@ -59,9 +60,9 @@ export function createOperator(team){
    if(name==='Index1R')hand=object;
    if(name==='ShoulderL'||name==='ShoulderR')aimArms.push({bone:object,pose:new T.Quaternion()});
  });
- return {group,model,mixer,actions,loadout,loadouts,hand,aimArms,aimed:false,clip:'Idle_Shoot',active:null};
+ return {group,model,mixer,actions,loadout,loadouts,revolver:revolverAction(loadouts.revolver),hand,aimArms,aimed:false,clip:'Idle_Shoot',active:null};
 }
-export function updateOperator(rig,player,dt,swing){
+export function updateOperator(rig,player,dt,swing,cylinderCycle){
  // Restore the animation pose before mixing the next frame or changing guns.
  if(rig.aimed){for(const arm of rig.aimArms)arm.bone.quaternion.copy(arm.pose);rig.aimed=false;}
  const knifeSkin=normalizeKnifeSkin(player.knifeSkin),cutLength=knifeAttackDuration(knifeSkin);
@@ -112,5 +113,6 @@ export function updateOperator(rig,player,dt,swing){
    rig.knifeSkin=skin;animateCarriedKnife(rig.loadouts.knife,skin,cutting?Infinity:rig.knifeAge,-.055);rig.knifeAge+=dt;
  }
  if(rig.active!==player.active){for(const [key,item] of Object.entries(rig.loadouts))item.visible=key===player.active;rig.active=player.active;}
+ if(player.active==='revolver')poseRevolver(rig.revolver,player,cylinderCycle);
 }
 export function disposeOperator(rig){rig.mixer.stopAllAction();rig.model.traverse(object=>{if(object.isSkinnedMesh)object.skeleton.dispose();});}

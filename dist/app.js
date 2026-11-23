@@ -1,6 +1,6 @@
 import { createRange, stepGame, spawnYaw, clearBufferedFire, TEAM_SIZES } from './sim.js';
 import { ARENAS, getArena } from './arena-map.js';
-import { MAX_HP, WEAPONS, PRIMARY_WEAPONS as primary } from './balance.js';
+import { MAX_HP, WEAPONS, PRIMARY_WEAPONS as primary, isSecondaryWeapon, secondaryWeapon } from './balance.js';
 import { LiteRenderer } from './lite.js';
 import { RoomClient, supportsLAN } from './net.js';
 import { ArenaSound } from './match-audio.js';
@@ -35,6 +35,7 @@ let chosenArena=getArena(read('mapId',ARENAS[0].id));
 const savedSize=read('size',2);
 let size=TEAM_SIZES.includes(savedSize)?savedSize:2, selected=primary.includes(read('weapon','rifle'))?read('weapon','rifle'):'rifle';
 let sensitivity=clamp(Number(read('sensitivity',1))||1,.1,3),quality=read('quality','high'),nickname=String(read('name','')).slice(0,16);
+let selectedSidearm=secondaryWeapon(read('sidearm','pistol'));
 let selectedKnife=normalizeKnifeSkin(read('knifeSkin')), inspectChoice=selected;
 audio.enabled=read('sound',true);
 let canvas=$('arena'),renderer,game=null,client=null,selfId='local',room=null,screen='home',modal='',lan=false;
@@ -57,12 +58,17 @@ function setLoadout(type){
   $('gunDesc').textContent=gun.callsign+' · '+gun.role+' · 탄창 '+gun.mag+'발 · 몸통 '+gun.damage+pellets+' / 머리 '+gun.head+pellets;
 }
 document.querySelectorAll('[data-weapon]').forEach(b=>b.onclick=()=>setLoadout(b.dataset.weapon));
+function setSidearm(type){
+  inspectChoice=selectedSidearm=secondaryWeapon(type);save('sidearm',selectedSidearm);
+  document.querySelectorAll('[data-sidearm]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.sidearm===selectedSidearm)));
+}
+document.querySelectorAll('[data-sidearm]').forEach(b=>b.onclick=()=>setSidearm(b.dataset.sidearm));
 function setKnife(type){
   inspectChoice=selectedKnife=normalizeKnifeSkin(type);save('knifeSkin',selectedKnife);
   document.querySelectorAll('[data-knife]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.knife===selectedKnife)));
 }
 document.querySelectorAll('[data-knife]').forEach(b=>b.onclick=()=>setKnife(b.dataset.knife));
-setKnife(selectedKnife);setLoadout(selected);
+setKnife(selectedKnife);setSidearm(selectedSidearm);setLoadout(selected);
 $('inspectBtn').onclick=async()=>{
   if(modal||screen!=='home')return;
   modal='armory';
@@ -70,8 +76,8 @@ $('inspectBtn').onclick=async()=>{
   try{
     const {openArmoryViewer}=await import('./armory-viewer.js');
     await openArmoryViewer({weapon:inspectChoice,lite:quality==='low'||renderer instanceof LiteRenderer||new URLSearchParams(location.search).has('lite'),
-      equippedPrimary:selected,equippedKnife:selectedKnife,
-      onEquip:id=>{if(primary.includes(id))setLoadout(id);else if(Object.hasOwn(KNIFE_LABELS,id))setKnife(id);},
+      equippedPrimary:selected,equippedSidearm:selectedSidearm,equippedKnife:selectedKnife,
+      onEquip:id=>{if(primary.includes(id))setLoadout(id);else if(isSecondaryWeapon(id))setSidearm(id);else if(Object.hasOwn(KNIFE_LABELS,id))setKnife(id);},
       onClose:close});
   }catch(error){console.error(error);close();notify('무기 자세히 보기를 열 수 없습니다. 다시 시도해 주세요.');}
 };
@@ -115,7 +121,7 @@ function help(){
   const teamRules='<div class="keyrow"><span>팀전 관전 대상 변경</span><kbd>Tab</kbd></div><p>팀전은 3선승입니다. 상대 팀을 전멸시키거나 연장전에 중앙 거점을 3초간 지키세요.</p>';
   const rangeRules='<p>사격장에서는 더미가 쓰러진 자리에 다시 나타납니다. Q로 주무기를 바꿔 가며 연습하세요.</p>';
   const rules=game?.phase==='range'?rangeRules:client?teamRules:rangeRules+teamRules;
-  showPanel('help','조작 안내','<div class="keyrow"><span>이동</span><kbd>W A S D</kbd></div><div class="keyrow"><span>시점 · 공격 · 조준</span><b>마우스 이동 · 좌클릭 · 우클릭</b></div><div class="keyrow"><span>점프 · 이동 중 슬라이딩</span><kbd>Space / C</kbd></div><div class="keyrow"><span>주무기 · 권총 · 칼</span><kbd>1 / 2 / 3</kbd></div><div class="keyrow"><span>손에 든 무기 자세히 보기</span><kbd>F</kbd></div><div class="keyrow"><span>총기 재장전</span><kbd>R</kbd></div><div class="keyrow"><span>주무기 변경 (사격장 · 팀전 준비 시간)</span><kbd>Q</kbd></div><div class="keyrow"><span>메뉴 · 마우스 감도</span><kbd>Esc</kbd></div><p>3번으로 칼을 꺼낸 뒤 좌클릭으로 가까운 대상을 공격하세요.</p>'+rules+'<button class="primary" id="helpDone">확인</button>');
+  showPanel('help','조작 안내','<div class="keyrow"><span>이동</span><kbd>W A S D</kbd></div><div class="keyrow"><span>시점 · 공격 · 조준</span><b>마우스 이동 · 좌클릭 · 우클릭</b></div><div class="keyrow"><span>점프 · 이동 중 슬라이딩</span><kbd>Space / C</kbd></div><div class="keyrow"><span>주무기 · 보조무기 · 칼</span><kbd>1 / 2 / 3</kbd></div><div class="keyrow"><span>손에 든 무기 자세히 보기</span><kbd>F</kbd></div><div class="keyrow"><span>총기 재장전</span><kbd>R</kbd></div><div class="keyrow"><span>주무기 변경 (사격장 · 팀전 준비 시간)</span><kbd>Q</kbd></div><div class="keyrow"><span>메뉴 · 마우스 감도</span><kbd>Esc</kbd></div><p>3번으로 칼을 꺼낸 뒤 좌클릭으로 가까운 대상을 공격하세요.</p>'+rules+'<button class="primary" id="helpDone">확인</button>');
   $('helpDone').onclick=returnFromPanel;
 }
 function sensitivityControls(){
@@ -163,7 +169,7 @@ function enterGame(state,id){
   audio.unlock();firstFrame=true;roundFlash=0;frameTime=performance.now();hudStamp=0;canvas.focus();
 }
 function openRange(){
-  enterGame(createRange({name:nickname||'나',weapon:selected,knifeSkin:selectedKnife,mapId:chosenArena.id}),'local');
+  enterGame(createRange({name:nickname||'나',weapon:selected,sidearm:selectedSidearm,knifeSkin:selectedKnife,mapId:chosenArena.id}),'local');
   attemptLock();
 }
 $('rangeBtn').onclick=openRange;
@@ -239,7 +245,7 @@ async function openNetwork(invite=''){
       const Client=lan?RoomClient:(await import('./online-net.js')).OnlineRoomClient;
       if(attempt!==joinAttempt)return;
       const old=client;client=null;await old?.leave();c=client=newClient(Client);c.online=!lan;
-      if(create)await c.create({name:nickname,size,weapon:selected,knifeSkin:selectedKnife,mapId:chosenArena.id});else await c.join({name:nickname,code,weapon:selected,knifeSkin:selectedKnife});
+      if(create)await c.create({name:nickname,size,weapon:selected,sidearm:selectedSidearm,knifeSkin:selectedKnife,mapId:chosenArena.id});else await c.join({name:nickname,code,weapon:selected,sidearm:selectedSidearm,knifeSkin:selectedKnife});
     }catch(e){
       await c?.leave().catch(()=>{});if(client===c)client=null;
       if(attempt===joinAttempt&&modal==='network')roomError(e);
@@ -325,7 +331,7 @@ function showHUD(now){
     $('health').style.setProperty('--team-color',p.team===0?'var(--blue)':'var(--red)');
   }
   const gun=WEAPONS[p.active];
-  const equippedSlot=gun.melee?3:p.active==='pistol'?2:1;
+  const equippedSlot=gun.melee?3:isSecondaryWeapon(p.active)?2:1;
   $('gun').textContent=equippedSlot+' · '+(gun.melee?KNIFE_LABELS[normalizeKnifeSkin(p.knifeSkin)]:gun.label);
   $('weaponHud').classList.toggle('melee',!!gun.melee);
   $('ammo').textContent=gun.melee?'근접':p.ammo;
@@ -333,7 +339,7 @@ function showHUD(now){
   const spectating=!me.alive&&game.phase!=='between'&&game.phase!=='end';$('spectator').hidden=!spectating;$('spectator').textContent=p.alive?'관전 · '+p.name+'   [Tab]':'다음 라운드 대기 중';
   feedback.updateWeapon(p,spectating);
   let text='',sub='',hint='';
-  if(game.phase==='range'){hint=gun.melee?'좌클릭  칼 공격 · 1  주무기 · 2  권총':'3  칼 · C  슬라이딩 · Q  주무기 변경 · R  재장전';}
+  if(game.phase==='range'){hint=gun.melee?'좌클릭  칼 공격 · 1  주무기 · 2  보조무기':'3  칼 · C  슬라이딩 · Q  주무기 변경 · R  재장전';}
   else if(game.phase==='warmup'){text='준비 사격';sub=teamName(me.team)+' 팀 · '+sizeText(game.size);hint='Q  주무기 변경 · '+WEAPONS[selected].label;}
   else if(game.phase==='between'){text=game.roundWinner==null?'라운드 무승부':(game.roundWinner===me.team?'라운드 승리':'라운드 패배');sub=game.reason;hint='Q  다음 라운드 무기 · '+WEAPONS[selected].label;}
   else if(game.phase==='overtime'){text='중앙 거점 점령';sub=game.capture?.team==null?'거점에서 3초 버티기':teamName(game.capture.team)+' 점령 중 '+Math.round(game.capture.progress*100)+'%';}
@@ -356,7 +362,7 @@ function inspectWeapon(){
   if(!inspectionAllowed(p))return;
   cancelInspection();
   const primaryId=game.phase==='range'||game.phase==='warmup'?selected:p.weapon;
-  inspectedItem=slot===3?normalizeKnifeSkin(p.knifeSkin):slot===2?'pistol':primaryId;
+  inspectedItem=slot===3?normalizeKnifeSkin(p.knifeSkin):slot===2?secondaryWeapon(p.sidearm):primaryId;
   // A switch and F can arrive between frames, especially before an online snapshot.
   inspectStart=null;inspectDeadline=performance.now()/1000+.65;
 }
@@ -382,8 +388,8 @@ function currentInput(){
 function aim(dx,dy){
   if(!Number.isFinite(dx)||Math.abs(dx)>450||!Number.isFinite(dy)||Math.abs(dy)>450)return;
   const sniper=watchPlayer()?.active==='sniper';
-  const zoomed=sniper ? aiming()&&renderer?.scopeActive : aiming();
-  const scale=.00225*sensitivity*(zoomed?(sniper?.31:.58):1);
+  const zoomScale=sniper ? 1-.69*(renderer?.lensAim??0) : aiming() ? .58 : 1;
+  const scale=.00225*sensitivity*zoomScale;
   yaw+=dx*scale;pitch=clamp(pitch-dy*scale,-1.40,1.40);
 }
 function bindCanvas(){
@@ -481,8 +487,10 @@ function frame(ms){
     $('weaponHud').toggleAttribute('data-inspecting',Number.isFinite(inspectAge));
     try{renderer.draw(visual,selfId,{lobby:false,ads:watch?!!p?.ads:aiming(),quality,yaw:watch?p?.yaw:yaw,pitch:watch?p?.pitch:pitch,spectatorId:watch?p?.id:undefined,inspectAge,t,dt});}
     catch(err){console.error(err);if(!(renderer instanceof LiteRenderer))switchToLite();else throw err;}
-    feedback.sight.hidden=!p?.alive||game.phase==='between'||Boolean(renderer.reflexActive);
-    if(p)feedback.updateSight(p,p.active==='sniper'?renderer.scopeActive:canAim(p,watch?p.ads:ads&&slot!==3),renderer.viewFov);
+    const adsHeld=canAim(p,watch?p?.ads:ads&&slot!==3);
+    const ironAligned=adsHeld&&renderer.aim>.96&&(p.active==='shotgun'||p.active==='revolver');
+    feedback.sight.hidden=!p?.alive||game.phase==='between'||Boolean(renderer.reflexActive)||ironAligned;
+    if(p)feedback.updateSight(p,p.active==='sniper'?renderer.scopeActive:adsHeld,renderer.viewFov);
     feedback.frame(t,watch?p?.yaw:yaw);
     if(ms-hudStamp>70||firstFrame){showHUD(t);hudStamp=ms;firstFrame=false;}
     if(game.phase==='end'&&!lastResult)results();

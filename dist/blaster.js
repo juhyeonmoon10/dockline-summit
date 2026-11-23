@@ -4,6 +4,7 @@ import { guns } from './assets/toon-guns.js';
 import { blasters } from './assets/blaster-geometry.js';
 import { Parts } from './arena-parts.js';
 import { redDotMount } from './red-dot.js';
+import { makeRevolver } from './revolver.js';
 export { gunFit } from './gun-fit.js';
 
 const cache=new Map();
@@ -267,6 +268,10 @@ function serviceDetails(model,kind){
   }
   for(let i=0;i<3;i++)parts.cube(0,.044,-.321+i*.027,.036,.002,.004,ink);
   parts.cube(-.018,.044,-.198,.007,.002,.012,p.mark);
+  const bead=new Parts();
+  bead.tube(0,.068,-.727,.007,.009,.007,'#68635b');
+  bead.piece(new T.SphereGeometry(.5,12,8),0,.072,-.727,.009,.008,.010,'#d2ab69');
+  model.add(propMesh(bead,'front-bead',1));
  }else if(kind==='sniper'){
   // One molded spine runs through both hand contacts and narrows into the raised comb.
   const furniture=new Parts();
@@ -476,6 +481,10 @@ function arcadeDetails(kind,model){
 }
 
 export function blasterMesh(kind='rifle'){
+ if(kind==='revolver'){
+  if(!cache.has(kind))cache.set(kind,makeRevolver());
+  return cache.get(kind).clone();
+ }
  if(!guns[kind]&&!arcadeBodies[kind])kind='rifle';
  if(!cache.has(kind)){
   const model=new T.Group();

@@ -10,6 +10,7 @@ import { isPrimaryWeapon } from '../dist/balance.js';
 const sourceURL = new URL('../dist/online-net.js', import.meta.url);
 const source = (await readFile(sourceURL, 'utf8')).replace(/^import .*\n/gm, '')
   .replace('export class OnlineRoomClient', 'class OnlineRoomClient')
+  .replaceAll('import.meta.resolve', 'undefined')
   .replaceAll('import.meta.url', JSON.stringify(sourceURL.href));
 
 function harness() {
@@ -91,13 +92,14 @@ test('online transport joins by code, binds identity, gates host actions, and cl
   try {
     const room = await host.create({ name: '방장', size: 2, weapon:'smg' });
     assert.match(room.code, /^[A-HJ-NP-Z2-9]{6}$/);
-    await guest.join({ name: '친구', code: room.code.toLowerCase(), weapon:'marksman', knifeSkin:'balisong' });
+    await guest.join({ name: '친구', code: room.code.toLowerCase(), weapon:'marksman', sidearm:'revolver', knifeSkin:'balisong' });
     await settled();
     assert.equal(host.room.players.length, 2);
     assert.equal(guest.room.players.length, 2);
     assert.notEqual(guest.id, host.id);
     assert.deepEqual(Array.from(guest.room.players,p=>p.weapon),['smg','marksman']);
     assert.deepEqual(Array.from(guest.room.players,p=>p.knifeSkin),['karambit','balisong']);
+    assert.deepEqual(Array.from(guest.room.players,p=>p.sidearm),['pistol','revolver']);
     await guest.weapon('burst');
     await assert.rejects(guest.start(true), /방장만/);
     await assert.rejects(host.start(true), /준비/);
@@ -115,6 +117,8 @@ test('online transport joins by code, binds identity, gates host actions, and cl
     assert.equal(engine.members.get(guest.id).lastInput.weapon,'lmg');
     engine.tick(.05);
     assert.equal(engine.game.players.find(p=>p.id===guest.id).weapon,'lmg');
+    guest.input({slot:2});guest.flush();await settled();engine.tick(.05);
+    assert.equal(engine.game.players.find(p=>p.id===guest.id).active,'revolver');
     assert.equal(engine.members.get(host.id).lastInput.slot, undefined);
     await host.leave(); await settled();
     assert.equal(closes.length, 1);

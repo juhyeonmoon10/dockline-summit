@@ -26,3 +26,13 @@ test('pump and bolt ejection wait for the action, and switching discards a pendi
     cases.frame(weapon,held,cam,1,1+opened,.016);assert.ok(scene.children.every(x=>!x.visible));
   }
 });
+
+test('a revolver keeps its cases in the cylinder throughout firing',()=>{
+  const scene=new Scene(),cases=new EjectedCases(scene),held=new Group(),cam=new PerspectiveCamera();
+  for(let i=0;i<6;i++){
+    cases.queue({weapon:'revolver',seq:i+1},i);
+    cases.frame('revolver',held,cam,1,i+.03,.03);
+  }
+  assert.equal(cases.pending.length,0);
+  assert.ok(scene.children.every(mesh=>!mesh.visible));
+});

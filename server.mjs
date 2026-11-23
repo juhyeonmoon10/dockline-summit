@@ -10,7 +10,7 @@ import { createGame, stepGame, TEAM_SIZES } from './dist/sim.js';
 import { gameSnapshot } from './dist/game-snapshot.js';
 import { normalizeKnifeSkin } from './dist/knife-types.js';
 import { getArena } from './dist/arena-map.js';
-import { isPrimaryWeapon, botLoadouts } from './dist/balance.js';
+import { isPrimaryWeapon, secondaryWeapon, botLoadouts } from './dist/balance.js';
 
 const root = fileURLToPath(new URL('./dist/', import.meta.url));
 const port = Number(process.env.PORT || 8787);
@@ -58,7 +58,7 @@ function addMember(room, fields) {
   const host = !room.hostId;
   const player = {
     id, name: cleanName(fields.name), weapon: isPrimaryWeapon(fields.weapon) ? fields.weapon : 'rifle',
-    knifeSkin: normalizeKnifeSkin(fields.knifeSkin), team: counts[0] <= counts[1] ? 0 : 1, bot: false, ready: host
+    sidearm: secondaryWeapon(fields.sidearm), knifeSkin: normalizeKnifeSkin(fields.knifeSkin), team: counts[0] <= counts[1] ? 0 : 1, bot: false, ready: host
   };
   if (host) room.hostId = id;
   const session = {
@@ -150,7 +150,7 @@ async function handleAPI(req, res, url) {
     fail(403, '다른 사이트에서 보낸 요청입니다.');
   if (req.headers['sec-fetch-site'] === 'cross-site') fail(403, '다른 사이트에서 보낸 요청입니다.');
   if (action === 'capabilities' && req.method === 'GET') {
-    json(res, 200, { docklineLAN: 1 });
+    json(res, 200, { docklineLAN: 2 });
     return;
   }
   if (action === 'stream' && req.method === 'GET') {

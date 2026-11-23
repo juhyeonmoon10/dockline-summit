@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { reloadPose, RELOAD_CONTACT, shotResponse, shotCycle, SHOT_MECHANIC, SNIPER_SCOPE_RETURN,
-  SNIPER_RELOAD_CONTACT, emptySniperBolt, scopeAfterShot } from '../dist/weapon-view.js';
+  SNIPER_RELOAD_CONTACT, emptySniperBolt, scopeAfterShot, shotKickResponse, shoulderedKick,
+  cameraAim, weaponFov, gunPresentation } from '../dist/weapon-view.js';
 import { WEAPONS } from '../dist/balance.js';
 import { createRange, stepGame } from '../dist/sim.js';
 
@@ -41,6 +42,39 @@ test('the shotgun pump and sniper bolt reach both audible stops on different bea
   assert.equal(shotCycle('shotgun',.30).lift,0);
   assert.equal(shotCycle('sniper',.30).lift,1);
   assert.ok(shotResponse(.045,'shotgun')>shotResponse(.045,'smg'));
+});
+
+test('each shot keeps a short kick, with a quieter shoulder pose and distinct heavy sidearm',()=>{
+  for(const id of ['rifle','smg','burst','marksman','lmg','shotgun','sniper','pistol','revolver']){
+    const peak=shotKickResponse(.022,id),hip=shoulderedKick(peak,0),aim=shoulderedKick(peak,1);
+    assert.ok(hip>=.48 && hip<=.66,id);
+    assert.ok(aim>hip*.5 && aim<hip*.55,id);
+    assert.equal(shotKickResponse(0,id),0);
+    assert.equal(shotKickResponse(1,id),0);
+    assert.ok(Math.abs(shotKickResponse(.13,id))<.16,id);
+  }
+  const pitch=id=>shotKickResponse(.022,id)*gunPresentation(id).pitch;
+  assert.ok(pitch('revolver')>pitch('pistol') && pitch('lmg')>pitch('smg'));
+  assert.equal(shotCycle('revolver',0).indexLag,1);
+  assert.equal(shotCycle('revolver',.025).stroke,1);
+  assert.equal(shotCycle('revolver',.081).indexLag,0);
+  assert.equal(shotCycle('revolver',.12).stroke,0);
+});
+
+test('holding a sniper scope shows the bolt with a steady lens and releasing ADS restores hip FOV',()=>{
+  for(const fps of [30,60,120]){
+    let zoom=1,highest=0;
+    for(let frame=0;frame<fps*1.5;frame++){
+      const ready=scopeAfterShot('sniper',true,frame/fps);
+      zoom=cameraAim('sniper',zoom,Number(ready),true,ready,1/fps);
+      highest=Math.max(highest,weaponFov('sniper',zoom));
+    }
+    assert.ok(highest>48 && highest<50);
+    assert.equal(weaponFov('sniper',zoom),WEAPONS.sniper.aimFov);
+    for(let frame=0;frame<fps;frame++)zoom=cameraAim('sniper',zoom,0,false,false,1/fps);
+    assert.equal(weaponFov('sniper',zoom),72);
+    assert.equal(cameraAim('rifle',0,.47,true,true,1/fps),.47);
+  }
 });
 
 test('a held sniper scope returns after the bolt closes and before the next possible shot',()=>{

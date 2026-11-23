@@ -1,15 +1,16 @@
 import { RELOAD_CONTACT, SHOT_MECHANIC, SNIPER_RELOAD_CONTACT } from './weapon-view.js';
-import { foleyUrl, unpackFoley, reloadClips } from './weapon-foley.js';
+import { REVOLVER_RELOAD_CONTACT } from './revolver-timing.js';
+import { foleyUrl, revolverFoleyUrl, cylinderCues, unpackFoley, reloadClips } from './weapon-foley.js';
 import { prepareShot, prepareAction, makeHandlingFoley } from './weapon-sound.js';
 import { inspectDuration } from './view-inspect.js';
 import { KNIFE_TIMING, normalizeKnifeSkin } from './knife-types.js';
 
 const shotVolumes={
-  rifle:.74,pistol:.64,shotgun:.88,sniper:.94,smg:.62,burst:.69,marksman:.80,lmg:.78,
+  rifle:.74,pistol:.64,revolver:.77,shotgun:.88,sniper:.94,smg:.62,burst:.69,marksman:.80,lmg:.78,
 };
 const footfalls=['stepA','stepB','land'];
 const alternateShots=new Set(['rifle','smg','burst','lmg']);
-const recordedClips={foley:foleyUrl};
+const recordedClips={foley:foleyUrl,cylinderFoley:revolverFoleyUrl};
 for(const weapon of Object.keys(shotVolumes))recordedClips[weapon]='./assets/audio/shots/'+weapon+'.wav';
 for(const weapon of alternateShots)recordedClips[weapon+'-2']='./assets/audio/shots/'+weapon+'-2.wav';
 for(const step of footfalls)recordedClips[step]='./assets/audio/steps/'+step+'.ogg';
@@ -61,7 +62,7 @@ export class ArenaSound {
     }
   }
   hasRecording(id){
-    return this.buffers.has(id==='foley'?'shell':id);
+    return this.buffers.has(id==='foley'?'shell':id==='cylinderFoley'?'cylinderClose':id);
   }
   unlock(){
     if(!this.enabled)return Promise.resolve();
@@ -99,10 +100,15 @@ export class ArenaSound {
         const bytes=await request;
         if(!bytes)return;
         const decoded=await ctx.decodeAudioData(bytes);
-        if(id==='foley'){
+        if(id==='cylinderFoley'){
+          for(const [cue,buffer] of unpackFoley(ctx,decoded,cylinderCues)){
+            this.buffers.set(cue,prepareAction(ctx,buffer,'revolver',cue));
+          }
+        }else if(id==='foley'){
           const actions=unpackFoley(ctx,decoded);
           for(const [cue,buffer] of actions)this.buffers.set(cue,buffer);
           for(const weapon of Object.keys(shotVolumes)){
+            if(weapon==='revolver')continue;
             const cues=weapon==='shotgun'?['shell','shellAlt','pumpOpen','pumpClose']:Object.values(reloadClips(weapon));
             if(weapon==='sniper')cues.push('boltOpen','boltClose');
             for(const cue of cues)this.buffers.set(cue+'@'+weapon,prepareAction(ctx,actions.get(cue),weapon,cue));
@@ -122,6 +128,7 @@ export class ArenaSound {
     if(event.type==='shot')return this.buffers.has(event.weapon);
     if(event.type==='reload'){
       if(event.weapon==='shotgun')return this.buffers.has('shell');
+      if(event.weapon==='revolver')return this.hasRecording('cylinderFoley');
       const sounds=reloadClips(event.weapon);
       return this.buffers.has(sounds.out)&&this.buffers.has(sounds.seat);
     }
@@ -325,7 +332,11 @@ export class ArenaSound {
         const when=actor.reload-duration*(1-phase);
         if(when>=-.035)this.sample(sample,level*attenuation,position,1,Math.max(0,when)+propagation,reloadOptions);
       };
-      if(event.weapon==='shotgun')cue(actor.ammo%2?'shellAlt':'shell',RELOAD_CONTACT.shell,.51);
+      if(event.weapon==='revolver'){
+        const phase=REVOLVER_RELOAD_CONTACT;
+        cue('cylinderOpen',phase.open,.40);cue('cylinderEject',phase.eject,.35);
+        cue('loaderSeat',phase.seat,.44);cue('cylinderClose',phase.close,.48);
+      }else if(event.weapon==='shotgun')cue(actor.ammo%2?'shellAlt':'shell',RELOAD_CONTACT.shell,.51);
       else{
         const names=reloadClips(event.weapon),sniper=event.weapon==='sniper';
         const contacts=sniper?SNIPER_RELOAD_CONTACT:RELOAD_CONTACT;

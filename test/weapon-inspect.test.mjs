@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Group,PerspectiveCamera,Vector3} from '../dist/assets/three.module.min.js';
-import {PRIMARY_WEAPONS} from '../dist/balance.js';
+import {PRIMARY_WEAPONS,SECONDARY_WEAPONS} from '../dist/balance.js';
 import {gunModel,poseHeldKnife,poseHeldSleeves} from '../dist/render.js';
 import {inspectDuration,inspectionPose,applyInspection,ringFlourish} from '../dist/view-inspect.js';
 
 const camera=new PerspectiveCamera(63,4/3,.012,4);
 const point=new Vector3();
 test('every firearm shows the receiver and top with the full weapon framed during the shoulder roll',()=>{
-  for(const key of [...PRIMARY_WEAPONS,'pistol']){
+  for(const key of [...PRIMARY_WEAPONS,...SECONDARY_WEAPONS]){
     const rig=new Group(),model=gunModel(key);rig.scale.setScalar(.91);rig.add(model);
     const duration=inspectDuration(key);
     assert.equal(inspectionPose(key,0),null);assert.equal(inspectionPose(key,duration),null);

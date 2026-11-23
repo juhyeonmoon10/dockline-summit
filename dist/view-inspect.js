@@ -10,7 +10,8 @@ const guns={
   sniper:   {duration:4.35,depth:.87, x:.275, lift:.24, face:1.03, reveal:.79, cant:.71},
   marksman: {duration:4.05,depth:.81, x:.219, lift:.28, face:1.09, reveal:.71, cant:.88},
   lmg:      {duration:4.3, depth:.79, x:.185, lift:.12, face:1.07, reveal:.89, cant:.72},
-  pistol:   {duration:3.15,depth:.405,x:.086, lift:.39, face:1.20, reveal:.43, cant:1.69}
+  pistol:   {duration:3.15,depth:.405,x:.086, lift:.39, face:1.20, reveal:.43, cant:1.69},
+  revolver: {duration:3.50,depth:.462,x:.107, lift:.26, face:1.21, reveal:.49, cant:1.47}
 };
 export function inspectDuration(id){
   return id==='balisong'?KNIFE_TIMING.balisong.inspect:id==='karambit'||id==='knife'?KNIFE_TIMING.karambit.inspect:guns[id]?.duration||0;
@@ -55,7 +56,7 @@ export function inspectionPose(id,age) {
   const settleRoll=Math.sin(Math.PI*ease((t-.625)/.065));
   const breathe=Math.sin(t*Math.PI*2.4)*.006;
   return {
-    weight,freeHand:id==='pistol'?ease(Math.min(t/.12,(1-t)/.10)):0,
+    weight,freeHand:id==='pistol'||id==='revolver'?ease(Math.min(t/.12,(1-t)/.10)):0,
     x:gun.x+.030*roll+.036*fall+.008*settle,
     y:-.047+.017*roll-.067*fall+.012*settle+breathe,
     z:-gun.depth+.050*roll+.04*fall,

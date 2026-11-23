@@ -2,10 +2,11 @@
 // Reciprocal-depth tests keep players, short cover and the aim point correctly aligned.
 import { eyeHeight, WEAPONS } from './sim.js';
 import { loadLiteOperators, liteOperator, posedOperator, operatorGrip } from './lite-operator.js';
-import { approachAim, canAim, weaponFov, reloadPose, shotKickResponse, shotFlashDuration, LOCAL_IGNITION_LIFE, scopeAfterShot, sniperScopeVisible } from './weapon-view.js';
+import { approachAim, cameraAim, canAim, weaponFov, reloadPose, shotKickResponse, shoulderedKick, shotFlashDuration, LOCAL_IGNITION_LIFE, scopeAfterShot, sniperScopeVisible } from './weapon-view.js';
 import { fieldViews } from './assets/field-frames.js';
 import { opticFit,reflexEngaged } from './optic-fit.js';
 import { drawFallbackSight,drawReflexDot } from './lite-reflex.js';
+import { revolverCylinderSwing } from './revolver-timing.js';
 import { weaponImageUrl } from './weapon-image-url.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { pelletTrails, pelletSpan, clipBarrelOrigin, visibleTraceEnd, exitsForward, muzzleDeparture, flightSlices, singleShotSpan, SHOT_TRAIL_LIFE, PELLET_LIFE, PELLET_CAPACITY } from './shot-path.js';
@@ -29,7 +30,7 @@ function fieldPose(p,t,aim,w,h,age,kick,atlas,motion){
   const stops=entry.aimStops||[0,1],still=closestFrame(stops,aim);
   let sheet=atlas,sw=640,sh=360,sx=still*640,sy=entry.row*360,ox=0,oy=0;
   let muzzle=entry.muzzles[still],glass=entry.glass?.still[still];
-  if(entry.glass){
+  if(!entry.sheet&&stops.length>2){
     if(still===0||still===stops.length-1)sx=still===0?0:640;
     else{sw=384;sh=216;sx=(still-1)*sw;sy=2520+entry.row*sh;}
   }
@@ -79,6 +80,29 @@ function sniperBackupPose(p,t,aim,w,h,kick,atlas){
   const point=aimFrame?ads:hip,imageX=-gunWidth*point[0],imageY=-h*point[1];
   return {row:2,atlas,aimFrame,gunWidth,imageX,imageY,x:mx+dx,y:my+dy,depth:hip[2]+(ads[2]-hip[2])*aim,
     uv:point,aimStop:Number(aimFrame),reloadPose:loading.tilt,kick};
+}
+
+// The metal bead and the barrel underneath it remain usable during image decode.
+function drawIronBackup(ctx,gun,pose,height){
+  const {x,y,iron}=pose,hip=1-iron.aim,shotgun=gun==='shotgun';
+  ctx.save();ctx.translate(x,y);ctx.scale(height,height);
+  const bead=(iron.tipY-y)/height,rearX=.24*hip,rearY=.14+(shotgun?.04:0);
+  const section=(width,level,offset)=>[rearX*offset-width,level,rearX*offset+width];
+  const poly=(paint,points)=>{
+    ctx.fillStyle=paint;ctx.beginPath();ctx.moveTo(...points[0]);
+    for(let i=1;i<points.length;i++)ctx.lineTo(...points[i]);
+    ctx.closePath();ctx.fill();
+  };
+  const band=(a,b,paint)=>poly(paint,[[a[0],a[1]],[a[2],a[1]],[b[2],b[1]],[b[0],b[1]]]);
+  const muzzle=section(.006,0,0),breech=section(shotgun?.038:.033,rearY,1),heel=section(.059,.24,1.25);
+  band(muzzle,breech,shotgun?'#4c5957':'#788488');
+  band(breech,heel,shotgun?'#614d40':'#404b51');
+  if(!shotgun)band(section(.039,rearY+.018,1.04),section(.047,rearY+.052,1.14),'#536268');
+  band(heel,section(.063,.42,1.48),shotgun?'#443f37':'#704936');
+  band(section(.08,.40,1.44),section(.12,.63,1.7),'#404a43');
+  poly('#3d4543',[[-.006,.003],[.006,.003],[.003,bead],[-.003,bead]]);
+  ctx.fillStyle='#dfb475';ctx.fillRect(-.0026,bead,.0052,.004);
+  ctx.restore();
 }
 
 const rgb = (r,g,b) => ((255<<24)|(b<<16)|(g<<8)|r)>>>0;
@@ -337,6 +361,26 @@ function heldEquipment(dst,p,[x,y,z],age,side=1){
     }
     return;
   }
+  if(p.active==='revolver'){
+    const front=-.27,barrelY=.068;
+    body(0,-.095,.012,.053,.104,.081,0x704936);
+    body(0,-.009,-.007,.065,.089,.103,0x747e82);
+    body(0,.070,-.073,.061,.019,.107,0x8a9698);
+    body(0,.009,-.185,.048,.043,.143,0x566269);
+    body(0,barrelY-.021,(front-.102)/2,.055,.042,-front-.102,0x77858a);
+    body(0,.087,-.244,.011,.013,.024,0xc2965a);
+    const t=p.reload>0&&p.reloadDuration>0?1-p.reload/p.reloadDuration:0;
+    const swing=revolverCylinderSwing(t),cx=.018*(Math.cos(swing)-1)-.050*Math.sin(swing);
+    const drumY=-.019+.018*Math.sin(swing)+.050*Math.cos(swing);
+    const ring=(i,d)=>transform(cx+.047*Math.cos(i*Math.PI/5),drumY+.047*Math.sin(i*Math.PI/5),d);
+    for(let i=0;i<10;i++){
+      quad(dst,[ring(i,-.124),ring(i+1,-.124),ring(i+1,-.025),ring(i,-.025)],i%2?0x59646a:0x465258);
+      quad(dst,[ring(i,-.025),ring(i+1,-.025),transform(cx,drumY,-.025)],0x505a5d);
+      quad(dst,[ring(i+1,-.124),ring(i,-.124),transform(cx,drumY,-.124)],0x3e484d);
+    }
+    const [mx,my,mz]=transform(0,barrelY,front);
+    return {x:mx,y:my,z:mz,forward:{x:sy*co,y:si,z:-cy*co}};
+  }
   const [front,stock,width]=carriedGuns[p.active]||carriedGuns.rifle;
   const compact=p.active==='pistol';
   body(0,-.036,stock*.40,width,.092,stock+.11,0x3d4747);
@@ -461,6 +505,14 @@ export class LiteRenderer {
       const shift=bob*h,sink=h*(this.recoil*.024+(p.reload>0?.22:0));
       const glass={x:w*.5+h*.27*(1-aim)+shift,y:h*(.5+.15*(1-aim))+sink,scale:h*optic.scale*(1.48+.58*aim)};
       return {x:glass.x-h*(.11-.09*aim),y:glass.y+h*(.049+.011*aim),fallbackGlass:glass};
+    }
+    if(kind==='shotgun'||kind==='revolver'){
+      const idx=closestFrame(entry.aimStops,aim),uv=entry.muzzles[idx],gunWidth=h*16/9;
+      const hip=entry.muzzles[0],ads=entry.muzzles.at(-1),kick=-this.recoil*.022;
+      const x=w*.5+(gunWidth*(hip[0]-.5)+h*bob)*(1-aim);
+      const y=h*(hip[1]+(ads[1]-hip[1])*aim+kick+(p.reload>0?.16:0));
+      const tipY=y-h*(ads[1]-.5);
+      return {x,y,depth:uv[2],uv,gunWidth,iron:{aim,tipY}};
     }
     return {x:w*(.57-.07*aim)+h*bob,y:h*(.64-.08*aim+this.recoil*.045+(p.reload>0?.17:0))};
   }
@@ -798,7 +850,7 @@ export class LiteRenderer {
     }
     if(!pose)return; // The shared HUD draws the magnified scope.
     const c=this.ctx,h=this.height,reload=p.reload>0;
-    const gun=p.active, isPistol=gun==='pistol', isShot=gun==='shotgun',isSniper=gun==='sniper';
+    const gun=p.active, compact=gun==='pistol'||gun==='revolver', isShot=gun==='shotgun',isSniper=gun==='sniper';
     if(gun==='rifle'&&reload&&this.rifleReloadAtlas.naturalWidth){
       const progress=1-p.reload/(p.reloadDuration||WEAPONS.rifle.reload);
       const index=Math.max(0,Math.min(15,Math.round(progress*15)));
@@ -808,7 +860,7 @@ export class LiteRenderer {
     }
     if(flash){
       // Start on the cap. The tongue follows the shot out past the front sight.
-      const length=Math.min(h*(isPistol?.083:.095),flash.length),width=Math.min(h*(isPistol?.014:.020),length*.4);
+      const length=Math.min(h*(compact?.083:.095),flash.length),width=Math.min(h*(compact?.014:.020),length*.4);
       c.save();c.translate(flash.x,flash.y);c.rotate(flash.angle);
       c.fillStyle='#ffa835';c.beginPath();c.moveTo(0,0);c.lineTo(length*.25,-width*.48);
       c.lineTo(length*.45,-width);c.lineTo(length*.47,-width*.46);c.lineTo(length,0);
@@ -823,15 +875,16 @@ export class LiteRenderer {
       else c.drawImage(pose.atlas,aimFrame?640:0,row*360,640,360,imageX,imageY,gunWidth,h);
       c.restore();return;
     }
+    if(pose.iron){drawIronBackup(c,gun,pose,h);return;}
     c.save();c.translate(pose.x,pose.y);c.scale(h*.0019,h*.0019);if(reload)c.rotate(.20);
     const poly=(color,pts)=>{c.fillStyle=color;c.beginPath();pts.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.closePath();c.fill();};
     const gunColor=WEAPONS[gun].accent;
     poly('#26313b',[[-6,0],[6,-2],[29,14],[24,25],[1,9]]);poly('#a4aaa1',[[-6,0],[5,-4],[29,12],[20,16]]);
-    const front=isPistol?10:19, back=isPistol?81:128;
+    const front=compact?10:19, back=compact?81:128;
     poly('#273a43',[[front,10],[front+14,7],[back+26,49],[back+10,91],[front+1,39]]);
     poly(gunColor,[[front-4,14],[front+13,7],[back+23,48],[back-6,57]]);
     poly(isShot?'#754731':'#4b5e64',[[front-4,14],[back-6,57],[back+10,91],[front-4,38]]);
-    for(let i=0;i<(isPistol?2:5);i++) {let x=front+8+i*10;poly('#33464e',[[x,23+i*3],[x+4,25+i*3],[x+4,32+i*3],[x,30+i*3]]);}
+    for(let i=0;i<(compact?2:5);i++) {let x=front+8+i*10;poly('#33464e',[[x,23+i*3],[x+4,25+i*3],[x+4,32+i*3],[x,30+i*3]]);}
     poly('#253642',[[back-12,53],[back+16,49],[back+64,76],[back+53,115],[back+12,102]]);
     poly('#566773',[[back-12,53],[back+17,47],[back+62,68],[back+37,80]]);
     poly('#c4a180',[[45,53],[56,44],[72,46],[86,62],[77,75],[55,73]]);
@@ -881,14 +934,16 @@ export class LiteRenderer {
       }
       if(p.reload>0){this.shotWeapon=null;this.shotAge=Infinity;}
     }
-    this.activeGun=p?.active;this.recoil=Number.isFinite(this.shotAge)?shotKickResponse(this.shotAge,p.active):0;
+    this.activeGun=p?.active;
     const held=mode&&canAim(p,p.id===selfId?view.ads??p.ads:p.ads);
     const ads=mode&&scopeAfterShot(p.active,held,this.shotWeapon===p.active?this.shotAge:Infinity);
     this.aim=mode&&this.aimFocus===p.id?approachAim(exchanging&&opticFit(p.active)?0:this.aim,ads,dt,p.active):Number(ads);
+    this.recoil=mode?shoulderedKick(shotKickResponse(this.shotAge,p.active),this.aim):0;
+    this.lensAim=mode?cameraAim(p.active,interrupted?this.aim:this.lensAim,this.aim,held,ads,dt):0;
     this.scopeActive=!!(mode&&sniperScopeVisible(p.active,this.aim,ads));
     this.reflexActive=Boolean(mode&&p.alive&&!p.reload&&!p.slide&&!Number.isFinite(view.inspectAge)&&reflexEngaged(p.active,this.aim));
     this.aimFocus=p?.id;
-    this.viewFov=mode?weaponFov(p.active,this.aim,p.slide>0):58;
+    this.viewFov=mode?weaponFov(p.active,this.lensAim,p.slide>0):58;
     this.focal=(h/2)/Math.tan(this.viewFov*Math.PI/360);this.depth.fill(0);
     if(mode){
       this.meleeEvents(game,p,now);

@@ -116,7 +116,7 @@ test('cold viewmodels and operators still have visible barrel sockets while thei
   try{
     for(const active of Object.keys(fieldViews)){
       const player={id:'a',active,team:0,x:0,y:0,z:-3,yaw:0,pitch:.3,alive:true,speed:0};
-      const pose=scene.gunPose(player,1),tip=scene.viewMuzzle(cam,pose,.9),forward=scene.viewForward(cam,pose,tip);
+      const pose=scene.gunPose(player,1),tip=scene.viewMuzzle(cam,pose,pose.depth??.9),forward=scene.viewForward(cam,pose,tip);
       assert.ok(pose&&Number.isFinite(forward.x)&&forward.z<0,active);
       const meshes=[];scene.remoteOperator(meshes,player,cam,1,true);
       assert.ok(meshes.length>8 && scene.remoteMuzzles.get('a').tip.forward.z<0,active);

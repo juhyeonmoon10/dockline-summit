@@ -27,6 +27,12 @@ pumpClose          Model 12                         K_5
 boltOpen           Tikka                            W_6, W_9
 boltClose          Tikka                            W_12, W_13
 
+revolver.ogg contains separate excerpts from the Smith & Wesson 642 sessions:
+cylinderOpen       V_0, 1.487 s                      165 ms
+cylinderEject      V_3, 1.162 s                      245 ms
+loaderSeat         V_2, 1.127 s                      170 ms
+cylinderClose      V_1, 1.247 s                      190 ms
+
 The game uses short excerpts at their recorded pitch. Edits include mono
 downmixing, low-frequency rumble filtering, level adjustment, trimming,
 short edge fades and Ogg Opus encoding. The two Tikka cues join recorded

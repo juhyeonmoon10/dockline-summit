@@ -1,5 +1,5 @@
 import { isPrimaryWeapon } from './balance.js';
-const protocolVersion = 1;
+const protocolVersion = 2;
 const api = path => new URL('api/' + path, new URL('./', location.href));
 
 export async function supportsLAN() {
@@ -74,8 +74,8 @@ export class RoomClient {
     this.onRoom?.(this.room);
     return this.room;
   }
-  create({ name, size, weapon = 'rifle', knifeSkin, mapId = 'summit' }) { return this.enter('create', { name, size, weapon, knifeSkin, mapId }); }
-  join({ name, code, weapon = 'rifle', knifeSkin }) { return this.enter('join', { name, code: String(code).trim().toUpperCase(), weapon, knifeSkin }); }
+  create({ name, size, weapon = 'rifle', sidearm, knifeSkin, mapId = 'summit' }) { return this.enter('create', { name, size, weapon, sidearm, knifeSkin, mapId }); }
+  join({ name, code, weapon = 'rifle', sidearm, knifeSkin }) { return this.enter('join', { name, code: String(code).trim().toUpperCase(), weapon, sidearm, knifeSkin }); }
   ready(ready = true) { return this.post('ready', { ready }); }
   weapon(weapon) { return this.post('weapon', { weapon }); }
   team(team) { return this.post('team', { team }); }

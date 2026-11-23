@@ -4,6 +4,7 @@
 const profiles={
   rifle:   {low:1.24,edge:1.09,body:1.16,delay:.033,room:.135,weight:.80},
   pistol:  {low:.92, edge:1.23,body:1.07,delay:.021,room:.090,weight:.48},
+  revolver:{low:1.33,edge:1.12,body:1.21,delay:.031,room:.125,weight:.74},
   shotgun: {low:1.55,edge:.99, body:1.38,delay:.042,room:.190,weight:.90},
   sniper:  {low:1.12,edge:1.17,body:.83, delay:.061,room:.175,weight:1.0},
   smg:     {low:.88, edge:1.13,body:1.06,delay:.018,room:.075,weight:.59},

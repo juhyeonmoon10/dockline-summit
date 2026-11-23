@@ -7,7 +7,6 @@ const mounts=Object.freeze({
   rifle:mount(.178,-.112,1.00,-.353),
   smg:mount(.134,-.055,.84,-.328),
   burst:mount(.152,-.062,1.00,-.358),
-  shotgun:mount(.093,-.190,.98,-.417),
   marksman:mount(.108,-.149,1.08,-.394),
   lmg:mount(.182,-.011,1.07,-.365),
   pistol:mount(.127,-.067,.72,-.302)
@@ -15,7 +14,7 @@ const mounts=Object.freeze({
 export const opticFit=id=>Object.hasOwn(mounts,id)?mounts[id]:null;
 // A narrower window passes the eye slightly later in the shoulder animation.
 // Hand off from the hip crosshair once the whole luminous bead fits.
-const eyeEntry={smg:.875,pistol:.895,shotgun:.87};
+const eyeEntry={smg:.875,pistol:.895};
 export const reflexEngaged=(id,aim)=>Boolean(opticFit(id)&&aim>=(eyeEntry[id]??.84));
 
 // The full opening spans .076 x .054 model units. The lower shoulders

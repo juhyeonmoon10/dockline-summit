@@ -11,17 +11,18 @@ export function canAim(player, held) {
   return Boolean(held && player?.alive && player.active !== 'knife' && !player.reload && !player.slide);
 }
 
-// Camera-space poses for the game's eight viewmodels. Translation, wrist rotation
+// Camera-space poses for the game's viewmodels. Translation, wrist rotation
 // and the time to bring up the sights are independent of the muzzle flash.
 const presentation = {
-  rifle:    {push:.072, pitch:.123, yaw:.018, roll:.030, aimSpeed:16, reticle:5},
-  smg:      {push:.041, pitch:.076, yaw:.032, roll:.048, aimSpeed:23, reticle:4},
-  burst:    {push:.061, pitch:.102, yaw:.012, roll:.018, aimSpeed:18, reticle:4},
-  marksman: {push:.085, pitch:.142, yaw:.014, roll:.032, aimSpeed:12, reticle:6},
-  lmg:      {push:.078, pitch:.101, yaw:.039, roll:.056, aimSpeed:10, reticle:7},
-  pistol:   {push:.049, pitch:.219, yaw:.025, roll:.065, aimSpeed:25, reticle:4},
-  shotgun:  {push:.133, pitch:.166, yaw:.041, roll:.072, aimSpeed:14, reticle:8},
-  sniper:   {push:.146, pitch:.174, yaw:.018, roll:.038, aimSpeed:11, reticle:6}
+  rifle:    {push:.072, pitch:.123, yaw:.018, roll:.030, aimSpeed:16, reticle:3},
+  smg:      {push:.041, pitch:.076, yaw:.032, roll:.048, aimSpeed:23, reticle:2},
+  burst:    {push:.061, pitch:.102, yaw:.012, roll:.018, aimSpeed:18, reticle:2},
+  marksman: {push:.085, pitch:.142, yaw:.014, roll:.032, aimSpeed:12, reticle:3},
+  lmg:      {push:.078, pitch:.101, yaw:.039, roll:.056, aimSpeed:10, reticle:3},
+  pistol:   {push:.049, pitch:.219, yaw:.025, roll:.065, aimSpeed:25, reticle:2},
+  revolver: {push:.084, pitch:.180, yaw:.022, roll:.046, aimSpeed:19, reticle:3},
+  shotgun:  {push:.133, pitch:.166, yaw:.041, roll:.072, aimSpeed:14, reticle:4},
+  sniper:   {push:.146, pitch:.174, yaw:.018, roll:.038, aimSpeed:11, reticle:3}
 };
 export function gunPresentation(id) {return presentation[id] ?? presentation.rifle;}
 
@@ -47,6 +48,14 @@ export function scopeAfterShot(weapon, held, age) {
 
 export function sniperScopeVisible(weapon,aim,held){
   return weapon==='sniper' && Boolean(held) && aim>=.72;
+}
+
+// Keep part of the magnification while showing the bolt animation. Releasing
+// ADS still returns smoothly to hip FOV, including midway through a shot.
+export function cameraAim(weapon,previous,shoulder,held,scopeReady,dt){
+  if(weapon!=='sniper')return shoulder;
+  const target=held && !scopeReady ? .60 : Number(held);
+  return approachAim(previous??shoulder,target,dt,weapon);
 }
 
 function ease(start, end, time) {
@@ -78,6 +87,11 @@ export function reloadPose(player, weapon) {
 // Stroke peaks when the opening sound lands, then returns on the closing sound.
 const restingAction = Object.freeze({stroke:0, lift:0, grasp:0});
 export function shotCycle(weapon, age) {
+  if(weapon==='revolver'){
+    if(age>=.12)return restingAction;
+    const stroke=ease(0,.025,age)*(1-ease(.025,.12,age));
+    return {stroke,lift:0,grasp:0,indexLag:1-ease(0,.080,age)};
+  }
   const marks = SHOT_MECHANIC[weapon];
   if (!marks || age >= marks.close+.13) return restingAction;
   const sniper = weapon === 'sniper';
@@ -101,14 +115,15 @@ export function emptySniperGrasp(player) {
 
 // Envelope values are in seconds so recoil retains its shape on a slow display.
 const impulse = {
-  rifle:   {damping:18, frequency:21, follow:.28, end:.28, flash:.027},
-  smg:     {damping:25, frequency:29, follow:.18, end:.20, flash:.023},
-  burst:   {damping:22, frequency:26, follow:.22, end:.23, flash:.026},
-  marksman:{damping:16, frequency:22, follow:.18, end:.33, flash:.031},
-  lmg:     {damping:15, frequency:18, follow:.26, end:.35, flash:.031},
-  pistol:  {damping:21, frequency:32, follow:.20, end:.25, flash:.024},
-  shotgun: {damping:13, frequency:22, follow:.32, end:.44, flash:.049},
-  sniper:  {damping:11, frequency:17, follow:.24, end:.52, flash:.042},
+  rifle:   {kick:.56, damping:18, frequency:21, follow:.28, end:.28, flash:.027},
+  smg:     {kick:.53, damping:25, frequency:29, follow:.18, end:.20, flash:.023},
+  burst:   {kick:.54, damping:22, frequency:26, follow:.22, end:.23, flash:.026},
+  marksman:{kick:.56, damping:16, frequency:22, follow:.18, end:.33, flash:.031},
+  lmg:     {kick:.50, damping:15, frequency:18, follow:.26, end:.35, flash:.031},
+  pistol:  {kick:.50, damping:21, frequency:32, follow:.20, end:.25, flash:.024},
+  revolver:{kick:.65, damping:18, frequency:29, follow:.19, end:.29, flash:.032},
+  shotgun: {kick:.60, damping:13, frequency:22, follow:.32, end:.44, flash:.049},
+  sniper:  {kick:.58, damping:11, frequency:17, follow:.24, end:.52, flash:.042},
 };
 export function shotResponse(age, weapon='rifle') {
   const {damping,frequency,follow,end} = impulse[weapon] ?? impulse.rifle;
@@ -123,5 +138,8 @@ export function shotFlashDuration(weapon) {
 export const LOCAL_IGNITION_LIFE=.016;
 export function shotKickResponse(age,weapon){
   const rise=.022;
-  return age<rise ? ease(0,rise,age) : shotResponse(age-rise,weapon);
+  const envelope=age<rise ? ease(0,rise,age) : shotResponse(age-rise,weapon);
+  return (impulse[weapon]??impulse.rifle).kick*envelope;
 }
+
+export const shoulderedKick=(kick,aim)=>kick*(1-.48*aim);

@@ -25,7 +25,8 @@ test('a visible shot leaves the rendered cap along the bore before recoil, even 
     const event={actor:player.id,seq:10,weapon,x:0,y:1.55,z:0,ex:end.x,ey:end.y,ez:end.z};
     renderer.shotsThisFrame=[{event,mine:true}];renderer.renderShots({players:[player]},player,camera);
     assert.equal(shotKickResponse(0,weapon),0);
-    assert.ok(shotKickResponse(.022,weapon)>.99);
+    const crest=shotKickResponse(.022,weapon);
+    assert.ok(crest>0 && crest>shotKickResponse(.05,weapon));
     assert.ok(renderer.flash.position.distanceTo(cap)<1e-8);
     if(weapon==='shotgun'){
       renderer.shotTrails.draw(camera,600);

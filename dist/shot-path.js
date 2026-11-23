@@ -60,6 +60,7 @@ export function flightSlices(directLength,departure,tail,head,emit){
 const streaks={
   __proto__:null,
   pistol:   {speed:600,length:.85, width:.78,alpha:.58,fade:.016},
+  revolver: {speed:680,length:1.24,width:.91,alpha:.74,fade:.021},
   smg:      {speed:760,length:1.10,width:.86,alpha:.62,fade:.016},
   burst:    {speed:790,length:1.45,width:.94,alpha:.72,fade:.020},
   rifle:    {speed:820,length:1.70,width:1,  alpha:.78,fade:.022},

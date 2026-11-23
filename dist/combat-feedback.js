@@ -117,7 +117,7 @@ export class CombatFeedback {
 
   frame(now, yaw) {
     if (this.lastShot > -Infinity) {
-      const weight = Math.max(0, 1 - (now - this.lastShot) / .16);
+      const weight = Math.max(0, 1 - (now - this.lastShot) / .12);
       const pixels = this.reticleWeapon === this.shotWeapon ? Math.round(gunPresentation(this.shotWeapon).reticle * weight * weight) : 0;
       if (pixels !== this.lastPulse) {
         this.sight.style.setProperty('--kick', pixels + 'px');

@@ -1,10 +1,13 @@
 import * as T from './assets/three.module.min.js';
 import { blasterMesh, gunFit, sniperContacts } from './blaster.js';
+import {ironTips} from './gun-fit.js';
 import { reflexEngaged } from './optic-fit.js';
 import { makeReflexDot,projectReflexDot,seatReflex } from './red-dot.js';
-import { PRIMARY_WEAPONS } from './balance.js';
+import { PRIMARY_WEAPONS,SECONDARY_WEAPONS,isSecondaryWeapon } from './balance.js';
+import {revolverAction,revolverLoader,poseRevolver} from './revolver.js';
+import {REVOLVER_RELOAD_CONTACT} from './revolver-timing.js';
 import { eyeHeight, WEAPONS } from './sim.js';
-import { approachAim, gunPresentation, canAim, weaponFov, reloadPose, shotKickResponse, shotCycle, shotFlashDuration, LOCAL_IGNITION_LIFE, scopeAfterShot, sniperScopeVisible, emptySniperBolt, emptySniperGrasp, RELOAD_CONTACT } from './weapon-view.js';
+import { approachAim, cameraAim, gunPresentation, canAim, weaponFov, reloadPose, shotKickResponse, shoulderedKick, shotCycle, shotFlashDuration, LOCAL_IGNITION_LIFE, scopeAfterShot, sniperScopeVisible, emptySniperBolt, emptySniperGrasp, RELOAD_CONTACT } from './weapon-view.js';
 import { makeYard, sky, Parts, glowMaterial } from './yard-art.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { PelletRenderer } from './pellet-render.js';
@@ -22,7 +25,7 @@ import { loadOperators,operatorAvailable,createOperator,updateOperator,disposeOp
 const PI=Math.PI;
 const clamp=(n,min,max)=>Math.min(max,Math.max(min,n));
 const damp=(from,to,rate,dt)=>from+(to-from)*(1-Math.exp(-rate*dt));
-const weaponNames=[...PRIMARY_WEAPONS,'pistol','knife'];
+const weaponNames=[...PRIMARY_WEAPONS,...SECONDARY_WEAPONS,'knife'];
 const pose=new T.Vector3(),direction=new T.Vector3(),endpoint=new T.Vector3();
 const forwardAxis=new T.Vector3(0,0,-1),beamStart=new T.Vector3(),beamEnd=new T.Vector3();
 const knifeShoulder=new T.Vector3(.405,-.354,-.135);
@@ -38,11 +41,22 @@ const reverseRightFrame=new T.Quaternion().setFromEuler(new T.Euler(1.90,1.02,2.
 const vertical=new T.Vector3(0,1,0);
 const teamColors=['#168bc9','#ed7040'];
 const teamLights=[0x66dcff,0xff975e];
-const tracerColors={pistol:0xffdbab,smg:0xffcc8e,rifle:0xffe2a9,burst:0xffe4b5,lmg:0xffca85,marksman:0xffeecf,sniper:0xfff5e3};
+const tracerColors={pistol:0xffdbab,revolver:0xffddb5,smg:0xffcc8e,rifle:0xffe2a9,burst:0xffe4b5,lmg:0xffca85,marksman:0xffeecf,sniper:0xfff5e3};
 
 // Grip points lie on the near face of the actual detachable mesh in its bind pose.
 // Apex and feed are fractions of the reload; release and seating are the shared Foley contacts.
 const palmPad=new T.Vector3(-.008,-.070,.010);
+const ironPoint=new T.Vector3();
+export function shoulderIron(rig,key,aim){
+  const tip=ironTips[key];
+  if(!tip||aim<=0)return;
+  // Most of the movement stays in the wrists and receiver. Keep a small
+  // visual lift at the front sight and a sliver of daylight over the blade.
+  const weight=.90*aim**3;
+  ironPoint.fromArray(tip).multiply(rig.scale).applyQuaternion(rig.quaternion).add(rig.position);
+  rig.position.x-=weight*ironPoint.x;
+  rig.position.y-=weight*(ironPoint.y+.00055);
+}
 const magazineHandling={
   rifle:   {grip:[-.0226,-.1740,-.2483],  apex:.405,feed:.51,drop:.190,side:-.072,back:.055,pitch:-.22,turn:.28,wrist:.39,roll:.39,center:.042},
   smg:     {grip:[-.0335,-.1241,-.15647], apex:.354,feed:.49,drop:.142,side:-.058,back:.031,pitch:.12,turn:.20,wrist:.32,roll:.27,center:.013},
@@ -175,6 +189,10 @@ export function gunModel(type,skin='karambit') {
     window:body.getObjectByName('reflex-window'),
     pump:body.getObjectByName('pump'),bolt:body.getObjectByName('bolt')};
   group.add(support.userData.sleeve,strong.userData.sleeve);
+  if(type==='revolver'){
+    group.userData.action=revolverAction(body);
+    const loader=revolverLoader();loader.visible=false;group.add(loader);group.userData.loader=loader;
+  }
   if(sniper){
     group.userData.magGrip=contact.clone();
     group.userData.magGrip.x=magBounds.min.x+.002;
@@ -261,6 +279,28 @@ export function animateHands(gun,player,reload,cycle) {
   const {fit,strong,support,body,magazine,shell,pump,bolt,handling}=gun.userData;
   if(!strong)return;
   const pull=reload.travel,reach=reload.reach;
+  if(gun.userData.action){
+    const {action,loader}=gun.userData,t=poseRevolver(action,player,cycle),smooth=T.MathUtils.smoothstep;
+    const leave=smooth(t,.24,.42)*(1-smooth(t,.44,REVOLVER_RELOAD_CONTACT.seat));
+    const retreat=smooth(t,.64,.75)*(1-smooth(t,.76,.94));
+    const contact=smooth(t,.065,.22)*(1-smooth(t,.76,.92));
+    action.hinge.updateMatrix();action.drum.updateMatrix();
+    // The loader follows the open cylinder in gun space. The support wrist
+    // comes back to the same point as the keyed parts return home.
+    gripTarget.set(0,0,-.020).applyMatrix4(action.drum.matrix).applyMatrix4(action.hinge.matrix);
+    loader.position.copy(gripTarget);
+    loader.position.x-=.016+.102*(leave+retreat);loader.position.y-=.176*(leave+retreat);
+    loader.position.z+=.020+.077*leave+.095*retreat;
+    loader.rotation.set(-.59*leave,-.35*leave,.17*leave);loader.visible=t>.405&&t<.762;
+    if(loader.visible)loader.position.x+=.016*(1-leave);
+    support.rotation.set(-.34*contact,.18*contact,.43*contact);
+    const hand=support.userData.hand;hand.updateMatrix();
+    wristAxis.copy(palmPad).applyMatrix4(hand.matrix).applyQuaternion(support.quaternion);
+    support.position.copy(loader.position).sub(wristAxis);
+    support.position.x-=.042;support.position.y-=.024;support.position.z+=.022;
+    support.position.multiplyScalar(contact);
+    return;
+  }
   if(pump){
     // The front hand stays on the sliding grip until it reaches for a loose shell.
     pump.position.z=.132*cycle.stroke;
@@ -607,7 +647,7 @@ export class ArenaRenderer {
     if(face){face.rotation.x=.081;face.material.emissive.setRGB(.342,.164,.038);}
   }
   resetShot() {
-    this.shotAge=Infinity;this.shotWeapon=null;this.shotStrength=0;this.shotRun=0;this.kickSide=1;
+    this.shotAge=Infinity;this.shotWeapon=null;this.shotRun=0;this.kickSide=1;
     this.recoil=0;this.flashTime=0;this.scopeActive=false;
   }
 
@@ -620,7 +660,7 @@ export class ArenaRenderer {
       if(!actor?.alive||actor.active!=='knife'||swing.age>=.55)this.meleeSwings.delete(id);
     }
     this.shotTrails.step(shotDt);this.impacts.step(shotDt);
-    this.shotAge+=shotDt;this.recoil=this.shotStrength*shotKickResponse(this.shotAge,this.shotWeapon);
+    this.shotAge+=shotDt;this.recoil=shotKickResponse(this.shotAge,this.shotWeapon);
     this.flashTime=Math.max(0,this.flashTime-shotDt);
     if(this.flashTime>0 && this.shotWeapon){
       this.flash.scale.setScalar(.91*gunFit[this.shotWeapon].flash*this.flashTime/LOCAL_IGNITION_LIFE);
@@ -659,8 +699,7 @@ export class ArenaRenderer {
         const continuous=this.shotWeapon===e.weapon&&this.shotAge<.24;
         this.shotRun=continuous?this.shotRun+1:0;
         this.kickSide=Math.cos(this.shotRun*2.19+.45);
-        this.shotStrength=1+.05*Math.min(this.shotRun,5);
-        this.shotAge=0;this.shotWeapon=e.weapon;
+        this.shotAge=0;this.shotWeapon=e.weapon;this.recoil=0;
         this.flashTime=e.blocked?0:LOCAL_IGNITION_LIFE;
       }
       const hit=events[i+1]?.type==='hit'&&events[i+1].actor===e.actor?events[i+1]:null;
@@ -768,19 +807,27 @@ export class ArenaRenderer {
         a.x=snap?p.x:damp(a.x,p.x,30,dt);a.z=snap?p.z:damp(a.z,p.z,30,dt);
         a.y=snap?p.y:damp(a.y,p.y,28,dt);a.group.position.set(a.x,a.y,a.z);
         a.group.rotation.y=-p.yaw;a.group.scale.y=damp(a.group.scale.y,!a.rig&&p.slide>0?.67:1,18,dt);
-        if(a.rig)updateOperator(a.rig,p,dt,this.meleeSwings.get(p.id));
+        let cylinderCycle;
+        if(p.active==='revolver'){
+          const fired=this.shotsThisFrame.some(({event})=>event.actor===p.id&&event.weapon==='revolver');
+          a.revolverAge=fired?0:(a.revolverAge??Infinity)+dt;
+          cylinderCycle=shotCycle('revolver',a.revolverAge);
+        }else a.revolverAge=Infinity;
+        if(a.rig)updateOperator(a.rig,p,dt,this.meleeSwings.get(p.id),cylinderCycle);
         else {
         const knifeSkin=normalizeKnifeSkin(p.knifeSkin);
         if(a.active!==p.active||(p.active==='knife'&&a.knifeSkin!==knifeSkin)){
           const held=p.active==='knife'?knifeMesh(knifeSkin):blasterMesh(p.active);
           if(p.active==='knife')held.position.y=.075;
           a.loadout.clear();a.loadout.add(held);a.active=p.active;a.knifeSkin=knifeSkin;a.drawAge=0;
+          a.revolver=p.active==='revolver'?revolverAction(held):null;
         }
         a.loadout.rotation.x=clamp(p.pitch,-.78,.78);
         const slash=p.active==='knife'?this.meleeSwings.get(p.id):null,cut=knifePose(slash?.age??.55,slash?.side||1,knifeSkin);
         a.loadout.position.set(.127,p.active==='knife'?1.11:1.166,-.277);
         a.loadout.rotation.y=p.active==='knife'?-.3+cut.ry:0;
         a.loadout.rotation.z=p.active==='knife'?.4+cut.rz:0;
+        if(a.revolver)poseRevolver(a.revolver,p,cylinderCycle);
         if(p.active==='knife'){
           a.loadout.rotation.x+=cut.rx-.18;
           animateCarriedKnife(a.loadout.children[0],knifeSkin,slash?Infinity:a.drawAge,0);a.drawAge+=dt;
@@ -865,6 +912,7 @@ export class ArenaRenderer {
     const age=this.shotWeapon===focus.active ? this.shotAge : Infinity;
     const ads=scopeAfterShot(focus.active,held,age);
     this.aim=first?Number(ads):approachAim(this.aim,ads,dt,focus.active);
+    this.lensAim=cameraAim(focus.active,first?this.aim:this.lensAim,this.aim,held,ads,dt);
     this.scopeActive=sniperScopeVisible(focus.active,this.aim,ads);
     const height=eyeHeight(focus);
     this.eye=first||playerView?height:damp(this.eye,height,19,dt);
@@ -879,7 +927,7 @@ export class ArenaRenderer {
     this.roll=damp(this.roll,slide?-.017:0,16,dt);
     // The simulation fires down this axis. The weapon rig carries the recoil.
     cam.rotation.set(pitch,-yaw,this.roll,'YXZ');
-    const fov=weaponFov(focus.active,this.aim,slide);
+    const fov=weaponFov(focus.active,this.lensAim,slide);
     if(cam.fov!==fov){cam.fov=fov;cam.updateProjectionMatrix();}
     this.viewFov=cam.fov;
     const key=weaponNames.includes(focus.active)?focus.active:'rifle';
@@ -904,21 +952,28 @@ export class ArenaRenderer {
     const fit=weapon.userData.fit, hip=1-this.aim;
     const gunX=(.188+Math.sin(this.bob)*.009*sway-this.lookSwayX)*hip;
     const gunY=(-.174-Math.abs(Math.cos(this.bob))*.009*sway-this.lookSwayY)*hip-(fit.sight*.91+.009)*this.aim;
-    const gunZ=(key==='pistol'?-.35:-.422)+.029*this.aim;
+    const gunZ=(isSecondaryWeapon(key)?-.35:-.422)+.029*this.aim;
     const handling=weapon.userData.handling,profile=gunPresentation(key);
-    const kick=this.recoil*(.64+.36*hip),lateral=kick*this.kickSide;
+    const kick=shoulderedKick(this.recoil,this.aim),lateral=kick*this.kickSide;
     this.gunRig.position.set(gunX+reloadWeight*(handling?.center??.042),gunY+reloadWeight*.059+reload.bump*.008-this.equip*.12,
       gunZ-reloadWeight*.17+kick*profile.push);
     this.gunRig.rotation.set(kick*profile.pitch+hip*.012+reloadWeight*.088-this.equip*.18,
       .025*hip+reloadWeight*.10+this.lookSwayX*.55+lateral*profile.yaw,
       -.032*hip+reloadWeight*(handling?.roll??.39)+reload.bump*.028+lateral*profile.roll);
     if(key==='shotgun'){
+      const shoulderMotion=cycle.stroke*(1-.68*this.aim);
       this.gunRig.position.x-=.098*reloadWeight;
-      this.gunRig.position.y-=.038*cycle.stroke;
+      this.gunRig.position.y-=.038*shoulderMotion;
       this.gunRig.position.z+=.10*reloadWeight;
-      this.gunRig.rotation.x-=.085*cycle.stroke;
+      this.gunRig.rotation.x-=.085*shoulderMotion;
       this.gunRig.rotation.y-=.24*reloadWeight;
-      this.gunRig.rotation.z+=.32*reloadWeight-.09*cycle.stroke;
+      this.gunRig.rotation.z+=.32*reloadWeight-.09*shoulderMotion;
+    }else if(key==='revolver'){
+      this.gunRig.position.x-=.093*reloadWeight;
+      this.gunRig.position.y+=.045*reloadWeight;
+      this.gunRig.rotation.x+=.20*reloadWeight;
+      this.gunRig.rotation.y+=.40*reloadWeight;
+      this.gunRig.rotation.z-=.99*reloadWeight;
     }else if(sniper){
       // Roll the long receiver toward the viewer during the bolt cycle.
       this.gunRig.position.x+=.035*hip-.074*cycle.grasp-.084*reloadWeight;
@@ -929,6 +984,7 @@ export class ArenaRenderer {
       this.gunRig.rotation.z-=.33*cycle.grasp+.73*reloadWeight;
     }
     seatReflex(this.gunRig,key,this.aim);
+    shoulderIron(this.gunRig,key,this.aim);
     const inspectAge=key==='knife'&&this.meleeAge<knifeAttackDuration(knifeSkin)?Infinity:view.inspectAge;
     if(key==='knife'){
       poseHeldKnife(this.gunRig,weapon,knifeSkin,t-this.knifeEquippedAt,inspectAge,

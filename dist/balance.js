@@ -6,6 +6,10 @@ const stud = .28;
 export const PRIMARY_WEAPONS = Object.freeze(['rifle', 'shotgun', 'sniper', 'smg', 'burst', 'marksman', 'lmg']);
 export const isPrimaryWeapon = id => PRIMARY_WEAPONS.includes(id);
 
+export const SECONDARY_WEAPONS = Object.freeze(['pistol', 'revolver']);
+export const isSecondaryWeapon = id => SECONDARY_WEAPONS.includes(id);
+export const secondaryWeapon = id => isSecondaryWeapon(id) ? id : 'pistol';
+
 // Deal a different set each match, without duplicating equipment across six bot seats.
 export function botLoadouts() {
   const first = Math.floor(Math.random() * PRIMARY_WEAPONS.length);
@@ -58,6 +62,12 @@ export const WEAPONS = {
     id:'pistol', label:'권총', mag:13, reserve:91, damage:12, head:15,
     semiAuto:true, interval:.13, equip:.20, reload:1.06, spread:.5*degree, aimSpread:.12*degree, moveScale:1,
     falloff:{start:50*stud, end:125*stud, damage:3, head:4}
+  },
+  revolver: {
+    id:'revolver', label:'리볼버', callsign:'타이드록', role:'6연발 단발', accent:'#d6aa74',
+    mag:6, reserve:36, damage:38, head:72, semiAuto:true, interval:.43, equip:.31, reload:1.85,
+    spread:1.1*degree, aimSpread:.16*degree, moveScale:.98, aimFov:58,
+    falloff:{start:16, end:39, damage:22, head:42}
   },
   knife: {
     id:'knife', label:'전투용 칼', melee:true, mag:null, reserve:null, damage:50, head:50,

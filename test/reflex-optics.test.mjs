@@ -7,7 +7,7 @@ import {opticFit,reflexEngaged} from '../dist/optic-fit.js';
 import {makeReflexDot,projectReflexDot,seatReflex} from '../dist/red-dot.js';
 import {gunPresentation} from '../dist/weapon-view.js';
 
-const firearms=[...PRIMARY_WEAPONS.filter(key=>key!=='sniper'),'pistol'];
+const firearms=[...PRIMARY_WEAPONS.filter(key=>key!=='sniper'&&key!=='shotgun'),'pistol'];
 function view(id){
   const rig=new Group(),gun=gunModel(id);
   rig.add(gun);rig.scale.setScalar(.91);
@@ -21,7 +21,7 @@ function view(id){
   return {rig,gun,glass,shoulder};
 }
 
-test('the seven receiver-mounted sights leave the optical axis open and rest on the body',()=>{
+test('receiver-mounted sights leave the optical axis open and rest on the body',()=>{
   const ray=new Raycaster(),down=new Vector3(0,-1,0),forward=new Vector3(0,0,-1);
   for(const id of firearms){
     const {gun,glass,shoulder}=view(id),fit=opticFit(id);
@@ -38,7 +38,7 @@ test('the seven receiver-mounted sights leave the optical axis open and rest on 
     assert.ok(intersections.length>0&&intersections.every(hit=>hit.object===glass),id+' open line of sight');
     assert.ok(Math.abs(intersections[0].distance+fit.eyeZ)<1e-5);
   }
-  for(const id of ['sniper','knife']){
+  for(const id of ['sniper','shotgun','revolver','knife']){
     assert.equal(opticFit(id),null);assert.equal(reflexEngaged(id,1),false);
     assert.equal(gunModel(id).getObjectByName('reflex-sight'),undefined);
   }

@@ -63,7 +63,7 @@ export function redDotMount(id){
 }
 
 const pivot=new T.Vector3(),turnedPivot=new T.Vector3();
-const aimedRise={shotgun:.33,marksman:.55,pistol:.60};
+const aimedRise={marksman:.55,pistol:.60};
 // Applied to the existing sway, recoil and equip pose. At full ADS the actual
 // aperture is at eyeZ; recoil turns the gun mostly about that contact.
 export function seatReflex(rig,id,aim){

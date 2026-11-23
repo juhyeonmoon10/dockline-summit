@@ -5,7 +5,7 @@
  * src/goals/DodgeGoal.js and src/goals/HuntGoal.js. See assets/dive-LICENSE.txt.
  * Dockline uses its own collision queries, navigation, weapons and net inputs.
  */
-import { WEAPONS } from './balance.js';
+import { WEAPONS, isSecondaryWeapon } from './balance.js';
 
 const limit = (value, min, max) => Math.max(min, Math.min(max, value));
 const angle = (from, to) => Math.atan2(Math.sin(to - from), Math.cos(to - from));
@@ -167,7 +167,7 @@ export function tacticalBotInput(g, p, dt, memory, env) {
   const dry=p.ammo===0 && p.reserve===0;
   return {
     yaw, pitch, fire:fire&&!dry&&!(gun.semiAuto&&memory.semiLatched), ads: seen && gun.aimFov<=55 && range > 8,
-    slot: p.active==='pistol'||dry?2:1,
+    slot: isSecondaryWeapon(p.active)||dry?2:1,
     forward: movement.x * sy - movement.z * cy, strafe: movement.x * cy + movement.z * sy,
     jump: !!movement.jump, reload: p.reserve>0 && !p.reload && (!p.ammo || (!seen && p.ammo <= gun.mag * .35))
   };

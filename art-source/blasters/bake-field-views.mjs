@@ -3,22 +3,21 @@
 // whole arsenal of uncompressed frames at once. The game supplies all poses.
 export async function bakeFieldViews(kind,options={}){
   const moduleAt=path=>import(new URL(path,location.href).href);
-  const [{ArenaRenderer},{blasterMesh,gunFit},{createRange},{getArena},T,{gunPresentation},{REFLEX_APERTURE}]=await Promise.all([
+  const [{ArenaRenderer},{blasterMesh,gunFit},{createRange},{getArena},T,{gunPresentation},{opticFit,REFLEX_APERTURE}]=await Promise.all([
     moduleAt('/render.js'),moduleAt('/blaster.js'),moduleAt('/sim.js'),moduleAt('/arena-map.js'),moduleAt('/assets/three.module.min.js'),moduleAt('/weapon-view.js'),moduleAt('/optic-fit.js'),
   ]);
-  const guns=['rifle','shotgun','sniper','smg','burst','marksman','lmg','pistol'];
-  if(!guns.includes(kind))throw Error('Unknown field weapon '+kind);
+  if(!Object.hasOwn(gunFit,kind))throw Error('Unknown field weapon '+kind);
   const canvas=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c;};
   const viewCanvas=canvas(640,360);viewCanvas.style.cssText='width:640px;height:360px;display:block';
   document.body.replaceChildren(viewCanvas);
   const arena=new ArenaRenderer(viewCanvas,getArena('switchyard'));
-  const g=createRange({weapon:kind==='pistol'?'rifle':kind}),actor=g.players[0];actor.active=kind;
+  const g=createRange(),actor=g.players[0];actor.active=kind;
   arena.gl.render=()=>{};
   const output=options.metadataOnly?null:new T.WebGLRenderer({alpha:true,antialias:true,preserveDrawingBuffer:true});
   if(output){output.setClearColor(0,0);output.outputColorSpace=arena.gl.outputColorSpace;output.setSize(640,360,false);}
   const round=v=>Math.round(v*100000)/100000;
   const windowMesh=arena.guns[kind].getObjectByName('reflex-window'),glass=windowMesh?{still:[]}:null;
-  if(kind!=='sniper'&&!windowMesh)throw Error('Missing reflex geometry on '+kind);
+  if(Boolean(windowMesh)!==Boolean(opticFit(kind)))throw Error('Unexpected reflex geometry on '+kind);
   // Save the convex aperture photographed in a particular tile. Geometry
   // vertices include the cut corners, so the in-game dot clips to the rim.
   const aperture=()=>REFLEX_APERTURE.flatMap(([x,y])=>{
@@ -37,7 +36,6 @@ export async function bakeFieldViews(kind,options={}){
     arena.equip=0;arena.active=kind;arena.aim=held?1+(aim-1)*Math.exp(raise*dt):aim;arena.flashTime=0;
     arena.lastFocus=actor.id;arena.lastYaw=0;arena.lastPitch=0;
     arena.lastSeq=g.seq;arena.shotAge=shotAge-dt;arena.shotWeapon=shotAge<8?kind:null;
-    arena.shotStrength=shotAge<8?(kind==='sniper'?gunFit[kind].flash:1):0;
     arena.draw(g,actor.id,{t:1,dt,yaw:0,pitch:0,ads:held,quality:'high'});
     // Scope masking is a HUD layer. The ADS still is also used in transitions.
     arena.guns[kind].visible=true;
@@ -72,8 +70,8 @@ export async function bakeFieldViews(kind,options={}){
   if(options.reloadTimes){
     const shots=options.shotTimes,loads=options.reloadTimes;
     const sequences=shots?{fire:shots,reload:loads}:{reload:loads};
+    if(kind==='shotgun'||kind==='revolver')sequences.fireADS=shots;
     if(kind==='shotgun'){
-      sequences.fireADS=shots;
       sequences.loopStart=loads.filter(t=>t<.15);
       sequences.loopEnd=loads.filter(t=>t>.76);
     }else if(kind==='sniper')sequences.empty=loads.filter(t=>t>=options.emptyStart&&t<1);

@@ -36,7 +36,7 @@ export class LiteHeldView {
       if(model.parent!==this.rig){this.rig.clear();this.rig.add(model);}
       if(knife)poseHeldKnife(this.rig,model,skin,drawAge,inspectAge,age,swing?.side||1,now*9,walk);
       else{
-        this.rig.position.set(key==='sniper'?.223:.188,-.174,key==='pistol'?-.35:-.422);
+        this.rig.position.set(key==='sniper'?.223:.188,-.174,key==='pistol'||key==='revolver'?-.35:-.422);
         this.rig.rotation.set(.012,.025,-.032);
       }
       applyInspection(this.rig,inspection);

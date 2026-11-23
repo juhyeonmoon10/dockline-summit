@@ -1,6 +1,8 @@
 // Recorded action takes, stored together to unlock all reloads with one request.
 // Durations and the silent guard between takes are in milliseconds.
 export const foleyUrl='./assets/audio/foley/mechanisms.ogg';
+export const revolverFoleyUrl='./assets/audio/foley/revolver.ogg';
+export const cylinderCues=[['cylinderOpen',165],['cylinderEject',245],['loaderSeat',170],['cylinderClose',190]];
 const guard=30;
 const cues=[
   ['magOut',296],['magSeat',151],['settle',94],
@@ -10,10 +12,10 @@ const cues=[
   ['boltOpen',224],['boltClose',215]
 ];
 
-export function unpackFoley(ctx,decoded){
+export function unpackFoley(ctx,decoded,sequence=cues){
   const buffers=new Map(),rate=decoded.sampleRate;
   let offset=guard;
-  for(const [id,duration] of cues){
+  for(const [id,duration] of sequence){
     const start=Math.round(offset*rate/1000),end=Math.round((offset+duration)*rate/1000);
     if(end>decoded.length)throw new Error('Incomplete recorded action pack');
     const take=ctx.createBuffer(decoded.numberOfChannels,end-start,rate);

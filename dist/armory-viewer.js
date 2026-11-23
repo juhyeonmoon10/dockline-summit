@@ -1,14 +1,15 @@
 import * as T from './assets/three.module.min.js';
-import {PRIMARY_WEAPONS,WEAPONS} from './balance.js';
+import {PRIMARY_WEAPONS,SECONDARY_WEAPONS,isSecondaryWeapon,WEAPONS} from './balance.js';
 import {blasterMesh} from './blaster.js';
 import {knifeMesh,animateKnife} from './knife.js';
 import {KARAMBIT_RING,KNIFE_LABELS,KNIFE_TIMING} from './knife-types.js';
 import {ringFlourish} from './view-inspect.js';
 import {createCanvasPreview} from './armory-canvas.js';
+import {weaponImageUrl} from './weapon-image-url.js';
 import {studioReflection} from './weapon-light.js';
 
 const knives=Object.keys(KNIFE_LABELS);
-const catalog=[...PRIMARY_WEAPONS,'pistol',...knives];
+const catalog=[...PRIMARY_WEAPONS,...SECONDARY_WEAPONS,...knives];
 const isKnife=id=>knives.includes(id);
 const nameOf=id=>KNIFE_LABELS[id]||WEAPONS[id].callsign||WEAPONS[id].label;
 const typeOf=id=>isKnife(id)?'근접 무기':WEAPONS[id].label;
@@ -262,12 +263,12 @@ function makeStage(host,preferLite,onZoom){
 
 let openViewer=null;
 
-export function openArmoryViewer({weapon='rifle',equippedPrimary='rifle',equippedKnife='karambit',lite=false,onEquip,onClose}={}){
+export function openArmoryViewer({weapon='rifle',equippedPrimary='rifle',equippedSidearm='pistol',equippedKnife='karambit',lite=false,onEquip,onClose}={}){
   if(openViewer){openViewer.select(weapon);return openViewer;}
   const dialog=document.createElement('dialog');
   dialog.className='armory-dialog';dialog.setAttribute('aria-labelledby','armory-dialog-heading');
-  const choices=catalog.map(id=>`<button type="button" class="armory-item" data-id="${id}" aria-pressed="false"><img src="./assets/loadout-${id}.png" alt=""><span>${nameOf(id)}</span></button>`).join('');
-  const options=catalog.map(id=>`<option value="${id}">${nameOf(id)}${isKnife(id)||id==='pistol'?'':' · '+typeOf(id)}</option>`).join('');
+  const choices=catalog.map(id=>`<button type="button" class="armory-item" data-id="${id}" aria-pressed="false"><img src="${weaponImageUrl(`loadout-${id}.png`)}" alt=""><span>${nameOf(id)}</span></button>`).join('');
+  const options=catalog.map(id=>`<option value="${id}">${nameOf(id)}${isKnife(id)||!WEAPONS[id].callsign?'':' · '+typeOf(id)}</option>`).join('');
   dialog.innerHTML=`<header class="armory-header"><h2 id="armory-dialog-heading">무기 자세히 보기</h2><button type="button" class="armory-close" aria-label="닫기" title="닫기 (Esc)">${icon('close')}</button></header>
     <div class="armory-body">
       <aside class="armory-rail" aria-label="무기 선택">${choices}</aside>
@@ -294,7 +295,7 @@ export function openArmoryViewer({weapon='rifle',equippedPrimary='rifle',equippe
     $('.armory-in').disabled=zoom>=2.799;$('.armory-out').disabled=zoom<=.651;
   }
   function updateEquip(){
-    const equipped=selected==='pistol'||selected===equippedPrimary||selected===equippedKnife;
+    const equipped=selected===equippedSidearm||selected===equippedPrimary||selected===equippedKnife;
     equip.hidden=!onEquip;equip.disabled=equipped;equip.textContent=equipped?'장착 중':'장착하기';
   }
   function select(id){
@@ -303,7 +304,7 @@ export function openArmoryViewer({weapon='rifle',equippedPrimary='rifle',equippe
     for(const b of buttons)b.setAttribute('aria-pressed',String(b.dataset.id===id));
     const chosen=buttons.find(b=>b.dataset.id===id);
     if(chosen&&chosen.offsetParent)chosen.scrollIntoView({block:'nearest',inline:'nearest'});
-    $('.armory-kind').textContent=(isKnife(id)?'근접 슬롯':id==='pistol'?'보조 슬롯':'주무기 슬롯')+' / '+typeOf(id);
+    $('.armory-kind').textContent=(isKnife(id)?'근접 슬롯':isSecondaryWeapon(id)?'보조 슬롯':'주무기 슬롯')+' / '+typeOf(id);
     $('.armory-name').textContent=nameOf(id);
     const w=isKnife(id)?WEAPONS.knife:WEAPONS[id];
     const stats=[['기본 피해',w.pellets?w.damage+' × '+w.pellets:w.damage],
@@ -331,7 +332,7 @@ export function openArmoryViewer({weapon='rifle',equippedPrimary='rifle',equippe
     $('.armory-reset').onclick=()=>stage.reset();
     equip.onclick=()=>{
       onEquip?.(selected);
-      if(isKnife(selected))equippedKnife=selected;else if(selected!=='pistol')equippedPrimary=selected;
+      if(isKnife(selected))equippedKnife=selected;else if(isSecondaryWeapon(selected))equippedSidearm=selected;else equippedPrimary=selected;
       updateEquip();
     };
     select(weapon);

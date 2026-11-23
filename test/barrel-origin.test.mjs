@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRange,stepGame,eyeHeight,firingMuzzle,MAX_HP} from '../dist/sim.js';
 import {getArena} from '../dist/arena-map.js';
+import {isSecondaryWeapon} from '../dist/balance.js';
 import {gunFit} from '../dist/gun-fit.js';
 import {worldHit} from '../dist/arena-world.js';
 import {clipBarrelOrigin,pelletTrails,pelletSpan,singleShotSpan} from '../dist/shot-path.js';
@@ -10,9 +11,9 @@ import {sniperScopeVisible} from '../dist/weapon-view.js';
 test('every gun publishes the muzzle as its shot origin for hip and aimed fire',t=>{
   t.mock.method(Math,'random',()=>0);
   for(const id of Object.keys(gunFit))for(const ads of [false,true]){
-    const game=createRange({weapon:id==='pistol'?'rifle':id}),p=game.players[0];
+    const game=createRange({weapon:id,sidearm:id}),p=game.players[0];
     Object.assign(p,{x:16.45,y:0,z:20.2});
-    const input={slot:id==='pistol'?2:1,yaw:.18,pitch:.06,ads};
+    const input={slot:isSecondaryWeapon(id)?2:1,yaw:.18,pitch:.06,ads};
     for(let i=0;i<80;i++)stepGame(game,{[p.id]:input},1/60);
     stepGame(game,{[p.id]:{...input,fire:true}},1/60);
     const shot=game.events.find(e=>e.type==='shot'),tip=firingMuzzle(p);
