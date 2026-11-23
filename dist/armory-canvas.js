@@ -9,6 +9,22 @@ for(let i=0;i<=1024;i++){
 }
 const channel=x=>gamma[Math.min(1024,Math.max(0,Math.round(x*1024)))];
 
+// Straight-alpha RGBA is required here: the same canvas also composites the
+// player's held model over the Lite arena and the catalogue's workbench.
+function over(foreground,background){
+  const fa=foreground>>>24,ba=background>>>24;
+  if(!ba)return foreground;
+  const keep=ba*(1-fa/255),opacity=fa+keep;
+  const r=Math.round(((foreground&255)*fa+(background&255)*keep)/opacity);
+  const g=Math.round((((foreground>>>8)&255)*fa+((background>>>8)&255)*keep)/opacity);
+  const b=Math.round((((foreground>>>16)&255)*fa+((background>>>16)&255)*keep)/opacity);
+  return (Math.round(opacity)<<24)|(b<<16)|(g<<8)|r;
+}
+
+function topLeft(dx,dy,winding){
+  return dy*winding<0||(dy===0&&dx*winding>0);
+}
+
 export function createCanvasPreview(canvas,{studio=false}={}){
   const ctx=canvas.getContext('2d');
   if(!ctx)throw new Error('Canvas 2D unavailable');
@@ -16,7 +32,8 @@ export function createCanvasPreview(canvas,{studio=false}={}){
   const normal=new T.Matrix3();
   let pixels,depth,packed;
 
-  function triangle(a,b,c,xyz,ink,w,h){
+  const translucent=[];
+  function triangle(a,b,c,xyz,ink,w,h,writeDepth=true){
     const ax=xyz[a],ay=xyz[a+1],az=xyz[a+2],bx=xyz[b],by=xyz[b+1],cx=xyz[c],cy=xyz[c+1];
     if(!Number.isFinite(ax+bx+cx))return;
     const ux=bx-ax,uy=by-ay,vx=cx-ax,vy=cy-ay,area=ux*vy-uy*vx;
@@ -25,13 +42,21 @@ export function createCanvasPreview(canvas,{studio=false}={}){
     const y0=Math.max(0,Math.ceil(Math.min(ay,by,cy)-.5)),y1=Math.min(h-1,Math.floor(Math.max(ay,by,cy)-.5));
     const sx=vy/area,sy=-vx/area,tx=-uy/area,ty=ux/area;
     const dz1=xyz[b+2]-az,dz2=xyz[c+2]-az;
+    const opaque=(ink>>>24)===255,winding=Math.sign(area);
+    const edgeU=opaque||topLeft(ax-cx,ay-cy,winding),edgeV=opaque||topLeft(ux,uy,winding);
+    const edgeW=opaque||topLeft(cx-bx,cy-by,winding);
     for(let y=y0;y<=y1;y++){
       let u=(x0+.5-ax)*sx+(y+.5-ay)*sy,v=(x0+.5-ax)*tx+(y+.5-ay)*ty;
       for(let x=x0,index=y*w+x0;x<=x1;x++,index++,u+=sx,v+=tx){
-        if(u<0||v<0||u+v>1)continue;
+        if(opaque){if(u<0||v<0||u+v>1)continue;}
+        else{
+          const w=1-u-v,eps=1e-8;
+          if(u< -eps||v< -eps||w< -eps||u<=eps&&!edgeU||v<=eps&&!edgeV||w<=eps&&!edgeW)continue;
+        }
         const z=az+u*dz1+v*dz2;
         if(z<=depth[index])continue;
-        depth[index]=z;packed[index]=ink;
+        if(writeDepth)depth[index]=z;
+        packed[index]=opaque?ink:over(ink,packed[index]);
       }
     }
   }
@@ -40,7 +65,7 @@ export function createCanvasPreview(canvas,{studio=false}={}){
     if(!pixels||pixels.width!==w||pixels.height!==h){
       pixels=ctx.createImageData(w,h);packed=new Uint32Array(pixels.data.buffer);depth=new Float32Array(w*h);
     }
-    packed.fill(0);depth.fill(-Infinity);
+    packed.fill(0);depth.fill(-Infinity);translucent.length=0;
     const scale=w/units,focal=perspectiveFov?h*.5/Math.tan(perspectiveFov*Math.PI/360):0;
     root.updateMatrixWorld(true);
     root.traverseVisible(mesh=>{
@@ -63,6 +88,8 @@ export function createCanvasPreview(canvas,{studio=false}={}){
       for(const group of groups){
         const material=Array.isArray(mesh.material)?mesh.material[group.materialIndex]:mesh.material;
         if(!material?.visible)continue;
+        const alpha=material.transparent?Math.round(Math.max(0,Math.min(1,material.opacity))*255):255;
+        if(!alpha)continue;
         const base=material.color,roughness=material.roughness??.76,metal=material.metalness??0;
         const studioLit=studio&&!material.isMeshBasicMaterial;
         for(let offset=group.start,end=group.start+group.count;offset+2<end;offset+=3){
@@ -90,11 +117,18 @@ export function createCanvasPreview(canvas,{studio=false}={}){
             greenOut=g*(fill+.89*key+.42*rim)+.93*reflect+shine*.56;
             blueOut=blue*(fill+.76*key+.64*rim)+reflect+shine*.67;
           }
-          const ink=0xff000000|(channel(blueOut)<<16)|(channel(greenOut)<<8)|channel(redOut);
-          triangle(a*3,b*3,c*3,points,ink,w,h);
+          const ink=(alpha<<24)|(channel(blueOut)<<16)|(channel(greenOut)<<8)|channel(redOut);
+          if(alpha===255)triangle(a*3,b*3,c*3,points,ink,w,h);
+          else{
+            const z=points[a*3+2]+points[b*3+2]+points[c*3+2];
+            translucent.push({a:a*3,b:b*3,c:c*3,points,ink,z,order:mesh.renderOrder,writeDepth:material.depthWrite});
+          }
         }
       }
     });
+    // Housing and hands have established their depth before the lens is tinted.
+    translucent.sort((a,b)=>a.order-b.order||a.z-b.z);
+    for(const t of translucent)triangle(t.a,t.b,t.c,t.points,t.ink,w,h,t.writeDepth);
     ctx.putImageData(pixels,0,0);
   }
   return {render};

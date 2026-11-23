@@ -3,8 +3,8 @@
 // whole arsenal of uncompressed frames at once. The game supplies all poses.
 export async function bakeFieldViews(kind,options={}){
   const moduleAt=path=>import(new URL(path,location.href).href);
-  const [{ArenaRenderer},{blasterMesh,gunFit},{createRange},{getArena},T]=await Promise.all([
-    moduleAt('/render.js'),moduleAt('/blaster.js'),moduleAt('/sim.js'),moduleAt('/arena-map.js'),moduleAt('/assets/three.module.min.js'),
+  const [{ArenaRenderer},{blasterMesh,gunFit},{createRange},{getArena},T,{gunPresentation},{REFLEX_APERTURE}]=await Promise.all([
+    moduleAt('/render.js'),moduleAt('/blaster.js'),moduleAt('/sim.js'),moduleAt('/arena-map.js'),moduleAt('/assets/three.module.min.js'),moduleAt('/weapon-view.js'),moduleAt('/optic-fit.js'),
   ]);
   const guns=['rifle','shotgun','sniper','smg','burst','marksman','lmg','pistol'];
   if(!guns.includes(kind))throw Error('Unknown field weapon '+kind);
@@ -17,6 +17,14 @@ export async function bakeFieldViews(kind,options={}){
   const output=options.metadataOnly?null:new T.WebGLRenderer({alpha:true,antialias:true,preserveDrawingBuffer:true});
   if(output){output.setClearColor(0,0);output.outputColorSpace=arena.gl.outputColorSpace;output.setSize(640,360,false);}
   const round=v=>Math.round(v*100000)/100000;
+  const windowMesh=arena.guns[kind].getObjectByName('reflex-window'),glass=windowMesh?{still:[]}:null;
+  if(kind!=='sniper'&&!windowMesh)throw Error('Missing reflex geometry on '+kind);
+  // Save the convex aperture photographed in a particular tile. Geometry
+  // vertices include the cut corners, so the in-game dot clips to the rim.
+  const aperture=()=>REFLEX_APERTURE.flatMap(([x,y])=>{
+    const p=windowMesh.localToWorld(new T.Vector3(x,y,0)).project(arena.gunCamera);
+    return [round((1+p.x)/2),round((1-p.y)/2)];
+  });
 
   const photo=(held,shotAge,load,variant,aim=Number(held))=>{
     const dt=1/60;
@@ -25,14 +33,16 @@ export async function bakeFieldViews(kind,options={}){
     actor.shellLoop=variant==='loopStart';actor.reserve=12;
     actor.reloadDuration=(variant==='empty'?options.emptyDuration:options.reloadDuration)||1;
     actor.reload=load===null?0:Math.max(.000001,(1-load)*actor.reloadDuration);
-    arena.equip=0;arena.active=kind;arena.aim=held?1+(aim-1)*Math.exp(14*dt):aim;arena.flashTime=0;
+    const raise=kind==='sniper'?14:gunPresentation(kind).aimSpeed;
+    arena.equip=0;arena.active=kind;arena.aim=held?1+(aim-1)*Math.exp(raise*dt):aim;arena.flashTime=0;
     arena.lastFocus=actor.id;arena.lastYaw=0;arena.lastPitch=0;
     arena.lastSeq=g.seq;arena.shotAge=shotAge-dt;arena.shotWeapon=shotAge<8?kind:null;
-    arena.shotStrength=shotAge<8?gunFit[kind].flash:0;
+    arena.shotStrength=shotAge<8?(kind==='sniper'?gunFit[kind].flash:1):0;
     arena.draw(g,actor.id,{t:1,dt,yaw:0,pitch:0,ads:held,quality:'high'});
     // Scope masking is a HUD layer. The ADS still is also used in transitions.
     arena.guns[kind].visible=true;
     arena.flash.visible=false;arena.gunCamera.aspect=16/9;arena.gunCamera.updateProjectionMatrix();
+    const dot=arena.guns[kind].getObjectByName('reflex-reticle');if(dot)dot.visible=false;
     output?.render(arena.gunScene,arena.gunCamera);
     const fit=gunFit[kind];
     const projectBore=z=>{
@@ -48,8 +58,17 @@ export async function bakeFieldViews(kind,options={}){
   const stops=options.aimStops||[0,1],base=output?canvas(640*stops.length,360):null,baseCtx=base?.getContext('2d'),muzzles=[];
   for(const [i,aim] of stops.entries()){
     muzzles.push(photo(aim>0,100,null,null,aim));if(output)baseCtx.drawImage(output.domElement,i*640,0);
+    if(glass)glass.still.push(aperture());
   }
-  const result={muzzles};if(base)result.row=base.toDataURL('image/png');
+  const result={muzzles,glass};if(base)result.row=base.toDataURL('image/png');
+  if(kind==='rifle'&&output){
+    const strip=canvas(1280,720),ctx=strip.getContext('2d');
+    for(let i=0;i<16;i++){
+      photo(false,100,i/15,'reload');
+      ctx.drawImage(output.domElement,(i%4)*320,Math.floor(i/4)*180,320,180);
+    }
+    result.rifleReload=strip.toDataURL('image/webp',.94);
+  }
   if(options.reloadTimes){
     const shots=options.shotTimes,loads=options.reloadTimes;
     const sequences=shots?{fire:shots,reload:loads}:{reload:loads};
@@ -68,6 +87,7 @@ export async function bakeFieldViews(kind,options={}){
       const seq=poses[set]=[];
       for(const time of times){
         const muzzle=photo(set==='fireADS',fire?time:100,fire?null:time,set);
+        if(glass&&fire)(glass[set]??=[]).push(aperture());
         // Cropped from a 512×288 view. Transparent gutters isolate neighbouring tiles.
         if(output)ctx.drawImage(output.domElement,cx*1.25,cy*1.25,cw*1.25,ch*1.25,(frame%n)*strideX+2,Math.floor(frame/n)*strideY+2,cw,ch);
         seq.push([frame++,...muzzle]);

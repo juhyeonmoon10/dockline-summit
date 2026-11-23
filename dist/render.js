@@ -1,5 +1,7 @@
 import * as T from './assets/three.module.min.js';
 import { blasterMesh, gunFit, sniperContacts } from './blaster.js';
+import { reflexEngaged } from './optic-fit.js';
+import { makeReflexDot,projectReflexDot,seatReflex } from './red-dot.js';
 import { PRIMARY_WEAPONS } from './balance.js';
 import { eyeHeight, WEAPONS } from './sim.js';
 import { approachAim, gunPresentation, canAim, weaponFov, reloadPose, shotKickResponse, shotCycle, shotFlashDuration, LOCAL_IGNITION_LIFE, scopeAfterShot, sniperScopeVisible, emptySniperBolt, emptySniperGrasp, RELOAD_CONTACT } from './weapon-view.js';
@@ -170,6 +172,7 @@ export function gunModel(type,skin='karambit') {
   const supportMount=new T.Group();
   supportMount.add(support);group.add(body,strong,supportMount);
   group.userData={fit,body,strong,support,supportMount,magazine,contact,shell,handling:magazineHandling[type],
+    window:body.getObjectByName('reflex-window'),
     pump:body.getObjectByName('pump'),bolt:body.getObjectByName('bolt')};
   group.add(support.userData.sleeve,strong.userData.sleeve);
   if(sniper){
@@ -417,6 +420,7 @@ export class ArenaRenderer {
     this.cases=new EjectedCases(this.scene);
     this.worldCamera=new T.PerspectiveCamera(72,1,.055,205);
     this.gunScene=new T.Scene();this.gunCamera=new T.PerspectiveCamera(63,1,.012,4);
+    this.reflexDot=makeReflexDot();this.reflexActive=false;
     this.gunScene.environment=studioReflection();
     this.worldCamera.rotation.order='YXZ';
     lightScene(this.scene,true);lightScene(this.gunScene);sky(this.scene);
@@ -802,6 +806,7 @@ export class ArenaRenderer {
     }
   }
   lobby(t) {
+    this.reflexActive=false;this.reflexDot.visible=false;
     this.meleeAge=.55;this.meleeSwings.clear();
     this.clearShotEffects();
     for(const plate of this.plates.values())plate.visible=false;
@@ -923,6 +928,7 @@ export class ArenaRenderer {
       this.gunRig.rotation.y+=-.20*cycle.grasp-.11*reloadWeight+.020*this.recoil;
       this.gunRig.rotation.z-=.33*cycle.grasp+.73*reloadWeight;
     }
+    seatReflex(this.gunRig,key,this.aim);
     const inspectAge=key==='knife'&&this.meleeAge<knifeAttackDuration(knifeSkin)?Infinity:view.inspectAge;
     if(key==='knife'){
       poseHeldKnife(this.gunRig,weapon,knifeSkin,t-this.knifeEquippedAt,inspectAge,
@@ -931,6 +937,8 @@ export class ArenaRenderer {
     const inspection=inspectionPose(key==='knife'?knifeSkin:key,inspectAge);
     applyInspection(this.gunRig,inspection);
     poseHeldSleeves(weapon,key,inspection?.weight,inspection?.freeHand);
+    this.reflexActive=Boolean(canAim(focus,true)&&!inspection&&reflexEngaged(key,this.aim));
+    projectReflexDot(this.reflexDot,weapon.userData.window,this.reflexActive,this.gunCamera,this.canvas.clientHeight||this.res.h);
     this.barrelTip.position.set(fit.muzzleX??0,fit.muzzleY,fit.muzzle);
     if(key==='knife'||this.flashTime<=0)this.flash.visible=false;
     this.ring.material.opacity=game.phase==='overtime'?.70+.19*Math.sin(t*5):.32;

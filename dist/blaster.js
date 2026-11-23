@@ -3,6 +3,7 @@ import * as T from './assets/three.module.min.js';
 import { guns } from './assets/toon-guns.js';
 import { blasters } from './assets/blaster-geometry.js';
 import { Parts } from './arena-parts.js';
+import { redDotMount } from './red-dot.js';
 export { gunFit } from './gun-fit.js';
 
 const cache=new Map();
@@ -405,7 +406,6 @@ function arcadeDetails(kind,model){
   parts.cube(0,.043,.198,.120,.073,.032,accent,-.13);
   breakerShell(parts,[[.162,.043,.045,.071],[.176,.054,.022,.079],[.201,.055,.017,.075],[.212,.051,.022,.069]],'#424e4b',edge);
   sidePanel(parts,[[-.245,.074],[-.179,.101],[-.048,.084],[-.084,.022],[-.206,.008]],.050,.066,accent);
-  parts.cube(0,.091,-.125,.024,.032,.064,ink);
   for(const side of [-1,1]){
    parts.beam([side*.066,.046,-.213],[side*.066,.069,-.144],.002,.005,edge);
    for(let i=0;i<3;i++)parts.cube(side*.066,.044,-.115+i*.013,.0025,.018,.004,ink,-.29);
@@ -422,10 +422,7 @@ function arcadeDetails(kind,model){
   sidePanel(parts,[[-.525,.063],[-.436,.084],[-.170,.085],[-.086,.058],[-.161,-.006],[-.451,.003]],.048,.071,accent);
   for(const side of [-1,1]){
    for(let i=0;i<3;i++)parts.cube(side*.071,.041,-.417+i*.052,.008,.036,.018,ink,-.36);
-   parts.beam([side*.046,.092,-.05],[side*.046,.145,-.115],.017,.022,silver);
-   parts.beam([side*.046,.145,-.115],[side*.046,.103,-.181],.017,.022,silver);
   }
-  parts.cube(0,.153,-.119,.106,.009,.055,ink);
   parts.six(0,.048,-.533,.083,.092,.062,shell,halfTurn);
   parts.six(0,.048,-.553,.085,.023,.066,accent,halfTurn);
   turnedTrim(parts,0,.048,[[-.697,0,ink],[-.700,.013,silver],[-.700,.019,edge],[-.690,.019,shell],[-.678,.017,shell],[-.568,.019,shell]],16);
@@ -439,11 +436,8 @@ function arcadeDetails(kind,model){
   sidePanel(parts,[[-.608,.023],[-.436,.062],[-.145,.052],[-.226,-.016],[-.553,-.028]],.047,.065,accent);
   for(const side of [-1,1]){
    parts.beam([side*.063,.016,-.455],[side*.040,.019,-.875],.018,.020,silver);
-   parts.beam([side*.058,.048,-.130],[side*.040,.146,-.149],.015,.049,shell);
-   parts.beam([side*.040,.146,-.149],[side*.037,.131,-.231],.015,.017,accent);
    parts.cube(side*.065,.010,-.266,.009,.013,.084,ink);
   }
-  parts.cube(0,.151,-.150,.092,.014,.061,accent);
   parts.six(0,.020,-.857,.067,.078,.064,shell,halfTurn);
   parts.six(0,.020,-.878,.070,.016,.067,accent,halfTurn);
   turnedTrim(parts,0,.020,[[-1.001,0,ink],[-1.004,.010,silver],[-1.004,.015,edge],[-.997,.016,shell],[-.986,.015,shell],[-.884,.014,shell]],16);
@@ -451,16 +445,12 @@ function arcadeDetails(kind,model){
   for(const side of [-1,1]){
    parts.beam([side*.0655,.032,-.485],[side*.0655,.030,-.292],.0024,.004,edge);
    for(let i=0;i<3;i++)parts.cube(side*.066,.013,-.443+i*.019,.0025,.014,.004,ink,-.31);
-   parts.cube(side*.043,.137,-.157,.0025,.006,.025,mark);
   }
  }else{
   sidePanel(parts,[[-.551,.061],[-.492,.084],[-.185,.116],[-.106,.103],[-.178,.012],[-.456,-.008]],.058,.080,accent);
   for(const side of [-1,1]){
    for(let i=0;i<4;i++)parts.cube(side*.080,.049,-.438+i*.051,.010,.035,.018,ink,-.34);
-   parts.beam([side*.045,.115,-.010],[side*.045,.183,-.053],.017,.030,shell);
-   parts.beam([side*.045,.183,-.053],[side*.045,.121,-.204],.017,.024,shell);
   }
-  parts.cube(0,.186,-.068,.108,.019,.087,shell);
   parts.six(0,.048,-.563,.095,.116,.074,ink,halfTurn);
   parts.six(0,.048,-.595,.099,.025,.077,accent,halfTurn);
   turnedTrim(parts,0,.048,[[-.769,0,ink],[-.773,.015,silver],[-.773,.023,edge],[-.755,.024,shell],[-.740,.020,shell],[-.611,.022,shell]],20);
@@ -504,7 +494,14 @@ export function blasterMesh(kind='rifle'){
     for(let i=0;i<colors.count;i++)colors.setXYZ(i,tint.r,tint.g,tint.b);
     moving.setAttribute('color',colors);breakerUV(moving);
     const pump=new T.Mesh(moving,breakerPaint()[2]);pump.name='pump';model.add(pump);
-   }else if(kind==='rifle')breakerSurface(geo,name==='magazine');
+   }else if(kind==='rifle'){
+    // Fold the raised backup ears flush with the Breaker's top rail.
+    if(name==='body'){
+     const pos=geo.attributes.position;
+     for(let i=0;i<pos.count;i++)if(pos.getY(i)>.14)pos.setY(i,.138);
+    }
+    breakerSurface(geo,name==='magazine');
+   }
    else propSurface(geo,kind,name==='magazine');
    const material=kind==='rifle'?breakerPaint():breakerPaint()[name==='magazine'?0:1];
    const part=new T.Mesh(geo,material);part.name=name;model.add(part);
@@ -512,6 +509,8 @@ export function blasterMesh(kind='rifle'){
   if(kind==='rifle')breakerDetails(model);
   else if(base)arcadeDetails(kind,model);
   else serviceDetails(model,kind);
+  const optic=redDotMount(kind);
+  if(optic)model.add(optic);
   cache.set(kind,model);
  }
  return cache.get(kind).clone();

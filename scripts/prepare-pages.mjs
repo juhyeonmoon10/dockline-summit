@@ -8,12 +8,13 @@ async function indexFiles(dir=''){
   for(const entry of await readdir(join(root,dir),{withFileTypes:true})){
     const file=dir?dir+'/'+entry.name:entry.name;
     if(entry.isDirectory()){await indexFiles(file);continue;}
-    if(!/\.js$|\.css$|(?:^|\/)loadout-[^/]+\.png$/.test(file))continue;
+    const atlas=/^assets\/[^/]+\.webp$/.test(file);
+    if(!atlas&&!/\.js$|\.css$|(?:^|\/)loadout-[^/]+\.png$/.test(file))continue;
     const bytes=await readFile(join(root,file));
     const hash=createHash('sha256').update(bytes).digest('hex').slice(0,12);
     const path='./'+file,url=path+'?v='+hash;
     versioned.set(path,url);
-    if(file.endsWith('.js'))imports[path]=url;
+    if(file.endsWith('.js')||atlas)imports[path]=url;
   }
 }
 await indexFiles();

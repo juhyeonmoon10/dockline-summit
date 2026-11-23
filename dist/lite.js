@@ -4,6 +4,9 @@ import { eyeHeight, WEAPONS } from './sim.js';
 import { loadLiteOperators, liteOperator, posedOperator, operatorGrip } from './lite-operator.js';
 import { approachAim, canAim, weaponFov, reloadPose, shotKickResponse, shotFlashDuration, LOCAL_IGNITION_LIFE, scopeAfterShot, sniperScopeVisible } from './weapon-view.js';
 import { fieldViews } from './assets/field-frames.js';
+import { opticFit,reflexEngaged } from './optic-fit.js';
+import { drawFallbackSight,drawReflexDot } from './lite-reflex.js';
+import { weaponImageUrl } from './weapon-image-url.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { pelletTrails, pelletSpan, clipBarrelOrigin, visibleTraceEnd, exitsForward, muzzleDeparture, flightSlices, singleShotSpan, SHOT_TRAIL_LIFE, PELLET_LIFE, PELLET_CAPACITY } from './shot-path.js';
 import { classifyImpact, ImpactParticlePool, SURFACE_FX } from './surface-fx.js';
@@ -11,21 +14,8 @@ import { buildSwitchyard, paintSwitchyardGround, paintSwitchyardPanel, switchyar
 import { normalizeKnifeSkin } from './knife-types.js';
 import { knifePose,knifeDrawPose,knifeAttackDuration } from './knife-motion.js';
 
-// 640×360 snapshots of the same two-handed rigs used by the WebGL view.
-const blasterRows={rifle:0,shotgun:1,sniper:2,pistol:3};
-const arcadeRows={smg:0,burst:1,marksman:2,lmg:3};
-// These backup sheets still show the original barrels. Their own cap UV and
-// camera depth must stay fixed even when a replacement model changes length.
-const backupMuzzles={
-  rifle:[[.56626,.56536,.97694],[.50061,.5853,.95392]],
-  shotgun:[[.55414,.59436,1.08883],[.50012,.54186,1.06403]],
-  sniper:[[.541,.5478,1.26752],[.5,.55298,1.24567]],
-  pistol:[[.61623,.6366,.64335],[.5,.56712,.61830]],
-  smg:[[.61814,.63341,.78135],[.52723,.58683,.75154]],
-  burst:[[.56873,.5901,.94683],[.5,.5997,.92262]],
-  marksman:[[.54294,.57684,1.23225],[.5,.58719,1.20836]],
-  lmg:[[.56477,.58542,.98213],[.5,.61616,.95811]]
-};
+// The old sniper sheet has its own barrel length and projected front caps.
+const sniperBackupMuzzles=[[.541,.5478,1.26752],[.5,.55298,1.24567]];
 function closestFrame(times,time){
   let i=0;while(i+1<times.length&&time>(times[i]+times[i+1])*.5)i++;
   return i;
@@ -38,11 +28,16 @@ function fieldPose(p,t,aim,w,h,age,kick,atlas,motion){
   if(!atlas?.naturalWidth&&!animated)return null;
   const stops=entry.aimStops||[0,1],still=closestFrame(stops,aim);
   let sheet=atlas,sw=640,sh=360,sx=still*640,sy=entry.row*360,ox=0,oy=0;
-  let muzzle=entry.muzzles[still];
+  let muzzle=entry.muzzles[still],glass=entry.glass?.still[still];
+  if(entry.glass){
+    if(still===0||still===stops.length-1)sx=still===0?0:640;
+    else{sw=384;sh=216;sx=(still-1)*sw;sy=2520+entry.row*sh;}
+  }
   if(animated){
     const progress=loading?1-p.reload/(p.reloadDuration||WEAPONS[p.active].reload):age;
     const times=loading?entry.reloadTimes:entry.shotTimes,index=closestFrame(times,progress);
-    const sequence=loading?entry.poses.reload:aimed&&entry.poses.fireADS?entry.poses.fireADS:entry.poses.fire;
+    const variant=loading?'reload':aimed&&entry.poses.fireADS?'fireADS':'fire';
+    const sequence=entry.poses[variant];glass=entry.glass?.[variant]?.[index];
     let frame=sequence[index];
     if(loading&&p.active==='shotgun'){
       if(p.shellLoop&&index<entry.poses.loopStart.length)frame=entry.poses.loopStart[index];
@@ -68,21 +63,21 @@ function fieldPose(p,t,aim,w,h,age,kick,atlas,motion){
   const recoil=animated?0:kick;
   const x=left+viewWidth*mx+h*(Math.sin(t*10)*.005*travel+load*.026);
   const gunWidth=Math.max(viewWidth,(w-x)/(1-muzzle[0]));
-  return {sheet,sw,sh,sx,sy,gunWidth,drawWidth:animated?gunWidth*sw/512:gunWidth,drawHeight:animated?h*sh/288:h,
+  return {sheet,sw,sh,sx,sy,glass,gunWidth,drawWidth:animated?gunWidth*sw/512:gunWidth,drawHeight:animated?h*sh/288:h,
     imageX:gunWidth*(ox/512-muzzle[0]),imageY:h*(oy/288-muzzle[1]),x,depth,uv:muzzle,aimStop:stops[still],
     y:h*(my+Math.abs(Math.cos(t*10))*.006*travel-recoil*.026+load*.082),reloadPose:load,kick:recoil};
 }
-function blasterPose(p,t,aim,w,h,kick,kind,row,atlas){
+function sniperBackupPose(p,t,aim,w,h,kick,atlas){
   const aimFrame=aim>=.5;
   const gunWidth=Math.max(w,h*16/9),left=(w-gunWidth)*.5,movement=Math.min(1,(p.speed||0)*.16)*(1-.83*aim);
-  const loading=reloadPose(p,kind);
-  const [hip,ads]=backupMuzzles[kind];
+  const loading=reloadPose(p,'sniper');
+  const [hip,ads]=sniperBackupMuzzles;
   const mx=left+gunWidth*(hip[0]+(ads[0]-hip[0])*aim),my=h*(hip[1]+(ads[1]-hip[1])*aim);
   const dx=Math.sin(t*10)*h*.005*movement+h*loading.tilt*.026;
   const dy=Math.abs(Math.cos(t*10))*h*.006*movement+h*(-kick*.026+loading.tilt*.082-loading.bump*.012);
   // Pivot each atlas image on its own muzzle as the gun moves into the sights.
   const point=aimFrame?ads:hip,imageX=-gunWidth*point[0],imageY=-h*point[1];
-  return {row,atlas,aimFrame,gunWidth,imageX,imageY,x:mx+dx,y:my+dy,depth:hip[2]+(ads[2]-hip[2])*aim,
+  return {row:2,atlas,aimFrame,gunWidth,imageX,imageY,x:mx+dx,y:my+dy,depth:hip[2]+(ads[2]-hip[2])*aim,
     uv:point,aimStop:Number(aimFrame),reloadPose:loading.tilt,kick};
 }
 
@@ -352,8 +347,15 @@ function heldEquipment(dst,p,[x,y,z],age,side=1){
   if(!compact){
     const magazine=p.active==='lmg'?.15:.073;
     body(0,-.128,-.090,magazine,.13,.085,0x3a423d);
-    if(p.active==='sniper'||p.active==='marksman')body(0,.087,-.12,.056,.056,.164,0x303c3d);
+    if(p.active==='sniper')body(0,.087,-.12,.056,.056,.164,0x303c3d);
     if(p.active==='shotgun')body(0,-.020,-front*.60,.083,.063,.18,0x6a6051);
+  }
+  const optic=opticFit(p.active);
+  if(optic){
+    const {scale:s,z}=optic,rail=.081;
+    body(0,rail-.004,z,.078*s,.016*s,.082*s,0x414b4a);
+    for(const side of [-1,1])body(side*.038*s,rail+.012*s,z,.011*s,.049*s,.032*s,0x414c4e);
+    body(0,rail+.060*s,z,.086*s,.011*s,.032*s,0x65706d);
   }
   const [mx,my,mz]=transform(0,barrelY,barrelZ-barrelLength/2);
   return {x:mx,y:my,z:mz,forward:{x:sy*co,y:si,z:-cy*co}};
@@ -388,14 +390,12 @@ export class LiteRenderer {
     this.operatorStates=new Map();this.operatorsReady=loadLiteOperators();
     this.materials=createMaterials(map);this.staticMesh=makeScene(map,this.materials);this.lastSeq=0;this.recoil=0;
     this.blasterAtlas=document.getElementById('blaster-atlas') || new Image();
-    if (!this.blasterAtlas.src) this.blasterAtlas.src='./assets/blaster-views.webp';
-    this.rifleReloadAtlas=new Image();this.rifleReloadAtlas.src='./assets/breaker-reload.webp';
-    this.arcadeAtlas=document.getElementById('arcade-atlas') || new Image();
+    if (!this.blasterAtlas.src) this.blasterAtlas.src=weaponImageUrl('blaster-views.webp');
+    this.rifleReloadAtlas=new Image();this.rifleReloadAtlas.src=weaponImageUrl('breaker-reload.webp');
     this.fieldAtlas=new Image();
-    this.fieldAtlas.onerror=()=>{if(!this.arcadeAtlas.src)this.arcadeAtlas.src='./assets/arcade-views.png';};
-    this.fieldAtlas.src='./assets/field-views.webp';
+    this.fieldAtlas.src=weaponImageUrl('field-views.webp');
     this.stillAtlases={};this.motionAtlas={};this.shotAge=Infinity;this.shotWeapon=null;this.scopeActive=false;
-    this.trails=[];this.shotImpacts=[];this.remoteMuzzles=new Map();this.remoteFlashes=new Map();
+    this.reflexActive=false;this.trails=[];this.shotImpacts=[];this.remoteMuzzles=new Map();this.remoteFlashes=new Map();
     this.surfaceParticles=new ImpactParticlePool(128);
     this.surfaceMarks=Array.from({length:96},()=>({until:0}));this.nextMark=0;
     this.quality='auto';this.lastFrame=-1;this.lastGame=null;this.scale=1;
@@ -454,9 +454,14 @@ export class LiteRenderer {
       const pose=fieldPose(p,t,aim,w,h,age,this.recoil,still,motion);
       if(pose)return pose;
     }
-    const arcade=kind in arcadeRows,atlas=arcade?this.arcadeAtlas:this.blasterAtlas;
-    if(atlas.complete&&atlas.naturalWidth)return blasterPose(p,t,aim,w,h,this.recoil,kind,arcade?arcadeRows[kind]:blasterRows[kind],atlas);
+    const optic=opticFit(kind);
+    if(kind==='sniper'&&this.blasterAtlas.complete&&this.blasterAtlas.naturalWidth)return sniperBackupPose(p,t,aim,w,h,this.recoil,this.blasterAtlas);
     const bob=p.speed>1?Math.sin(t*10)*.006*(1-.83*aim):0;
+    if(optic){
+      const shift=bob*h,sink=h*(this.recoil*.024+(p.reload>0?.22:0));
+      const glass={x:w*.5+h*.27*(1-aim)+shift,y:h*(.5+.15*(1-aim))+sink,scale:h*optic.scale*(1.48+.58*aim)};
+      return {x:glass.x-h*(.11-.09*aim),y:glass.y+h*(.049+.011*aim),fallbackGlass:glass};
+    }
     return {x:w*(.57-.07*aim)+h*bob,y:h*(.64-.08*aim+this.recoil*.045+(p.reload>0?.17:0))};
   }
   viewMuzzle(cam,muzzle,depth){
@@ -820,7 +825,7 @@ export class LiteRenderer {
     }
     c.save();c.translate(pose.x,pose.y);c.scale(h*.0019,h*.0019);if(reload)c.rotate(.20);
     const poly=(color,pts)=>{c.fillStyle=color;c.beginPath();pts.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.closePath();c.fill();};
-    const gunColor=gun in arcadeRows?WEAPONS[gun].accent:isShot?'#ba784f':isSniper?'#6b9491':'#899598';
+    const gunColor=WEAPONS[gun].accent;
     poly('#26313b',[[-6,0],[6,-2],[29,14],[24,25],[1,9]]);poly('#a4aaa1',[[-6,0],[5,-4],[29,12],[20,16]]);
     const front=isPistol?10:19, back=isPistol?81:128;
     poly('#273a43',[[front,10],[front+14,7],[back+26,49],[back+10,91],[front+1,39]]);
@@ -833,7 +838,8 @@ export class LiteRenderer {
     poly('#343f45',[[53,66],[75,62],[96,73],[114,115],[77,108],[58,87]]);
     poly('#25343d',[[109,86],[138,74],[197,105],[242,200],[133,205]]);
     if(isSniper){poly('#202e38',[[38,16],[49,4],[81,16],[83,29],[68,33]]);}
-    else{c.strokeStyle='#232e35';c.lineWidth=3;c.strokeRect(21,4,6,8);}c.restore();
+    c.restore();
+    if(pose.fallbackGlass)drawFallbackSight(c,pose.fallbackGlass);
   }
   draw(game,selfId,view={}) {
     const began=performance.now(), now=began/1000,playing=Boolean(game)&&!view.lobby;
@@ -853,17 +859,18 @@ export class LiteRenderer {
     const pitch=mode?(view.pitch??p.pitch):previewPitch;
     const cam={x:mode?p.x:(preview?.x??13),y:mode?p.y+eyeHeight(p):(preview?.y??7.1),z:mode?p.z:(preview?.z??20),sy:Math.sin(yaw),cy:Math.cos(yaw),sp:Math.sin(pitch),cp:Math.cos(pitch)};
     const resync=mode&&(this.lastRound!==game.round||game.elapsed<this.lastElapsed||game.seq<this.lastSeq);
-    const interrupted=!mode||!p.alive||this.aimFocus!==p.id||this.activeGun!==p.active||resync;
+    const exchanging=mode&&this.activeGun&&this.activeGun!==p.active;
+    const interrupted=!mode||!p.alive||this.aimFocus!==p.id||exchanging||resync;
     if(interrupted){this.shotAge=Infinity;this.shotWeapon=null;this.recoil=0;}
     else this.shotAge+=frameTime;
     if(mode){
       if(fieldViews[p.active]&&!fieldViews[p.active].legacy&&p.active!==this.activeGun){
         const entry=fieldViews[p.active],special=Boolean(entry.shotTimes),key=special?p.active:'magazines';
         if(entry.sheet&&!this.stillAtlases[p.active]){
-          const image=new Image();image.src='./assets/'+entry.sheet;this.stillAtlases[p.active]=image;
+          const image=new Image();image.src=weaponImageUrl(entry.sheet);this.stillAtlases[p.active]=image;
         }
         if(entry.poses&&!this.motionAtlas[key]){
-          const image=new Image();image.src='./assets/'+(special?p.active+'-motion':'field-reloads')+'.webp';this.motionAtlas[key]=image;
+          const image=new Image();image.src=weaponImageUrl((special?p.active+'-motion':'field-reloads')+'.webp');this.motionAtlas[key]=image;
         }
       }
       const previous=resync||!p.alive?game.seq:this.lastSeq;
@@ -877,8 +884,9 @@ export class LiteRenderer {
     this.activeGun=p?.active;this.recoil=Number.isFinite(this.shotAge)?shotKickResponse(this.shotAge,p.active):0;
     const held=mode&&canAim(p,p.id===selfId?view.ads??p.ads:p.ads);
     const ads=mode&&scopeAfterShot(p.active,held,this.shotWeapon===p.active?this.shotAge:Infinity);
-    this.aim=mode&&this.aimFocus===p.id?approachAim(this.aim,ads,dt,p.active):Number(ads);
+    this.aim=mode&&this.aimFocus===p.id?approachAim(exchanging&&opticFit(p.active)?0:this.aim,ads,dt,p.active):Number(ads);
     this.scopeActive=!!(mode&&sniperScopeVisible(p.active,this.aim,ads));
+    this.reflexActive=Boolean(mode&&p.alive&&!p.reload&&!p.slide&&!Number.isFinite(view.inspectAge)&&reflexEngaged(p.active,this.aim));
     this.aimFocus=p?.id;
     this.viewFov=mode?weaponFov(p.active,this.aim,p.slide>0):58;
     this.focal=(h/2)/Math.tan(this.viewFov*Math.PI/360);this.depth.fill(0);
@@ -971,5 +979,6 @@ export class LiteRenderer {
       }
     }
     this.weapon(p,now,pose,flash,view.inspectAge);
+    if(this.reflexActive)drawReflexDot(this.ctx,pose,sizeY);
   }
 }

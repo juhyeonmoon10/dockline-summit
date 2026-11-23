@@ -481,7 +481,7 @@ function frame(ms){
     $('weaponHud').toggleAttribute('data-inspecting',Number.isFinite(inspectAge));
     try{renderer.draw(visual,selfId,{lobby:false,ads:watch?!!p?.ads:aiming(),quality,yaw:watch?p?.yaw:yaw,pitch:watch?p?.pitch:pitch,spectatorId:watch?p?.id:undefined,inspectAge,t,dt});}
     catch(err){console.error(err);if(!(renderer instanceof LiteRenderer))switchToLite();else throw err;}
-    feedback.sight.hidden=!p?.alive||game.phase==='between';
+    feedback.sight.hidden=!p?.alive||game.phase==='between'||Boolean(renderer.reflexActive);
     if(p)feedback.updateSight(p,p.active==='sniper'?renderer.scopeActive:canAim(p,watch?p.ads:ads&&slot!==3),renderer.viewFov);
     feedback.frame(t,watch?p?.yaw:yaw);
     if(ms-hudStamp>70||firstFrame){showHUD(t);hudStamp=ms;firstFrame=false;}
