@@ -74,8 +74,8 @@ export class RoomClient {
     this.onRoom?.(this.room);
     return this.room;
   }
-  create({ name, size, weapon = 'rifle', mapId = 'summit' }) { return this.enter('create', { name, size, weapon, mapId }); }
-  join({ name, code, weapon = 'rifle' }) { return this.enter('join', { name, code: String(code).trim().toUpperCase(), weapon }); }
+  create({ name, size, weapon = 'rifle', knifeSkin, mapId = 'summit' }) { return this.enter('create', { name, size, weapon, knifeSkin, mapId }); }
+  join({ name, code, weapon = 'rifle', knifeSkin }) { return this.enter('join', { name, code: String(code).trim().toUpperCase(), weapon, knifeSkin }); }
   ready(ready = true) { return this.post('ready', { ready }); }
   weapon(weapon) { return this.post('weapon', { weapon }); }
   team(team) { return this.post('team', { team }); }

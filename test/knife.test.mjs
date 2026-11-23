@@ -3,6 +3,15 @@ import assert from 'node:assert/strict';
 import { createGame,createRange,eyeHeight,MAX_HP,stepGame,WEAPONS } from '../dist/sim.js';
 
 const dt=1/60;
+
+test('knife cosmetics persist across slots and older or unknown loadouts receive the default',()=>{
+  for(const [choice,expected] of [[undefined,'karambit'],['unknown','karambit'],['karambit','karambit'],['balisong','balisong']]){
+    const game=createRange({knifeSkin:choice});
+    for(const slot of [3,1,2,3])advance(game,{slot},.24);
+    assert.equal(game.players[0].knifeSkin,expected);
+    assert.equal(game.players[0].active,'knife');
+  }
+});
 function advance(game,input,seconds){
   for(let left=seconds;left>1e-8;left-=dt)stepGame(game,{[game.players[0].id]:input},Math.min(left,dt));
 }

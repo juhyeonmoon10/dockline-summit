@@ -7,6 +7,7 @@ import { fieldViews } from './assets/field-frames.js';
 import { dummyBody, dummyStand } from './range-dummy.js';
 import { pelletTrails, pelletSpan, clipBarrelOrigin, visibleTraceEnd, exitsForward, muzzleDeparture, flightSlices, singleShotSpan, SHOT_TRAIL_LIFE, PELLET_LIFE, PELLET_CAPACITY } from './shot-path.js';
 import { buildSwitchyard, paintSwitchyardGround, paintSwitchyardPanel, switchyardPaints } from './switchyard-art.js';
+import { normalizeKnifeSkin } from './knife-types.js';
 
 // 640×360 snapshots of the same two-handed rigs used by the WebGL view.
 const blasterRows={rifle:0,shotgun:1,sniper:2,pistol:3};
@@ -296,13 +297,8 @@ function fallbackOperator(dst,p,clock,swing) {
   if(p.active==='knife'){
     const {cut}=knifeMotion(clock-(swing?.at??-10)),handX=.27-cut*.20,handY=1.02+cut*.04,handZ=-.35-cut*.16;
     part(handX,handY-.10,handZ,.105,.17,.11,0x263641);
-    part(handX,handY+.045,handZ,.17,.035,.07,0xe9b44a);
-    const point=(xx,yy,zz)=>{const sx=handX+xx-cut*yy*.8,sz=handZ+zz;return [x+sx*cy-sz*sy,y+(handY+yy)*h,z+sx*sy+sz*cy];};
-    const face=(points,col)=>quad(dst,points.map(v=>point(...v)),col);
-    face([[-.038,.08,.018],[.038,.08,.018],[.026,.32,.018],[0,.43,.018]],0xbccbd0);
-    face([[.038,.08,.018],[.026,.32,.018],[0,.43,.018],[.012,.12,.025]],0xf0f4e8);
-    face([[-.038,.08,-.018],[0,.43,-.018],[.026,.32,-.018],[.038,.08,-.018]],0x788f9a);
-    face([[.038,.08,-.018],[.026,.32,-.018],[.026,.32,.018],[.038,.08,.018]],0xdce8e4);
+    const grip=[x+handX*cy-handZ*sy,y+handY*h,z+handX*sy+handZ*cy];
+    return heldEquipment(dst,p,grip,clock-(swing?.at??-10));
   }else{
     const grip=[x+.24*cy+.24*sy,y+.93*h,z+.24*sy-.24*cy];
     return heldEquipment(dst,p,grip,0);
@@ -331,12 +327,21 @@ function heldEquipment(dst,p,[x,y,z],age){
       quad(dst,[v[a],v[b],v[c],v[e]],col,shade);
   };
   if(knife){
-    body(0,-.075,0,.047,.12,.052,0x38413c);
-    body(0,.043,0,.112,.021,.056,0x9c997d);
-    const bottom=transform(0,.064,.022),edge=transform(-.039,.091,-.003),back=transform(.026,.071,-.005);
-    const tip=transform(-.018,.31,-.106);
-    quad(dst,[bottom,edge,tip,back],0xb1c0be);
-    quad(dst,[back,tip,edge,bottom],0x819697,1);
+    const face=(pts,z,col)=>quad(dst,pts.map(([x,y])=>transform(x,y,z)),col);
+    if(p.knifeSkin==='balisong'){
+      body(-.022,-.13,0,.034,.20,.037,0x394247);
+      body(.022,-.13,0,.034,.20,.037,0x917e63);
+      face([[-.024,.072],[.031,.070],[.022,.237],[-.011,.319]],0,0xafb8ba);
+      face([[.031,.070],[.041,.099],[.022,.237],[-.011,.319]],.004,0xd6dddd);
+    }else{
+      body(.012,-.085,0,.057,.16,.040,0x394641);
+      face([[-.032,.068],[.027,.066],[.038,.165],[.002,.208]],0,0x929ea2);
+      face([[.002,.208],[.038,.165],[.024,.229],[-.054,.249]],0,0xd7dfdd);
+      for(let i=0;i<10;i++){
+        const ring=(k,r)=>[.012+r*Math.cos(k*Math.PI/5),-.116+r*Math.sin(k*Math.PI/5)];
+        face([ring(i,.042),ring(i+1,.042),ring(i+1,.026),ring(i,.026)],.002,0x829a91);
+      }
+    }
     return;
   }
   const [front,stock,width]=carriedGuns[p.active]||carriedGuns.rifle;
@@ -420,7 +425,7 @@ export class LiteRenderer {
     for(const event of game.events||[]){
       if(event.seq<=this.lastMeleeSeq)continue;this.lastMeleeSeq=event.seq;
       if(event.type==='round'){this.meleeSwings.clear();this.meleeImpacts=[];}
-      if(event.type==='melee')this.meleeSwings.set(event.actor,{at:now});
+      if(event.type==='melee')this.meleeSwings.set(event.actor,{at:now,side:event.seq%2?1:-1});
       if(event.type==='meleeImpact'&&[event.ex,event.ey,event.ez].every(Number.isFinite)){
         this.meleeImpacts.push({event,until:now+.10});
         if(this.meleeImpacts.length>16)this.meleeImpacts.shift();
@@ -431,8 +436,9 @@ export class LiteRenderer {
       if(!actor?.alive||actor.active!=='knife'||now-swing.at>=.55)this.meleeSwings.delete(id);
     }
     this.meleeImpacts=this.meleeImpacts.filter(impact=>impact.until>now);
-    if(this.knifeFocus!==p.id||this.lastWeapon!==p.active){
-      this.knifeEquippedAt=now;this.knifeFocus=p.id;this.lastWeapon=p.active;
+    const skin=normalizeKnifeSkin(p.knifeSkin);
+    if(this.knifeFocus!==p.id||this.lastWeapon!==p.active||this.knifeSkin!==skin){
+      this.knifeEquippedAt=now;this.knifeFocus=p.id;this.lastWeapon=p.active;this.knifeSkin=skin;
     }
   }
   gunPose(p,t,kind=p.active){
@@ -681,53 +687,26 @@ export class LiteRenderer {
       }
     }
   }
-  knifeWeapon(p,t){
-    const c=this.ctx,w=this.width,h=this.height;
-    const swing=this.meleeSwings.get(p.id),{cut,wind}=knifeMotion(t-(swing?.at??-10));
-    const equip=Math.max(0,1-(t-this.knifeEquippedAt)/.20)**2;
-    const walk=Math.min(1,(p.speed||0)/5.4),bob=Math.sin(t*9)*walk;
-    const handX=w*(.74-.29*cut+.025*wind)+h*.006*bob,handY=h*(.83-.13*cut+.025*wind+.34*equip)+h*.003*Math.abs(bob);
-    const angle=-.24-1.05*cut+.20*wind+.26*equip,scale=h/520,cs=Math.cos(angle),sn=Math.sin(angle);
-    const handPoint=(x,y)=>[handX+(x*cs-y*sn)*scale,handY+(x*sn+y*cs)*scale];
-    const poly=(color,points)=>{c.fillStyle=color;c.beginPath();points.forEach(([x,y],i)=>i?c.lineTo(x,y):c.moveTo(x,y));c.closePath();c.fill();};
-    c.save();
-    // The wrist follows the slash, while the forearm stays attached beyond the viewport.
-    const wristLow=handPoint(-5,72),wristHigh=handPoint(63,28),farHigh=[w*1.10,h*.98],farLow=[w*.90,h*1.22];
-    poly('#263e50',[wristLow,wristHigh,farHigh,farLow]);
-    poly('#486273',[handPoint(42,44),wristHigh,farHigh,[w*1.02,h*1.08]]);
-    c.translate(handX,handY);c.rotate(angle);c.scale(scale,scale);
-    // The cuff overlaps the screen-anchored sleeve so no capped stump appears mid-swing.
-    poly('#b7c6c8',[[13,55],[58,42],[72,65],[21,80]]);
-    poly('#f3b947',[[20,75],[69,61],[73,70],[24,85]]);
-    poly('#202f3a',[[-20,-5],[13,-17],[40,-5],[52,29],[38,57],[4,67],[-24,38]]);
-    poly('#405461',[[13,-17],[40,-5],[43,17],[22,30],[-8,20],[-20,-5]]);
-    poly('#84969c',[[9,-11],[30,-7],[37,7],[20,17],[1,10]]);
-    // Charcoal wrapped grip, beveled pommel, and a narrow amber guard.
-    poly('#182a34',[[-13,-44],[12,-43],[15,48],[-11,51]]);
-    poly('#3c505b',[[3,-42],[12,-43],[15,48],[5,47]]);
-    for(let i=0;i<6;i++)poly(i%2?'#52636a':'#263943',[[-13,-35+i*12],[12,-39+i*12],[13,-34+i*12],[-13,-30+i*12]]);
-    poly('#b07d2e',[[-17,45],[17,44],[21,56],[-14,60]]);
-    poly('#f1bc57',[[-15,45],[15,44],[16,49],[-16,53]]);
-    // Faceted drop-point steel: dark spine, broad satin face, polished cutting bevel.
-    poly('#617c89',[[-14,-48],[-18,-147],[-9,-193],[5,-176],[19,-70],[16,-49]]);
-    poly('#afc3cb',[[-11,-49],[-14,-146],[-9,-193],[5,-176],[12,-69],[10,-49]]);
-    poly('#e6eee6',[[10,-49],[12,-69],[5,-176],[-9,-193],[13,-167],[24,-76],[19,-49]]);
-    poly('#f7f6df',[[19,-49],[24,-76],[13,-167],[-9,-193],[16,-165],[28,-75],[23,-49]]);
-    poly('#718e9b',[[-7,-72],[-9,-140],[-6,-161],[-2,-148],[2,-72]]);
-    poly('#d0dfe0',[[-6,-72],[-8,-141],[-6,-161],[-3,-140],[-1,-72]]);
-    poly('#9f742c',[[-28,-48],[29,-49],[33,-38],[-26,-35]]);
-    poly('#f0bb51',[[-28,-48],[29,-49],[29,-43],[-28,-40]]);
-    // Fingers wrap around the near side of the handle, not over the blade.
-    for(let i=0;i<3;i++){
-      const y=-12+i*15;
-      poly('#334752',[[-22,y],[6,y-5],[20,y+1],[18,y+10],[-13,y+14],[-24,y+8]]);
-      poly('#60747e',[[-19,y],[5,y-4],[13,y],[8,y+4],[-17,y+8]]);
+  weapon(p,t,pose,flash,inspectAge) {
+    if(p.active==='knife'||Number.isFinite(inspectAge)){
+      if(!this.heldViewLoading&&t>=(this.heldRetryAt||0)){
+        this.heldViewLoading=import('./lite-held.js').then(({LiteHeldView})=>{this.heldView=new LiteHeldView();})
+          .catch(()=>{this.heldViewLoading=null;this.heldRetryAt=performance.now()/1000+3;});
+      }
+      if(this.heldView?.draw(this.ctx,p,t,t-this.knifeEquippedAt,inspectAge,this.meleeSwings.get(p.id)))return;
+      if(p.active==='knife'){
+        // Immediate equip silhouette while the 3D renderer loads on a cold connection.
+        const c=this.ctx,h=this.height,flip=p.knifeSkin==='balisong';
+        const {cut}=knifeMotion(t-(this.meleeSwings.get(p.id)?.at??-10));
+        c.save();c.translate(this.width*.70-cut*h*.25,h*.81);c.scale(h*.20,h*.20);c.rotate(-.40-cut);
+        c.fillStyle='#39443f';c.beginPath();c.moveTo(-.12,-.04);c.lineTo(.15,-.08);
+        c.lineTo(1,1.18);c.lineTo(.54,1.24);c.lineTo(-.13,.31);c.fill();
+        c.fillStyle='#b3c3c2';c.beginPath();c.moveTo(-.10,-.10);c.lineTo(.13,-.10);
+        if(flip){c.lineTo(.085,-.95);c.lineTo(-.061,-1.28);}
+        else{c.quadraticCurveTo(.35,-.68,-.24,-1.08);c.quadraticCurveTo(.02,-.71,-.10,-.38);}
+        c.closePath();c.fill();c.restore();return;
+      }
     }
-    poly('#536873',[[17,-14],[31,-12],[39,2],[33,15],[22,10],[12,-2]]);
-    c.restore();
-  }
-  weapon(p,t,pose,flash) {
-    if(p.active==='knife'){this.knifeWeapon(p,t);return;}
     if(!pose)return; // The shared HUD draws the magnified scope.
     const c=this.ctx,h=this.height,reload=p.reload>0;
     const gun=p.active, isPistol=gun==='pistol', isShot=gun==='shotgun',isSniper=gun==='sniper';
@@ -902,6 +881,6 @@ export class LiteRenderer {
         }
       }
     }
-    this.weapon(p,now,pose,flash);
+    this.weapon(p,now,pose,flash,view.inspectAge);
   }
 }

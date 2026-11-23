@@ -91,12 +91,13 @@ test('online transport joins by code, binds identity, gates host actions, and cl
   try {
     const room = await host.create({ name: '방장', size: 2, weapon:'smg' });
     assert.match(room.code, /^[A-HJ-NP-Z2-9]{6}$/);
-    await guest.join({ name: '친구', code: room.code.toLowerCase(), weapon:'marksman' });
+    await guest.join({ name: '친구', code: room.code.toLowerCase(), weapon:'marksman', knifeSkin:'balisong' });
     await settled();
     assert.equal(host.room.players.length, 2);
     assert.equal(guest.room.players.length, 2);
     assert.notEqual(guest.id, host.id);
     assert.deepEqual(Array.from(guest.room.players,p=>p.weapon),['smg','marksman']);
+    assert.deepEqual(Array.from(guest.room.players,p=>p.knifeSkin),['karambit','balisong']);
     await guest.weapon('burst');
     await assert.rejects(guest.start(true), /방장만/);
     await assert.rejects(host.start(true), /준비/);
@@ -106,6 +107,7 @@ test('online transport joins by code, binds identity, gates host actions, and cl
     assert.equal(guest.room.phase, 'playing');
     assert.equal(games.at(-1).players.length, 4);
     assert.equal(games.at(-1).players.find(p=>p.id===guest.id).active,'burst');
+    assert.equal(games.at(-1).players.find(p=>p.id===guest.id).knifeSkin,'balisong');
     guest.input({ slot: 3, yaw: .3, pitch: 0, forward: 1, fire: true, weapon:'lmg' });
     guest.flush(); await settled();
     const engine = [...workers][0].host;

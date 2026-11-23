@@ -89,7 +89,7 @@ export class OnlineRoomClient {
     return peer;
   }
 
-  async create({ name, size, weapon = 'rifle', mapId = 'summit' }) {
+  async create({ name, size, weapon = 'rifle', knifeSkin, mapId = 'summit' }) {
     const epoch = this.begin();
     this.isHost = true;
     try {
@@ -118,7 +118,7 @@ export class OnlineRoomClient {
       worker.onerror = () => {
         if (this.worker === worker && !this.closed) this.lost('방장 경기 처리가 중단됐습니다. 새 방을 만들어 주세요.');
       };
-      const room = await this.workerRequest('init', { fields: { code, size, hostId: this.id, name, weapon, mapId } });
+      const room = await this.workerRequest('init', { fields: { code, size, hostId: this.id, name, weapon, knifeSkin, mapId } });
       this.assertActive(epoch);
       this.entered = true;
       this.receiveState('room', room);
@@ -127,7 +127,7 @@ export class OnlineRoomClient {
     } catch (error) { if (this.epoch === epoch) await this.leave(); throw error; }
   }
 
-  async join({ name, code, weapon = 'rifle' }) {
+  async join({ name, code, weapon = 'rifle', knifeSkin }) {
     code = String(code || '').trim().toUpperCase();
     if (!/^[A-HJ-NP-Z2-9]{6}$/.test(code)) throw Error('영문·숫자 방 코드 6자리를 입력해 주세요.');
     const epoch = this.begin();
@@ -163,7 +163,7 @@ export class OnlineRoomClient {
         const timer = setTimeout(() => finish(Error(CONNECT_FAILED)), 18000);
         connection.on('open', () => {
           if (this.closed || this.epoch !== epoch || this.connection !== connection) return;
-          this.remoteRequest('join', { name, weapon, protocol: PROTOCOL }).then(value => finish(null, value), failed);
+          this.remoteRequest('join', { name, weapon, knifeSkin, protocol: PROTOCOL }).then(value => finish(null, value), failed);
         });
       });
       this.assertActive(epoch);

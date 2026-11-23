@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { performance } from 'node:perf_hooks';
 import { createGame, stepGame, TEAM_SIZES } from './dist/sim.js';
 import { gameSnapshot } from './dist/game-snapshot.js';
+import { normalizeKnifeSkin } from './dist/knife-types.js';
 import { getArena } from './dist/arena-map.js';
 import { isPrimaryWeapon, botLoadouts } from './dist/balance.js';
 
@@ -57,7 +58,7 @@ function addMember(room, fields) {
   const host = !room.hostId;
   const player = {
     id, name: cleanName(fields.name), weapon: isPrimaryWeapon(fields.weapon) ? fields.weapon : 'rifle',
-    team: counts[0] <= counts[1] ? 0 : 1, bot: false, ready: host
+    knifeSkin: normalizeKnifeSkin(fields.knifeSkin), team: counts[0] <= counts[1] ? 0 : 1, bot: false, ready: host
   };
   if (host) room.hostId = id;
   const session = {

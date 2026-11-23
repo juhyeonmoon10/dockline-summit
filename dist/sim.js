@@ -5,6 +5,7 @@ import { nextWaypoint } from './arena-routes.js';
 import { tacticalBotInput } from './tactics.js';
 import { MAX_HP, WEAPONS, impactDamage, isPrimaryWeapon, botLoadouts } from './balance.js';
 import { gunFit } from './gun-fit.js';
+import { normalizeKnifeSkin } from './knife-types.js';
 export { MAP, MAX_HP, WEAPONS };
 export const TEAM_SIZES = Object.freeze([1,2,3]);
 
@@ -36,7 +37,7 @@ function resetPlayer(p, map) {
 }
 
 function spawnPlayer(fields, map) {
-  const p = { ...fields, kills:0, deaths:0, damage:0 };
+  const p = { ...fields, knifeSkin:normalizeKnifeSkin(fields.knifeSkin), kills:0, deaths:0, damage:0 };
   resetPlayer(p, map);
   return p;
 }
@@ -47,9 +48,9 @@ function initialState(map, size, phase, time, players, targets) {
     events:[], seq:0, capture:{team:null,progress:0} };
 }
 
-export function createRange({ id='local', name='나', weapon='rifle', mapId } = {}) {
+export function createRange({ id='local', name='나', weapon='rifle', knifeSkin, mapId } = {}) {
   const map = getArena(mapId);
-  const player = spawnPlayer({id, name, team:0, seat:0, bot:false, weapon:primary(weapon)}, map);
+  const player = spawnPlayer({id, name, team:0, seat:0, bot:false, weapon:primary(weapon), knifeSkin}, map);
   player.reserve = null; // The range never runs out of practice rounds.
   const targets = map.rangeTargets.map((position, index) => ({
     ...position, kind:'dummy', id:'dummy-'+(index+1), name:'더미 '+(index+1),
@@ -79,7 +80,7 @@ export function createGame({ size = 2, players = [], warmup = 15, mapId } = {}) 
       while (used.has(id)) id += '-';
       used.add(id);
       roster.push(spawnPlayer({ id, team, seat, name: String(source?.name ?? names[team][seat]).slice(0, 24),
-        bot: source ? Boolean(source.bot) : true, weapon: primary(source?.weapon ?? botWeapon(team,seat)) }, map));
+        bot: source ? Boolean(source.bot) : true, weapon: primary(source?.weapon ?? botWeapon(team,seat)), knifeSkin:source?.knifeSkin }, map));
     }
   }
   warmup = clamp(number(warmup, 15), 0, 60);

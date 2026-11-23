@@ -2,7 +2,8 @@ import * as T from './assets/three.module.min.js';
 import { clone } from './assets/SkeletonUtils.js';
 import { blasterMesh, gunFit } from './blaster.js';
 import { PRIMARY_WEAPONS } from './balance.js';
-import { knifeMesh,knifePose } from './knife.js';
+import { knifeMesh,knifePose,animateKnife } from './knife.js';
+import { normalizeKnifeSkin } from './knife-types.js';
 
 const sources=[null,null];
 let loading;
@@ -95,6 +96,16 @@ export function updateOperator(rig,player,dt,swing){
    gripOffset.set(0,.050,0);
    if(player.active==='sniper')gripOffset.applyQuaternion(rig.loadout.quaternion);
    rig.loadout.position.add(gripOffset);
+ }
+ if(player.active==='knife'){
+   const skin=normalizeKnifeSkin(player.knifeSkin);
+   if(skin!==(rig.knifeSkin||'karambit')){
+     rig.loadout.remove(rig.loadouts.knife);
+     rig.loadouts.knife=knifeMesh(skin);rig.loadout.add(rig.loadouts.knife);
+     rig.knifeAge=0;
+   }
+   if(rig.active!=='knife')rig.knifeAge=0;
+   rig.knifeSkin=skin;animateKnife(rig.loadouts.knife,skin,rig.knifeAge,Infinity);rig.knifeAge+=dt;
  }
  if(rig.active!==player.active){for(const [key,item] of Object.entries(rig.loadouts))item.visible=key===player.active;rig.active=player.active;}
 }

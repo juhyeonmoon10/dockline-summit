@@ -227,3 +227,16 @@ body[data-scene="game"] .lobby-shell { display: none; }
 .sense-inputs #sense{flex:1;min-width:60px;width:auto}
 #senseNumber{width:82px;box-sizing:border-box;padding:8px;border:1px solid #6c8389;border-radius:4px;background:#0d1f28;color:var(--paper);font:inherit;font-variant-numeric:tabular-nums}
 .sense-inputs>span{color:var(--muted)}
+
+.loadout-heading,.knife-loadout { display:flex;align-items:center;gap:8px; }
+.loadout-heading { justify-content:space-between;margin-bottom:8px; }
+.lobby-deck .loadout-heading h2 { margin:0; }
+#inspectBtn { display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid #8a9a9b;border-radius:4px;color:#f4e7a3;font-family:inherit;font-size:12px;font-weight:700;line-height:1.3;background:#233741; }
+#inspectBtn:hover,#inspectBtn:focus-visible { background:#354b54;color:white; }
+#inspectBtn .icon { width:15px;height:15px;display:block; }
+.knife-loadout { flex-wrap:wrap;margin-top:9px;padding-top:9px;border-top:1px solid #64757a80; }
+.knife-loadout strong { margin-right:3px;color:var(--paper);font-size:12px; }
+.knife-loadout button { display:inline-flex;align-items:center;gap:5px;border:1px solid #647780;border-radius:3px;padding:2px 9px 2px 5px;background:#233741;color:#e2e9e9;font-size:12px;font-weight:700; }
+.knife-loadout button[aria-pressed="true"] { background:#f6efd3;color:#15262d;border-color:#f3ecaf; }
+.knife-loadout button:hover { border-color:#f3ecaf; }
+.knife-loadout img { width:44px;height:25px;object-fit:contain; }

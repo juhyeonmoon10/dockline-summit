@@ -1,5 +1,6 @@
 import { createGame, stepGame, TEAM_SIZES } from './sim.js';
 import { gameSnapshot } from './game-snapshot.js';
+import { normalizeKnifeSkin } from './knife-types.js';
 import { getArena } from './arena-map.js';
 import { isPrimaryWeapon, botLoadouts } from './balance.js';
 
@@ -19,13 +20,13 @@ function sanitizedInput(input) {
 // Transport assigns player IDs. Only inputs and lobby requests cross the connection;
 // this host owns all movement, ammunition, hits and match transitions.
 export class OnlineHost {
-  constructor({code,size,hostId,name,weapon,mapId,onRoom,onGame,now=()=>performance.now()}) {
+  constructor({code,size,hostId,name,weapon,knifeSkin,mapId,onRoom,onGame,now=()=>performance.now()}) {
     if(!TEAM_SIZES.includes(size))fail('팀 인원은 1~3명입니다.');
     if(typeof hostId!=='string'||!hostId)fail('방장 연결을 확인해 주세요.');
     this.state={code,size,mapId:getArena(mapId).id,hostId,phase:'lobby',players:[],needed:size*2};
     this.members=new Map();this.game=null;this.closed=false;this.broadcastTime=0;
     this.onRoom=onRoom;this.onGame=onGame;this.now=now;
-    this.join(hostId,{name,weapon});
+    this.join(hostId,{name,weapon,knifeSkin});
   }
   get room(){return structuredClone(this.state);}
   roomUpdate(){this.onRoom?.(this.room);}
@@ -38,7 +39,7 @@ export class OnlineHost {
     if(this.state.players.length>=this.state.needed)fail('방이 가득 찼습니다.');
     const counts=[0,0];this.state.players.forEach(p=>counts[p.team]++);
     const player={id,name:cleanName(fields.name),weapon:isPrimaryWeapon(fields.weapon)?fields.weapon:'rifle',
-      team:counts[0]<=counts[1]?0:1,bot:false,ready:id===this.state.hostId};
+      knifeSkin:normalizeKnifeSkin(fields.knifeSkin), team:counts[0]<=counts[1]?0:1,bot:false,ready:id===this.state.hostId};
     this.state.players.push(player);
     this.members.set(id,{player,lastInput:{},lastInputAt:-Infinity,seq:-1});
     this.roomUpdate();return this.room;

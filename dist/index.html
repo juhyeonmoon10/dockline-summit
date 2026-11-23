@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="./arena-ui.css">
   <link rel="stylesheet" href="./online-ui.css">
   <link rel="stylesheet" href="./combat-ui.css">
+  <link rel="stylesheet" href="./armory-viewer.css">
 </head>
 <body data-scene="lobby">
   <canvas id="arena" aria-label="도크라인 세관 4번 창고" tabindex="-1"></canvas>
@@ -39,7 +40,10 @@
         <p id="boot" role="status">경기장 준비 중…</p>
       </section>
       <section id="arsenal" aria-labelledby="loadoutTitle">
-        <h2 id="loadoutTitle">주무기 선택</h2>
+        <div class="loadout-heading">
+          <h2 id="loadoutTitle">주무기 선택</h2>
+          <button type="button" id="inspectBtn" aria-haspopup="dialog"><span data-icon="inspect"></span>무기 자세히 보기</button>
+        </div>
         <div class="gun-options" role="group" aria-labelledby="loadoutTitle">
           <button data-weapon="rifle" aria-pressed="true"><img src="./assets/loadout-rifle.png" alt=""><span>돌격소총</span></button>
           <button data-weapon="shotgun" aria-pressed="false"><img src="./assets/loadout-shotgun.png" alt=""><span>산탄총</span></button>
@@ -50,6 +54,11 @@
           <button data-weapon="lmg" aria-pressed="false"><img src="./assets/loadout-lmg.png" alt=""><span>경기관총</span></button>
         </div>
         <p id="gunDesc" aria-live="polite"></p>
+        <div class="knife-loadout" role="group" aria-labelledby="knifeTitle">
+          <strong id="knifeTitle">근접 무기</strong>
+          <button type="button" data-knife="karambit" aria-pressed="true"><img src="./assets/loadout-karambit.png" alt="">카람빗</button>
+          <button type="button" data-knife="balisong" aria-pressed="false"><img src="./assets/loadout-balisong.png" alt="">발리송</button>
+        </div>
       </section>
     </div>
   </main>
