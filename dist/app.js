@@ -425,6 +425,7 @@ async function startArena(){
   if(!renderer)switchToLite();
   displayArena(chosenArena);
   $('arenaPick').disabled=$('rangeBtn').disabled=$('teamBtn').disabled=false;$('boot').textContent='';
+  audio.preload();
   requestAnimationFrame(frame);
   const invite=new URLSearchParams(location.hash.slice(1)).get('room');
   if(invite&&/^[A-Z0-9]{4,6}$/i.test(invite))openNetwork(invite.toUpperCase());

@@ -21,7 +21,7 @@ const mime = {
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.ico': 'image/x-icon',
   '.woff2': 'font/woff2', '.glb': 'model/gltf-binary', '.mp3': 'audio/mpeg',
-  '.ogg': 'audio/ogg', '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8'
+  '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.wasm': 'application/wasm', '.txt': 'text/plain; charset=utf-8'
 };
 const fail = (status, message) => { throw Object.assign(new Error(message), { status }); };
 const json = (res, status, data) => {

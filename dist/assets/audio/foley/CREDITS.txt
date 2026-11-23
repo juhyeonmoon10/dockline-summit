@@ -1,0 +1,33 @@
+Recorded reloads and weapon action sounds
+
+Original recordings from The Free Firearm Sound Library by Ben Jaszczak,
+Brian Nelson, Kevin Heras and Matthew Nanney. Released under CC0 1.0.
+https://opengameart.org/content/the-free-firearm-sound-library
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Source archive, master recording index and license
+https://github.com/buddingmonkey/FreeFirearmsSFXLibrary/tree/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Master%20Tracks
+https://github.com/buddingmonkey/FreeFirearmsSFXLibrary/blob/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Master%20Sheet.xlsx
+https://github.com/buddingmonkey/FreeFirearmsSFXLibrary/blob/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/LICENSE
+
+Cue                Source directory                 Master take(s)
+magOut             AR-15                            D_5
+magSeat, settle    AR-15                            D_4 (two different contacts)
+pistolOut          1911                             A_5
+pistolSeat         1911                             A_4
+smgOut             Carl Gustav M45_Swedish K        G_9
+smgSeat            Carl Gustav M45_Swedish K        G_8
+sniperOut          Tikka                            W_5
+sniperSeat         Tikka                            W_4
+heavyOut           PPSh                             P_7
+heavySeat          PPSh                             P_6
+shell, shellAlt    Model 12                         K_3 (two individual inserts)
+pumpOpen           Model 12                         K_4
+pumpClose          Model 12                         K_5
+boltOpen           Tikka                            W_6, W_9
+boltClose          Tikka                            W_12, W_13
+
+The game uses short excerpts at their recorded pitch. Edits include mono
+downmixing, low-frequency rumble filtering, level adjustment, trimming,
+short edge fades and Ogg Opus encoding. The two Tikka cues join recorded
+lift and pull sounds, and forward travel and latch sounds, respectively.

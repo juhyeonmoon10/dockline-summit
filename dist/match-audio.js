@@ -1,15 +1,15 @@
 import { RELOAD_CONTACT, SHOT_MECHANIC, SNIPER_RELOAD_CONTACT } from './weapon-view.js';
+import { foleyUrl, unpackFoley, reloadClips } from './weapon-foley.js';
 
-const guns={
-  rifle:{length:.34,hold:.018,decay:.064,body:.11,frequency:158,volume:.71,echo:.055,tail:.11,rate:1,foley:1},
-  pistol:{length:.23,hold:.012,decay:.040,body:.075,frequency:205,volume:.61,echo:.025,tail:.07,rate:1,foley:1.25},
-  shotgun:{length:.64,hold:.015,decay:.044,body:.22,frequency:96,volume:.78,echo:.15,tail:.18,rate:.96,foley:.90,onset:.12},
-  sniper:{sniperReport:true,volume:.75,foley:.90},
-  smg:{source:'pistol',length:.17,hold:.006,decay:.024,body:.055,frequency:278,volume:.48,echo:.018,tail:.05,rate:1.29,foley:1.38},
-  burst:{source:'rifle',length:.26,hold:.010,decay:.040,body:.12,frequency:205,volume:.59,echo:.045,tail:.085,rate:1.12,foley:1.12},
-  marksman:{source:'sniper',length:.48,hold:.011,decay:.062,body:.12,frequency:177,volume:.66,echo:.12,tail:.16,rate:1.14,foley:1.04},
-  lmg:{source:'rifle',length:.38,hold:.025,decay:.080,body:.20,frequency:87,volume:.65,echo:.06,tail:.12,rate:.81,foley:.78}
+const shotVolumes={
+  rifle:.74,pistol:.64,shotgun:.88,sniper:.94,smg:.62,burst:.69,marksman:.80,lmg:.78,
 };
+const footfalls=['stepA','stepB','land'];
+const alternateShots=new Set(['rifle','smg','burst','lmg']);
+const recordedClips={foley:foleyUrl};
+for(const weapon of Object.keys(shotVolumes))recordedClips[weapon]='./assets/audio/shots/'+weapon+'.wav';
+for(const weapon of alternateShots)recordedClips[weapon+'-2']='./assets/audio/shots/'+weapon+'-2.wav';
+for(const step of footfalls)recordedClips[step]='./assets/audio/steps/'+step+'.ogg';
 const clamp=(v,lo,hi)=>Math.max(lo,Math.min(hi,v));
 function mono(buffer){
   const data=new Float32Array(buffer.length);
@@ -19,142 +19,17 @@ function mono(buffer){
   }
   return data;
 }
-// Bake once at load time. Direct report and diffuse reflections share one mono
-// voice; distant players retain the same weapon identity without a sample swap.
-function gunBuffer(ctx,source,profile){
-  if(profile.sniperReport)return sniperReport(ctx,source);
-  const input=mono(source),rate=source.sampleRate;
-  let peak=0;for(const v of input)peak=Math.max(peak,Math.abs(v));
-  let start=input.findIndex(v=>Math.abs(v)>=peak*(profile.onset||.04));
-  start=Math.max(0,start-Math.round(rate*.001));
-  const buffer=ctx.createBuffer(1,Math.ceil(profile.length*rate),rate),out=buffer.getChannelData(0);
-  const gain=.70/(peak||1),hp=Math.exp(-2*Math.PI*38/rate);
-  let previous=0,filtered=0,phase=0;
-  for(let i=0;i<out.length;i++){
-    const t=i/rate,index=start+i*profile.rate,whole=Math.floor(index),mix=index-whole;
-    const raw=((input[whole]||0)*(1-mix)+(input[whole+1]||0)*mix)*gain;
-    filtered=hp*(filtered+raw-previous);previous=raw;
-    const envelope=Math.exp(-Math.max(0,t-profile.hold)/profile.decay);
-    phase+=2*Math.PI*profile.frequency*(.45+.55*Math.exp(-t/.025))/rate;
-    const body=profile.body*Math.sin(phase)*Math.exp(-t/.040)*(1-Math.exp(-t/.001));
-    const fade=Math.min(1,t/.0008,(out.length-1-i)/(rate*.012));
-    out[i]=(filtered*envelope+body)*Math.max(0,fade);
-  }
-  const dry=out.slice(),reflection=new Float32Array(out.length);
-  // Unequal delays and low-pass diffusion avoid a repeated gunshot/slapback.
-  for(const [seconds,level] of [[.047,1],[.083,.71],[.139,.49],[.223,.28],[.347,.13]]){
-    const offset=Math.round(seconds*rate);let low=0;
-    const smoothing=1-Math.exp(-2*Math.PI*2400/rate);
-    for(let i=offset;i<out.length;i++){
-      low+=(dry[i-offset]-low)*smoothing;
-      reflection[i]+=low*level*profile.echo;
-    }
-  }
-  let seed=83621,tailLow=0,tailHigh=0;
-  const tailStart=.035;
-  for(let i=0;i<out.length;i++){
-    const t=i/rate;
-    seed=(Math.imul(seed,1664525)+1013904223)>>>0;
-    tailLow+=(seed/2147483648-1-tailLow)*.13;tailHigh+=(tailLow-tailHigh)*.018;
-    const envelope=t<tailStart?0:(1-Math.exp(-(t-tailStart)/.012))*Math.exp(-(t-tailStart)/profile.tail);
-    out[i]+=(reflection[i]+(tailLow-tailHigh)*profile.echo*.28*envelope)*Math.min(1,(out.length-1-i)/(rate*.03));
-  }
-  peak=0;for(const v of out)peak=Math.max(peak,Math.abs(v));
-  if(peak>.86)for(let i=0;i<out.length;i++)out[i]*=.86/peak;
-  return buffer;
-}
-
-// The licensed bolt-action recording supplies the crack. Original filtered
-// pressure/noise and close, uneven reflections supply weight without adding a
-// long ringing tone or replaying the report as several separate bangs.
-function sniperReport(ctx,source){
-  const input=mono(source),rate=source.sampleRate,length=Math.ceil(.92*rate);
-  const buffer=ctx.createBuffer(1,length,rate),out=buffer.getChannelData(0);
-  let peak=0;for(const v of input)peak=Math.max(peak,Math.abs(v));
-  const onset=Math.max(0,input.findIndex(v=>Math.abs(v)>=peak*.04)-Math.round(rate*.0006));
-  const gain=.68/(peak||1),hp=Math.exp(-2*Math.PI*48/rate);
-  const bodyLow=1-Math.exp(-2*Math.PI*420/rate),bodyHigh=1-Math.exp(-2*Math.PI*55/rate);
-  let previous=0,filtered=0,low=0,sub=0,phase=0,seed=137321;
-  for(let i=0;i<length;i++){
-    const t=i/rate,index=onset+i*.93,whole=Math.floor(index),mix=index-whole;
-    const raw=((input[whole]||0)*(1-mix)+(input[whole+1]||0)*mix)*gain;
-    filtered=hp*(filtered+raw-previous);previous=raw;
-    seed=(Math.imul(seed,1664525)+1013904223)>>>0;
-    low+=(seed/2147483648-1-low)*bodyLow;sub+=(low-sub)*bodyHigh;
-    phase+=2*Math.PI*(92+32*Math.exp(-t/.032))/rate;
-    const attack=1-Math.exp(-t/.0007),pressure=Math.exp(-t/.071)*attack;
-    const body=(Math.sin(phase)*.24+Math.sin(phase*1.93)*.075+(low-sub)*.28)*pressure;
-    out[i]=(filtered*Math.exp(-Math.max(0,t-.012)/.052)+body)*Math.min(1,t/.0005,(length-1-i)/(rate*.025));
-  }
-  const dry=out.slice();
-  for(const [delay,level,cutoff] of [[.026,.18,3400],[.049,.13,2700],[.083,.085,2100],[.131,.045,1500]]){
-    const at=Math.round(delay*rate),smooth=1-Math.exp(-2*Math.PI*cutoff/rate);let reflection=0;
-    for(let i=at;i<length;i++){reflection+=(dry[i-at]-reflection)*smooth;out[i]+=reflection*level;}
-  }
-  let air=0,airLow=0;
-  for(let i=0;i<length;i++){
-    const t=i/rate;
-    seed=(Math.imul(seed,1664525)+1013904223)>>>0;
-    air+=(seed/2147483648-1-air)*.12;airLow+=(air-airLow)*.022;
-    const tail=t<.028?0:(1-Math.exp(-(t-.028)/.012))*Math.exp(-(t-.028)/.18);
-    out[i]+=(air-airLow)*.047*tail;
-    out[i]*=Math.min(1,(length-1-i)/(rate*.04));
-  }
-  peak=0;for(const v of out)peak=Math.max(peak,Math.abs(v));
-  if(peak>.86)for(let i=0;i<length;i++)out[i]*=.86/peak;
-  return buffer;
-}
-function clip(ctx,source,from=0,duration=source.duration,level=.65){
-  const input=mono(source),rate=source.sampleRate,start=Math.floor(from*rate);
-  const count=Math.max(1,Math.min(input.length-start,Math.ceil(duration*rate)));
+function footstepBuffer(ctx,source){
+  const data=mono(source),rate=source.sampleRate,count=data.length;
   const buffer=ctx.createBuffer(1,count,rate),out=buffer.getChannelData(0);
-  let peak=0;for(let i=0;i<count;i++)peak=Math.max(peak,Math.abs(input[start+i]||0));
-  const gain=Math.min(2,level/(peak||1));
-  for(let i=0;i<count;i++)out[i]=(input[start+i]||0)*gain*Math.min(1,i/(rate*.002),(count-1-i)/(rate*.012));
+  let peak=0;
+  for(const value of data)peak=Math.max(peak,Math.abs(value));
+  const gain=Math.min(2,.65/(peak||1));
+  for(let i=0;i<count;i++)out[i]=data[i]*gain*Math.min(1,i/(rate*.002),(count-1-i)/(rate*.012));
   return buffer;
 }
 
-// Original, deterministic mechanical foley layered with a short CC0 reload
-// contact. The click is at buffer start, so it follows the visible contact.
-const mechanisms={
-  pumpOpen:{duration:.16,frequency:520,grit:.42,decay:.032,drag:.12,seed:3101},
-  pumpClose:{duration:.12,frequency:178,grit:.23,decay:.025,drag:.035,seed:4102},
-  boltOpen:{duration:.15,frequency:438,grit:.34,decay:.013,drag:.062,seed:5123,bolt:true,latch:.055},
-  boltClose:{duration:.13,frequency:248,grit:.25,decay:.015,drag:.034,seed:6124,bolt:true,latch:.035},
-  magOut:{duration:.12,frequency:470,grit:.16,decay:.021,drag:.065,seed:7125},
-  magSeat:{duration:.10,frequency:210,grit:.20,decay:.019,drag:.025,seed:8126},
-  settle:{duration:.075,frequency:680,grit:.13,decay:.012,drag:.020,seed:9127},
-  shell:{duration:.11,frequency:760,grit:.17,decay:.018,drag:.045,seed:1128}
-};
-function mechanismBuffer(ctx,kind,recording){
-  const p=mechanisms[kind],rate=ctx.sampleRate,length=Math.ceil(p.duration*rate);
-  const buffer=ctx.createBuffer(1,length,rate),out=buffer.getChannelData(0);
-  const recorded=recording?mono(recording):null;
-  let onset=0,recordedPeak=0;
-  if(recorded){
-    for(const v of recorded)recordedPeak=Math.max(recordedPeak,Math.abs(v));
-    onset=Math.max(0,recorded.findIndex(v=>Math.abs(v)>=recordedPeak*.12)-Math.round(rate*.0005));
-  }
-  let seed=p.seed,low=0,peak=0;
-  for(let i=0;i<length;i++){
-    const t=i/rate,u=t/p.duration;
-    seed=(Math.imul(seed,1664525)+1013904223)>>>0;
-    const noise=seed/2147483648-1;low+=(noise-low)*.18;
-    const attack=1-Math.exp(-t/.00045),impact=Math.exp(-t/p.decay);
-    const metal=p.bolt
-      ?Math.sin(2*Math.PI*p.frequency*t)*.13+Math.sin(2*Math.PI*p.frequency*1.73*t)*.055+Math.sin(2*Math.PI*p.frequency*3.91*t)*.035
-      :Math.sin(2*Math.PI*p.frequency*t)*.30+Math.sin(2*Math.PI*p.frequency*2.71*t)*.09;
-    const scrape=(noise-low)*p.grit*Math.exp(-t/p.drag)*(.45+.55*Math.sin(Math.PI*u));
-    const real=(recorded?.[onset+i]||0)/(recordedPeak||1)*(p.bolt?.50:.21)*Math.exp(-t/.035);
-    const latch=p.bolt&&t>=p.latch?((noise-low)*.45+Math.sin(2*Math.PI*1400*(t-p.latch))*.10)*.18*Math.exp(-(t-p.latch)/.008):0;
-    out[i]=(metal*impact+scrape+real+latch)*attack*Math.min(1,(p.duration-t)/.014);
-    peak=Math.max(peak,Math.abs(out[i]));
-  }
-  if(peak)for(let i=0;i<length;i++)out[i]*=.60/peak;
-  return buffer;
-}
-
-// Short, original foley buffers; generated once, without another audio download.
+// Knife and impact feedback are generated locally and use no weapon recordings.
 function meleeBuffer(ctx,kind){
   const swing=kind==='bladeSwing',wall=kind==='bladeWall',duration=swing?.17:wall?.12:.10;
   const rate=ctx.sampleRate,buffer=ctx.createBuffer(1,Math.ceil(rate*duration),rate),data=buffer.getChannelData(0);
@@ -181,6 +56,7 @@ export class ArenaSound {
   constructor(){
     this._enabled=true;this.ctx=null;this.ready=null;this.loaded=false;
     this.buffers=new Map();this.stepsFor=new Map();this.voices=new Set();this.pending=[];
+    this.downloads=new Map();this.takes=new Map();this.retryAt=0;
   }
   get enabled(){return this._enabled;}
   set enabled(value){this.setEnabled(value);}
@@ -188,6 +64,23 @@ export class ArenaSound {
     this._enabled=!!value;
     if(this.master)this.master.gain.setTargetAtTime(this._enabled?.78:0,this.ctx.currentTime,.004);
     if(!this._enabled)this.clear();
+  }
+  // Fetch in the lobby. Decoding and playback use the context unlocked by the player.
+  preload(){
+    if(!this.enabled)return;
+    for(const [id,path] of Object.entries(recordedClips)){
+      if(this.hasRecording(id)||this.downloads.has(id))continue;
+      const request=fetch(new URL(path,import.meta.url)).then(response=>{
+        if(!response.ok)throw Error('HTTP '+response.status);
+        return response.arrayBuffer();
+      }).catch(error=>{
+        this.downloads.delete(id);console.warn('효과음 다운로드 실패',id,error);return null;
+      });
+      this.downloads.set(id,request);
+    }
+  }
+  hasRecording(id){
+    return this.buffers.has(id==='foley'?'shell':id);
   }
   unlock(){
     if(!this.enabled)return Promise.resolve();
@@ -206,37 +99,57 @@ export class ArenaSound {
         bus.connect(ceiling);ceiling.connect(master);master.connect(ctx.destination);
         this.bus=bus;this.master=master;
         for(const kind of ['bladeSwing','bladeHit','bladeWall'])this.buffers.set(kind,meleeBuffer(ctx,kind));
-        const resume=ctx.state==='suspended'?ctx.resume().catch(()=>{}):Promise.resolve();
-        this.ready=Promise.all([resume,this.loadSamples(ctx)]).then(()=>{
+      }
+      const resume=this.ctx.state==='suspended'?this.ctx.resume().catch(()=>{}):Promise.resolve();
+      if(!this.ready||this.retryAt&&performance.now()>=this.retryAt){
+        this.retryAt=0;
+        this.ready=this.loadSamples(this.ctx).then(()=>{
           this.loaded=true;
-          const queued=this.pending.splice(0);
-          if(this.enabled)for(const cue of queued)if(performance.now()-cue.at<350)this.playEvent(cue.event,cue.actor,cue.view);
+          if(Object.keys(recordedClips).some(id=>!this.hasRecording(id)))this.retryAt=performance.now()+2000;
         });
-      }else if(this.ctx.state==='suspended')return Promise.all([this.ready,this.ctx.resume().catch(()=>{})]);
-      return this.ready;
+      }
+      return Promise.all([this.ready,resume]).then(()=>this.flushPending());
     }catch{return Promise.resolve();}
   }
   async loadSamples(ctx){
-    try{
-      const {samples}=await import('./assets/match-samples.js');
-      await Promise.all(Object.entries(samples).map(async ([id,b64])=>{
-        try{
-          const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
-          const decoded=await ctx.decodeAudioData(bytes.buffer);
-          this.buffers.set(id,guns[id]?gunBuffer(ctx,decoded,guns[id]):clip(ctx,decoded));
-          for(const [variant,profile] of Object.entries(guns)){
-            if(profile.source===id)this.buffers.set(variant,gunBuffer(ctx,decoded,profile));
-          }
-          if(id==='reload'){
-            const release=clip(ctx,decoded,.100,.25,.48),seat=clip(ctx,decoded,.603,.21,.60),rack=clip(ctx,decoded,1.012,.39,.58);
-            for(const kind of Object.keys(mechanisms)){
-              const recording=kind==='magOut'||kind==='shell'?release:kind==='magSeat'?seat:rack;
-              this.buffers.set(kind,mechanismBuffer(ctx,kind,recording));
-            }
-          }
-        }catch(error){console.warn('효과음 해석 실패',id,error);}
-      }));
-    }catch(error){console.warn('효과음을 불러오지 못했습니다.',error);}
+    this.preload();
+    await Promise.all(Array.from(this.downloads,async ([id,request])=>{
+      try{
+        const bytes=await request;
+        if(!bytes)return;
+        const decoded=await ctx.decodeAudioData(bytes);
+        if(id==='foley'){
+          for(const [cue,buffer] of unpackFoley(ctx,decoded))this.buffers.set(cue,buffer);
+        }else this.buffers.set(id,footfalls.includes(id)?footstepBuffer(ctx,decoded):decoded);
+        this.flushPending();
+      }catch(error){console.warn('효과음 해석 실패',id,error);}
+      finally{this.downloads.delete(id);}
+    }));
+  }
+  canPlay(event){
+    if(this.ctx?.state!=='running')return false;
+    if(event.type==='shot')return this.buffers.has(event.weapon);
+    if(event.type==='reload'){
+      if(event.weapon==='shotgun')return this.buffers.has('shell');
+      const sounds=reloadClips(event.weapon);
+      return this.buffers.has(sounds.out)&&this.buffers.has(sounds.seat);
+    }
+    return true;
+  }
+  flushPending(){
+    if(!this.enabled||!this.pending.length)return;
+    const waiting=[],now=performance.now();
+    for(const cue of this.pending){
+      const age=(now-cue.at)/1000;
+      if(age>.35)continue;
+      // Keep a queued hit confirmation behind the shot that produced it.
+      if(!this.canPlay(cue.event)||waiting.some(previous=>previous.event.actor===cue.event.actor)){
+        waiting.push(cue);continue;
+      }
+      const actor=cue.event.type==='reload'?{...cue.actor,reload:Math.max(0,cue.actor.reload-age)}:cue.actor;
+      this.playEvent(cue.event,actor,cue.view);
+    }
+    this.pending=waiting;
   }
   stop(voice){
     const now=this.ctx.currentTime;
@@ -244,7 +157,7 @@ export class ArenaSound {
     try{voice.source.stop(now+.008);}catch{}
     this.voices.delete(voice);
   }
-  clear(){this.pending.length=0;this.stepsFor.clear();for(const voice of this.voices)this.stop(voice);}
+  clear(){this.pending.length=0;this.stepsFor.clear();this.takes.clear();for(const voice of this.voices)this.stop(voice);}
   connected(source,volume,pan,delay=0,options={}){
     const ctx=this.ctx;if(!this.enabled||ctx?.state!=='running')return;
     const priority=options.priority||1;
@@ -291,9 +204,13 @@ export class ArenaSound {
   }
   event(event,game,view){
     if(!view||!this.enabled)return;const actor=game.players.find(p=>p.id===event.actor);if(!actor)return;
-    if(!this.loaded){
+    if(event.type==='shot'||event.type==='reload'){
+      this.pending=this.pending.filter(c=>!(c.event.actor===event.actor&&c.event.type==='reload'));
+    }
+    if(this.pending.length||!this.canPlay(event)){
       if(this.pending.length>=8)this.pending.shift();
-      this.pending.push({event:{...event},actor:{...actor},view:{...view},at:performance.now()});return;
+      this.pending.push({event:{...event},actor:{...actor},view:{...view},at:performance.now()});
+      this.flushPending();return;
     }
     this.playEvent(event,actor,view);
   }
@@ -304,17 +221,23 @@ export class ArenaSound {
     const options={priority:own?3:2,lowpass:own?0:Math.max(1800,16000/(1+dist*.12))};
     if(event.type==='melee')this.sample('bladeSwing',.34*attenuation,position,.96+(event.seq%3)*.04,0,options);
     if(event.type==='meleeImpact')this.sample(event.target?'bladeHit':'bladeWall',.44*attenuation,position,.98+(event.seq%3)*.025,0,options);
-    if(event.type==='shot'&&guns[event.weapon]){
-      const profile=guns[event.weapon],delay=own?0:Math.min(.12,dist/343);
-      this.sample(event.weapon,profile.volume*attenuation,position,.988+Math.random()*.024,delay,options);
+    if(event.type==='shot'&&Object.hasOwn(shotVolumes,event.weapon)){
+      const weapon=event.weapon,delay=own?0:Math.min(.12,dist/343);
+      let take=weapon;
+      if(alternateShots.has(weapon)){
+        const key=actor.id+'|'+weapon,second=this.takes.get(key)&&this.buffers.has(weapon+'-2');
+        if(second)take=weapon+'-2';
+        this.takes.set(key,!second);
+      }
+      this.sample(take,shotVolumes[weapon]*attenuation,position,1,delay,options);
       // Do not leave a queued reload or previous cycle behind a new shot.
       for(const voice of this.voices)if(voice.actor===actor.id&&(voice.reload||voice.mechanic))this.stop(voice);
       const cycle=SHOT_MECHANIC[event.weapon];
       if(cycle&&actor.alive&&actor.active===event.weapon){
         const mechanicOptions={...options,priority:own?2:1,mechanic:true,actor:actor.id,weapon:event.weapon};
         const pump=event.weapon==='shotgun';
-        this.sample(pump?'pumpOpen':'boltOpen',(pump?.29:.24)*attenuation,position,1,delay+cycle.open,mechanicOptions);
-        this.sample(pump?'pumpClose':'boltClose',(pump?.35:.29)*attenuation,position,1,delay+cycle.close,mechanicOptions);
+        this.sample(pump?'pumpOpen':'boltOpen',(pump?.44:.40)*attenuation,position,1,delay+cycle.open,mechanicOptions);
+        this.sample(pump?'pumpClose':'boltClose',(pump?.49:.45)*attenuation,position,1,delay+cycle.close,mechanicOptions);
       }
     }
     if(event.type==='hit'&&own)this.note(event.headshot?1350:840,event.headshot?1760:1060,.035,.07);
@@ -324,26 +247,30 @@ export class ArenaSound {
       if(!actor.alive||actor.active!==event.weapon||!(actor.reload>0))return;
       const reloadOptions={...options,priority:own?2:1,reload:true,actor:actor.id,weapon:event.weapon,reloadEnd:this.ctx.currentTime+actor.reload};
       const duration=actor.reloadDuration||actor.reload;
-      const speed=guns[event.weapon]?.foley||1;
-      const cue=(sample,phase,level,rate=speed)=>{
+      const cue=(sample,phase,level)=>{
         const when=actor.reload-duration*(1-phase);
-        if(when>=-.035)this.sample(sample,level*attenuation,position,rate,Math.max(0,when),reloadOptions);
+        if(when>=-.035)this.sample(sample,level*attenuation,position,1,Math.max(0,when),reloadOptions);
       };
-      if(event.weapon==='shotgun')cue('shell',RELOAD_CONTACT.shell,.39,1);
-      else if(event.weapon==='sniper'){
-        cue('magOut',SNIPER_RELOAD_CONTACT.release,.31);
-        cue('magSeat',SNIPER_RELOAD_CONTACT.seat,.42);
-        cue('settle',SNIPER_RELOAD_CONTACT.settle,.22);
-        if(actor.ammo===0)cue('boltClose',SNIPER_RELOAD_CONTACT.empty,.31,1);
-      }
+      if(event.weapon==='shotgun')cue(actor.ammo%2?'shellAlt':'shell',RELOAD_CONTACT.shell,.51);
       else{
-        cue('magOut',RELOAD_CONTACT.release,.32);
-        cue('magSeat',RELOAD_CONTACT.seat,.43);
-        cue('settle',RELOAD_CONTACT.settle,event.weapon==='lmg'?.32:.22);
+        const names=reloadClips(event.weapon),sniper=event.weapon==='sniper';
+        const contacts=sniper?SNIPER_RELOAD_CONTACT:RELOAD_CONTACT;
+        cue(names.out,contacts.release,.42);
+        cue(names.seat,contacts.seat,.53);
+        if(names.settle)cue(names.settle,contacts.settle,event.weapon==='lmg'?.36:.28);
+        if(sniper&&actor.ammo===0)cue('boltClose',SNIPER_RELOAD_CONTACT.empty,.44);
       }
     }
   }
   reconcile(game){
+    if(this.pending.length){
+      this.pending=this.pending.filter(cue=>{
+        const actor=game.players.find(p=>p.id===cue.event.actor);
+        const holding=actor?.alive&&actor.active===cue.event.weapon;
+        if(cue.event.type==='shot'&&!holding)cue.actor.alive=false;
+        return cue.event.type!=='reload'||(holding&&actor.reload>0);
+      });
+    }
     for(const voice of this.voices)if(voice.reload||voice.mechanic){
       const actor=game.players.find(p=>p.id===voice.actor);
       // Natural completion may leave a few milliseconds of contact decay.
