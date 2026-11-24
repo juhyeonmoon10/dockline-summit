@@ -1,4 +1,6 @@
 import * as T from './assets/three.module.min.js';
+import {assetUrl} from './asset-url.js';
+import {held,preview,seats,tips} from './assets/responder-glove.js';
 
 // Rounded cross-sections follow the hand last and glove pattern. Adjacent
 // sections share vertices so stitched panels sit on a continuous silhouette.
@@ -60,82 +62,95 @@ function mesh(data,sleeve=false) {
   }
   g.setAttribute('uv',new T.BufferAttribute(uv,2));return new T.Mesh(g,cloth);
 }
-function fingerSegment(length,radius,tip) {
-  const data=batch(),r=radius;
-  loft(data,[[.004,0,0,r*.76,r*.84],[0,0,0,r,r],[-length*.24,0,0,r*1.03,r],
-    [-length*.78,0,-.001,r*.93,r*.93],[-length,.001,-.001,r*(tip?.50:.80),r*(tip?.56:.83)]],
-    [fabric,edge,fabric,leather,leather,seam,fabric,fabric],'x');
-  loft(data,[[-.003,0,r*.60,.0028,r*.64],[-.006,0,r*.84,.0029,r*.74],
-    [-length*.67,0,r*.78,.0028,r*.66],[-length*.73,0,r*.66,.0018,r*.56]],
-    [edge,fabric,fabric,leather],'x');
-  return mesh(data);
+const decode=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
+const glovePaint=new T.MeshStandardMaterial({vertexColors:true,roughness:.84,metalness:.015});
+export const gloveTextureReady=typeof document==='undefined'?Promise.resolve():new T.TextureLoader()
+  .loadAsync(assetUrl('responder-glove.webp')).then(texture=>{
+    texture.colorSpace=T.SRGBColorSpace;texture.flipY=false;texture.anisotropy=4;
+    glovePaint.vertexColors=false;glovePaint.map=texture;glovePaint.needsUpdate=true;
+  }).catch(error=>console.warn('장갑 텍스처를 불러오지 못했습니다.',error));
+
+const gloveMeshes=new Map();
+const linearChannel=Float32Array.from({length:256},(_,i)=>{
+  const c=i/255;
+  return c<=.04045?c/12.92:((c+.055)/1.055)**2.4;
+});
+function importedGloveGeometry(source){
+  if(gloveMeshes.has(source))return gloveMeshes.get(source);
+  const {points,texcoords,colors,digits,triangles}=source;
+  const raw=new Int16Array(decode(points).buffer),weights=decode(digits),count=raw.length/3;
+  const indexes=new Uint8Array(count*4),mix=new Float32Array(count*4);
+  for(let i=0;i<count;i++){
+    const finger=weights[i*3],bend=weights[i*3+1]/255,tip=weights[i*3+2]/255;
+    indexes.set([0,1+2*finger,2+2*finger,0],4*i);
+    mix.set([1-bend,bend*(1-tip),bend*tip,0],4*i);
+  }
+  const geo=new T.BufferGeometry();
+  geo.setAttribute('position',new T.Float32BufferAttribute(Float32Array.from(raw,x=>x*.0001),3));
+  const linear=Float32Array.from(decode(colors),value=>linearChannel[value]);
+  geo.setAttribute('color',new T.Float32BufferAttribute(linear,3));
+  if(texcoords)geo.setAttribute('uv',new T.Uint16BufferAttribute(new Uint16Array(decode(texcoords).buffer),2,true));
+  geo.setAttribute('skinIndex',new T.Uint8BufferAttribute(indexes,4));
+  geo.setAttribute('skinWeight',new T.Float32BufferAttribute(mix,4));
+  geo.setIndex(new T.BufferAttribute(new Uint16Array(decode(triangles).buffer),1));
+  geo.computeVertexNormals();gloveMeshes.set(source,geo);return geo;
 }
-export function articulatedGlove(left=false) {
-  const group=new T.Group(),skin=new T.Group(),palm=batch();
+const outward=new T.Vector3(-1,0,0);
+let wristLiner;
+function linedCuff(){
+  if(!wristLiner){
+    const p=batch();
+    // A sewn-in dark knit tube closes the original cut even as the sleeve changes direction.
+    loft(p,[[.039,-.066,.049,.024,.029],[.038,-.067,.061,.027,.035],
+      [.037,-.068,.069,.035,.040],[.038,-.068,.083,.036,.040],
+      [.038,-.070,.092,.035,.038],[.039,-.073,.108,.029,.033]],
+      ['#403e37','#353833','#47463d','#333630'],'z');
+    wristLiner=mesh(p);
+  }
+  return wristLiner.clone();
+}
+function fingerChain(root,i){
+  const seat=new T.Vector3(...seats[i]),tip=new T.Vector3(...tips[i]),axis=tip.sub(seat);
+  const a=new T.Bone(),b=new T.Bone();
+  a.position.copy(seat);
+  a.quaternion.setFromUnitVectors(outward,axis.clone().normalize());
+  b.position.x=-axis.length()*.56;root.add(a);a.add(b);
+  return {a,b,rest:a.quaternion.clone()};
+}
+export function articulatedGlove(left=false){
+  const group=new T.Group(),skin=new T.Group(),root=new T.Bone();
+  const mesh=new T.SkinnedMesh(importedGloveGeometry(held),glovePaint);
+  mesh.userData.previewGeometry=importedGloveGeometry(preview);
+  mesh.name='Tripo responder glove';mesh.frustumCulled=false;
+  skin.add(mesh,linedCuff());mesh.add(root);
+  const chains=seats.map((_,i)=>fingerChain(root,i));
+  mesh.bind(new T.Skeleton([root,...chains.flatMap(({a,b})=>[a,b])]));
   if(left)skin.scale.x=-1;
   group.add(skin);
-  // A broad knuckle line joins the narrower heel and cuff. A scalloped
-  // backhand patch rises across the metacarpals as one piece of leather.
-  loft(palm,[[.050,-.081,.055,.030,.026],[.048,-.076,.036,.036,.039],
-    [.044,-.069,.010,.036,.051],[.047,-.064,-.010,.030,.050],[.049,-.061,-.029,.020,.043]],
-    [fabric,fabric,leather,leather,seam,leather,fabric,edge],'z');
-  loft(palm,[[.073,-.076,.027,.008,.025],[.078,-.066,.018,.008,.037],
-    [.077,-.061,-.005,.007,.041],[.071,-.060,-.023,.006,.031]],
-    [leather,fabric,seam,leather,leather,edge],'z');
-  // The horseshoe seam follows the outside of the dorsal panel. Its raised
-  // stitches remain distinct from the grooves dividing the four knuckle pads.
-  for(let i=0;i<11;i++){
-    const a=-1.15+i*.34,y=-.061+.035*Math.sin(a),z=.001+.020*Math.cos(a);
-    const x=.080+.005*Math.cos(a);
-    loft(palm,[[x,y,z,.0008,.0011],[x+.0009,y+.002,z+.001,.001,.0012]],
-      ['#929384','#72796a'],'z');
-  }
-  for(let i=0;i<4;i++){
-    const y=-.031-i*.021;
-    loft(palm,[[.071,y,-.024,.006,.005],[.078,y,-.020,.010,.008],[.080,y,-.010,.010,.009],
-      [.079,y,.002,.008,.007],[.075,y,.011,.004,.004]],[leather,'#626961',fabric,leather],'z');
-    loft(palm,[[.086,y,-.017,.0015,.004],[.089,y,-.014,.0018,.005],[.089,y,-.008,.0015,.004]],
-      [edge,fabric,leather],'z');
-  }
-  loft(palm,[[.048,-.082,.038,.032,.032],[.052,-.084,.043,.036,.036],[.056,-.087,.062,.037,.032],[.059,-.090,.070,.033,.028]],
-    [leather,rubber,seam,rubber],'z');
-  loft(palm,[[.071,-.080,.047,.012,.017],[.079,-.077,.051,.009,.019],[.081,-.076,.061,.007,.016]],
-    [edge,fabric,leather],'z');
-  skin.add(mesh(palm));
-  const fingers=[];
-  for(let i=0;i<4;i++){
-    const a=new T.Group(),b=new T.Group(),base=[.040,.044,.041,.034][i],end=[.030,.035,.031,.026][i];
-    a.position.set(.055-i*.001,-.026-i*.024,(left?-.026:.013)-i*.002);skin.add(a);
-    a.add(fingerSegment(base,.0117-i*.00045,false));b.position.x=-base+.003;a.add(b);
-    b.add(fingerSegment(end,.0109-i*.00040,true));fingers.push({a,b});
-  }
-  const thumb=new T.Group(),thumbTip=new T.Group();
-  thumb.position.set(.039,left?-.029:-.045,left?.006:-.016);skin.add(thumb);thumb.rotation.set(-.26,-.55,.46);
-  thumb.add(fingerSegment(.040,.013,false));thumbTip.position.x=-.036;
-  thumbTip.add(fingerSegment(.028,.0118,true));thumb.add(thumbTip);
-  group.userData={fingers,thumb,thumbTip,left,wrist:new T.Vector3(left?-.057:.057,-.088,.057),
-    elbow:new T.Vector3(),sleeve:viewSleeve()};
-  flexGlove(group,0);return group;
+  group.userData={fingers:chains.slice(0,4),thumb:chains[4],left,
+    wrist:new T.Vector3(),elbow:new T.Vector3(),sleeve:viewSleeve()};
+  flexGlove(group,0);
+  return group;
 }
-
+const digitTurn=new T.Quaternion(),digitEuler=new T.Euler();
+function bendDigit(chain,proximal,distal,spread){
+  chain.a.quaternion.copy(chain.rest).multiply(digitTurn.setFromEuler(digitEuler.set(0,proximal,spread,'ZYX')));
+  chain.b.rotation.set(0,distal,0);
+}
 export function flexGlove(hand,release,indexFixed=false) {
-  const {fingers,thumb,thumbTip,left}=hand.userData;
-  fingers.forEach(({a,b},i)=>{
-    const open=indexFixed&&i===0?0:release*(left?1-i*.16:1);
-    a.rotation.y=.66-open*(left?2.13:1.02)+i*.045;
-    a.rotation.z=-.035+(i-1.5)*.10*open;
-    b.rotation.y=-1.22+.93*open-i*.045;
-    b.rotation.z=.13-.12*open;
+  const {fingers,thumb,left,wrist}=hand.userData,open=Math.max(0,Math.min(1,release));
+  // Seat the original finger on the moving ring socket in the reverse grip.
+  const skin=hand.children[0];
+  skin.position.set(indexFixed?.055754:0,indexFixed?.000486:0,indexFixed?-.012476:0);
+  wrist.set(left?-.038:.038,-.070,.074).add(skin.position);
+  fingers.forEach((finger,i)=>{
+    if(indexFixed&&i===0){bendDigit(finger,1.48,1.49,-.03);return;}
+    const reach=open*(left?1-i*.10:1);
+    bendDigit(finger,(i===0?1.11:1.42)-reach*1.12+i*.02,1.18-reach*.97,(i-1.5)*.07*reach);
   });
-  thumb.rotation.z=.46-release*(left?1.61:.75);thumb.rotation.y=-.55+release*(left?.29:-.38);
-  thumbTip.rotation.y=-.74+release*.36;
-  if(indexFixed){
-    // The ring sits outside the closed fist. Hold it with the index only while
-    // the other fingers extend; the thumb rests across the curled middle finger.
-    fingers[0].a.rotation.set(0,-.96,.08);fingers[0].b.rotation.set(0,-1.55,.08);
-    thumb.rotation.y=1.56-release*.53;thumb.rotation.z=-.88+release*.29;
-    thumbTip.rotation.y=-1.70+release*.38;
-  }
+  const stock=Number(hand.userData.stockGrip||0),free=1-stock;
+  bendDigit(thumb,free*((indexFixed?1.61:1.15)-open*.47)-stock*.70,
+    free*(.84-open*.48)-stock*.38,free*(-.55+open*.21)-stock*.31);
 }
 
 let sleeve;

@@ -6,6 +6,7 @@ import {poseRevolver,revolverAction} from './revolver.js';
 import { knifeMesh,knifePose,animateCarriedKnife } from './knife.js';
 import { knifeAttackDuration,knifeClipPhase } from './knife-motion.js';
 import { normalizeKnifeSkin } from './knife-types.js';
+import { assetUrl } from './asset-url.js';
 
 const sources=[null,null];
 let loading;
@@ -13,7 +14,7 @@ export function loadOperators(){
  if(!loading){
    loading=import('./assets/GLTFLoader.js')
      .then(({GLTFLoader})=>Promise.all(['guard','responder'].map(async (outfit,team)=>{
-       const gltf=await new GLTFLoader().loadAsync(new URL('./assets/customs-'+outfit+'.glb',import.meta.url).href);
+       const gltf=await new GLTFLoader().loadAsync(assetUrl('customs-'+outfit+'.glb'));
        gltf.scene.updateMatrixWorld(true);
        sources[team]=gltf;
      })))

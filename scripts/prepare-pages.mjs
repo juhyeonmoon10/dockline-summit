@@ -8,13 +8,13 @@ async function indexFiles(dir=''){
   for(const entry of await readdir(join(root,dir),{withFileTypes:true})){
     const file=dir?dir+'/'+entry.name:entry.name;
     if(entry.isDirectory()){await indexFiles(file);continue;}
-    const atlas=/^assets\/[^/]+\.webp$/.test(file);
-    if(!atlas&&!/\.js$|\.css$|(?:^|\/)loadout-[^/]+\.png$/.test(file))continue;
+    const visualAsset=/^assets\/[^/]+\.(?:webp|glb|bin)$/.test(file);
+    if(!visualAsset&&!/\.js$|\.css$|(?:^|\/)loadout-[^/]+\.png$/.test(file))continue;
     const bytes=await readFile(join(root,file));
     const hash=createHash('sha256').update(bytes).digest('hex').slice(0,12);
     const path='./'+file,url=path+'?v='+hash;
     versioned.set(path,url);
-    if(file.endsWith('.js')||file.endsWith('.png')||atlas)imports[path]=url;
+    if(file.endsWith('.js')||file.endsWith('.png')||visualAsset)imports[path]=url;
   }
 }
 // Module workers do not receive the page import map. Each published set of

@@ -4,7 +4,7 @@ const rest=Object.freeze({x:0,y:0,z:0,rx:0,ry:0,rz:0,turn:0,grip:0});
 export function knifeWristPose(skin,draw,slash,step=0,walk=0,swayX=0){
   const flip=skin==='balisong';
   return {
-    x:(flip?.123:.14)+draw.x+slash.x*.88+Math.sin(step)*.006*walk-swayX,
+    x:(flip?.123:.14)+draw.x*(flip?1:1.19)+slash.x*.88+Math.sin(step)*.006*walk-swayX,
     y:(flip?-.095:-.10)+draw.y+slash.y*.84-Math.abs(Math.cos(step))*.005*walk,
     z:(flip?-.435:-.453)+draw.z+slash.z*.80,
     rx:(flip?-.06:.30)+draw.rx+slash.rx*.85,ry:(flip?-.23:-.40)+draw.ry+slash.ry*.89,

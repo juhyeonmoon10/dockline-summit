@@ -77,6 +77,10 @@ function glove(support,fit) {
   const group=new T.Group(),hand=articulatedGlove(support);
   const side=support?-1:1,center=support?fit.support:0,grip=support?-.066:fit.grip;
   hand.position.set(0,grip+.067,center);
+  hand.userData.stockGrip=!support;
+  if(!support&&fit===gunFit.shotgun){
+    hand.position.y-=.018;
+  }
   if(support)hand.rotation.set(.14,.08,.12);
   flexGlove(hand,support?.13:0);group.add(hand);
   hand.updateMatrix();
@@ -88,42 +92,15 @@ function glove(support,fit) {
 // The origin of each glove is a point on the surface it holds. Wrist and
 // sleeve are separate so reaching for the magazine never translates an elbow.
 function sniperGlove(front) {
-  const parts=new Parts(),hand=new T.Group(),side=front ? -1 : 1;
-  const cloth='#383d39',pads='#4a5048',seam='#282e2c';
-  pod(parts,side*.016,.001,.009,.049,.066,.098,cloth,-.17,0,side*.17);
-  pod(parts,side*.034,.005,.017,.018,.049,.064,pads,-.20,0,side*.14);
-  if(front){
-    // Four fingers curl under the fore-end. The thumb rests on the near face.
-    for(let i=0;i<4;i++){
-      const z=-.031+i*.021,short=i===3 ? .008 : 0;
-      pod(parts,-.010,-.015,z,.032,.035,.021,cloth,0,0,.42);
-      pod(parts,.014,-.017,z,.053-short,.021,.022,pads,0,0,.08);
-      pod(parts,.047-short,-.011,z,.026,.019,.020,cloth,0,0,.4);
-    }
-    pod(parts,-.013,.024,.010,.031,.039,.060,pads,-.50,-.12,.12);
-    pod(parts,-.004,.035,-.015,.021,.030,.048,cloth,-.28,-.15,.14);
-  }else{
-    // The rear glove wraps the upright grip, with a raised thumb and a
-    // separated top finger so its silhouette remains readable at the bolt.
-    for(let i=0;i<4;i++){
-      const y=.022-i*.016,z=-.026+i*.006;
-      pod(parts,.006,y,z,.045,.019,.031,cloth,-.15,-.30,0);
-      pod(parts,-.017,y-.004,z-.006,.026,.017,.023,pads,-.12,.30,0);
-    }
-    pod(parts,.007,.030,.026,.032,.034,.055,pads,-.51,.16,0);
-    pod(parts,-.004,.035,.014,.028,.023,.037,cloth,-.30,.33,0);
-  }
-  const wrist=new T.Vector3(side*.019,-.029,.056);
-  pod(parts,wrist.x,wrist.y,wrist.z,.070,.066,.077,seam,-.45,0,side*.13);
-  hand.add(parts.mesh());
-  const fabric=new Parts();
-  limb(fabric,[0,0,0],[0,.65,0],.068,.052,'#38433e');
-  limb(fabric,[0,.62,0],[0,.89,0],.054,.045,'#404a43');
-  limb(fabric,[0,.87,0],[0,1,0],.047,.035,'#313a34');
-  limb(fabric,[0,.79,0],[0,.82,0],.049,.048,'#51594d');
-  const sleeve=fabric.mesh();
-  hand.userData={wrist,sleeve,elbow:new T.Vector3()};
-  return hand;
+  const group=new T.Group(),hand=articulatedGlove(front);
+  // Keep the palm against the same rifle, magazine and bolt contacts in every pose.
+  hand.position.set(front?.008:-.008,.070,-.010);
+  hand.userData.stockGrip=!front;
+  flexGlove(hand,front?.19:.02);group.add(hand);
+  hand.updateMatrix();
+  group.userData={hand,sleeve:hand.userData.sleeve,elbow:new T.Vector3(),
+    wrist:hand.userData.wrist.clone().applyMatrix4(hand.matrix)};
+  return group;
 }
 
 const gripTarget=new T.Vector3(),wristAxis=new T.Vector3();
@@ -135,7 +112,8 @@ function placeSleeve(gun,hand,shoulder) {
   gun.worldToLocal(hand.localToWorld(wristAxis.copy(wrist)));
   wristAxis.sub(elbow);
   sleeve.position.copy(elbow);
-  sleeve.scale.y=wristAxis.length();
+  // Telescope the sleeve edge into the liner as the wrist turns away from the elbow.
+  sleeve.scale.y=wristAxis.length()/.90;
   sleeve.quaternion.setFromUnitVectors(vertical,wristAxis.normalize());
 }
 
@@ -152,6 +130,9 @@ function placeSniperHands(data,reach,grasp) {
   // Move around the outside of the receiver while the right hand is in transit.
   strong.position.x+=.042*4*grasp*(1-grasp);
   strong.rotation.set(-.37*grasp,.20*grasp,-.46*grasp);
+  // Leave the stock with an open thumb, then close the grip around the moving knob.
+  strong.userData.hand.userData.stockGrip=1-grasp;
+  flexGlove(strong.userData.hand,.02+.34*4*grasp*(1-grasp));
 }
 
 export function gunModel(type,skin='karambit') {

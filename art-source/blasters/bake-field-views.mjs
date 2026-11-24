@@ -11,6 +11,8 @@ export async function bakeFieldViews(kind,options={}){
   const viewCanvas=canvas(640,360);viewCanvas.style.cssText='width:640px;height:360px;display:block';
   document.body.replaceChildren(viewCanvas);
   const arena=new ArenaRenderer(viewCanvas,getArena('switchyard'));
+  const {gloveTextureReady}=await moduleAt('/view-hands.js');
+  await gloveTextureReady;
   const g=createRange(),actor=g.players[0];actor.active=kind;
   arena.gl.render=()=>{};
   const output=options.metadataOnly?null:new T.WebGLRenderer({alpha:true,antialias:true,preserveDrawingBuffer:true});

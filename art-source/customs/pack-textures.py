@@ -1,4 +1,8 @@
-"""Resize embedded PBR maps and grade the fabric for each team. Requires Pillow, NumPy."""
+"""Prepare a compact Tripo GLB for rigging. Preserve native PBR maps up to 2K.
+
+Before running this, simplify the source with gltfpack (-noq -sp -sv; target
+about 38,000 triangles for a full operator). Requires Pillow and NumPy.
+"""
 from io import BytesIO
 import json
 from pathlib import Path
@@ -48,10 +52,13 @@ for idx,view in enumerate(g['bufferViews']):
     chunk=binary[start:start+view['byteLength']]
     if idx in images:
         image_id,image=images[idx]
-        im=Image.open(BytesIO(chunk)).convert('RGB')
-        size=1024 if image_id in base else 768
-        im.thumbnail((size,size),Image.Resampling.LANCZOS)
-        if image_id in base and team=='guard':
+        im=Image.open(BytesIO(chunk))
+        grade=image_id in base and team=='guard'
+        resize=max(im.size)>2048
+        if resize:
+            im.thumbnail((2048,2048),Image.Resampling.LANCZOS)
+        if grade:
+            im=im.convert('RGB')
             hsv=np.asarray(im.convert('HSV'),dtype=float)
             hue,sat,val=hsv[...,0],hsv[...,1],hsv[...,2]
             # Shift olive cloth into slate, preserving warm skin, dark trim and highlights.
@@ -62,10 +69,16 @@ for idx,view in enumerate(g['bufferViews']):
             hsv[...,2]*=.96
             slate=np.asarray(Image.fromarray(hsv.clip(0,255).astype('uint8'),'HSV').convert('RGB'),dtype=float)
             im=Image.fromarray(((1-mix)*np.asarray(im)+mix*slate).clip(0,255).astype('uint8'))
-        out=BytesIO()
-        im.save(out,'JPEG',quality=89 if image_id in base else 86,subsampling=0,optimize=True)
-        chunk=out.getvalue()
-        image['mimeType']='image/jpeg'
+        # An extra JPEG generation blurs the independent channels of normal
+        # and roughness maps. Reuse the original embedded bytes where possible.
+        if grade or resize:
+            out=BytesIO()
+            if image['mimeType']=='image/jpeg':
+                im.save(out,'JPEG',quality=94,subsampling=0,optimize=True)
+            else:
+                im.save(out,'PNG',optimize=True)
+                image['mimeType']='image/png'
+            chunk=out.getvalue()
     result.extend(b'\0'*(-len(result)%4))
     view['byteOffset']=len(result)
     view['byteLength']=len(chunk)

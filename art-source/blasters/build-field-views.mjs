@@ -3,11 +3,11 @@
 // e.g. globalThis.fieldBakeOptions={assets:'C:/.../dist/assets',space:23,page:'p2',origin:'http://127.0.0.1:18765'}
 // Set only:'sniper' or only:'reflex' to refresh either group independently.
 // calibrate:true also reprojects the cap points for every existing sprite without rewriting it.
-const {assets,space,page:label,origin,only,calibrate=false}=globalThis.fieldBakeOptions;
+const {assets,space,page:label,browserPage,origin,only,calibrate=false}=globalThis.fieldBakeOptions;
 if(only&&!['sniper','reflex'].includes(only))throw Error('Unknown sheet group');
 const sniperOnly=only==='sniper';
 const fs=await import('node:fs/promises');
-const task=await taskSpace(space),page=task.page(label);
+const page=browserPage??(await taskSpace(space)).page(label);
 const source=await fs.readFile(new URL('./bake-field-views.mjs',import.meta.url),'utf8');
 const guns=['shotgun','sniper','smg','burst','marksman','lmg','pistol','rifle','revolver'];
 const sharedRows=['shotgun','rifle','smg','burst','marksman','lmg','pistol'];

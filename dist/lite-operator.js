@@ -1,6 +1,7 @@
 // Derived from the same rigged, textured GLBs used by the WebGL renderer.
 // Only positions change between frames. Triangle topology and hues stay shared.
 import {knifeAttackDuration,knifeClipPhase} from './knife-motion.js';
+import {assetUrl} from './asset-url.js';
 const CLIPS=['Idle_Shoot','Run_Gun','Jump_Idle','Duck','Punch'];
 const sources=['customs-guard','customs-responder'];
 const teams=sources.map(()=>({model:null,promise:null,failed:false}));
@@ -42,7 +43,7 @@ export function decodeLiteOperator(buffer){
 export function loadLiteOperators(){
   return Promise.all(teams.map((team,i)=>{
     if(!team.promise){
-      team.promise=fetch(new URL('./assets/'+sources[i]+'.lite.bin',import.meta.url))
+      team.promise=fetch(assetUrl(sources[i]+'.lite.bin'))
         .then(response=>{if(!response.ok)throw Error('Character download '+response.status);return response.arrayBuffer();})
         .then(data=>{team.model=decodeLiteOperator(data);})
         .catch(()=>{team.failed=true;});

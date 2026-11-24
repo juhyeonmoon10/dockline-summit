@@ -25,6 +25,42 @@ function topLeft(dx,dy,winding){
   return dy*winding<0||(dy===0&&dx*winding>0);
 }
 
+// Each visible hand gets its own posed vertices. Its source geometry is
+// shared by both hands and across weapons, even while their fingers move independently.
+const posedMeshes=new WeakMap();
+function skinForPreview(mesh,geo){
+  const {position,normal,skinIndex,skinWeight}=geo.attributes;
+  let pose=posedMeshes.get(mesh);
+  if(!pose||pose.source!==geo){
+    const vectors=()=>new T.BufferAttribute(new Float32Array(position.count*3),3);
+    pose={source:geo,position:vectors(),normal:vectors(),bones:mesh.skeleton.bones.map(()=>new T.Matrix4())};
+    posedMeshes.set(mesh,pose);
+  }
+  mesh.skeleton.bones.forEach((bone,i)=>{
+    pose.bones[i].multiplyMatrices(mesh.bindMatrixInverse,bone.matrixWorld)
+      .multiply(mesh.skeleton.boneInverses[i]).multiply(mesh.bindMatrix);
+  });
+  for(let i=0;i<position.count;i++){
+    const x=position.getX(i),y=position.getY(i),z=position.getZ(i);
+    const nx=normal.getX(i),ny=normal.getY(i),nz=normal.getZ(i);
+    let px=0,py=0,pz=0,sx=0,sy=0,sz=0;
+    for(let j=0;j<4;j++){
+      const weight=skinWeight.getComponent(i,j);
+      if(!weight)continue;
+      const m=pose.bones[skinIndex.getComponent(i,j)].elements;
+      px+=weight*(m[0]*x+m[4]*y+m[8]*z+m[12]);
+      py+=weight*(m[1]*x+m[5]*y+m[9]*z+m[13]);
+      pz+=weight*(m[2]*x+m[6]*y+m[10]*z+m[14]);
+      sx+=weight*(m[0]*nx+m[4]*ny+m[8]*nz);
+      sy+=weight*(m[1]*nx+m[5]*ny+m[9]*nz);
+      sz+=weight*(m[2]*nx+m[6]*ny+m[10]*nz);
+    }
+    pose.position.setXYZ(i,px,py,pz);
+    pose.normal.setXYZ(i,sx,sy,sz);
+  }
+  return pose;
+}
+
 export function createCanvasPreview(canvas,{studio=false}={}){
   const ctx=canvas.getContext('2d');
   if(!ctx)throw new Error('Canvas 2D unavailable');
@@ -70,7 +106,9 @@ export function createCanvasPreview(canvas,{studio=false}={}){
     root.updateMatrixWorld(true);
     root.traverseVisible(mesh=>{
       if(!mesh.isMesh)return;
-      const geo=mesh.geometry,pos=geo.attributes.position,col=geo.attributes.color,nor=geo.attributes.normal;
+      const geo=mesh.userData.previewGeometry??mesh.geometry;
+      const attrs=mesh.isSkinnedMesh?skinForPreview(mesh,geo):geo.attributes;
+      const pos=attrs.position,col=geo.attributes.color,nor=attrs.normal;
       let points=projected.get(mesh);
       if(!points){points=new Float32Array(pos.count*3);projected.set(mesh,points);}
       const m=mesh.matrixWorld.elements;

@@ -19,7 +19,7 @@ from mathutils.bvhtree import BVHTree
 arguments = [Path(p).resolve() for p in sys.argv[sys.argv.index('--')+1:]]
 if len(arguments) not in (2,3): raise RuntimeError('Expected source, destination and optional existing atlas')
 src,dst=arguments[:2]
-basis=arguments[2] if len(arguments)==3 else None
+basis=arguments[2].read_bytes() if len(arguments)==3 else None
 clips = [('Idle_Shoot',4),('Run_Gun',10),('Jump_Idle',5),('Duck',4),('Punch',7)]
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=str(src))
@@ -97,7 +97,10 @@ bm.from_mesh(mesh.data)
 bmesh.ops.remove_doubles(bm,verts=bm.verts[:],dist=.00001)
 bm.to_mesh(mesh.data);bm.free();mesh.data.update()
 dec=mesh.modifiers.new('Software renderer silhouette','DECIMATE')
-dec.ratio=min(1.,480/max(1,len(hi_tri)))
+# Older atlases were baked with a 480-face decimator target. Use their
+# original topology when the caller requests a compatibility extension.
+face_target=480 if basis and struct.unpack_from('<H',basis,6)[0]<=480 else 820
+dec.ratio=min(1.,face_target/max(1,len(hi_tri)))
 dec.use_collapse_triangulate=True
 mesh.modifiers.move(len(mesh.modifiers)-1,0)
 bpy.ops.object.modifier_apply(modifier=dec.name)
@@ -107,7 +110,7 @@ def substantial(face):
     return (b-a).cross(c-a).length>.00012
 
 triangles=[tri for tri in mesh.data.loop_triangles if substantial(tri)]
-if not 200 <= len(triangles) <= 600:
+if not 200 <= len(triangles) <= 820:
     raise RuntimeError(f'Unexpected effective triangle count {len(triangles)}')
 source_indices=np.array([t.vertices[:] for t in triangles],dtype=int)
 used,packed_indices=np.unique(source_indices,return_inverse=True)
@@ -190,7 +193,7 @@ data.extend(packed_poses.tobytes())
 if basis:
     # Blender may reorder otherwise identical decimated vertices between runs.
     # Keep every existing face/colour/pose byte, and remap only the new weights.
-    existing=basis.read_bytes()
+    existing=basis
     positions_at=(28+9*len(triangles)+1)&~1
     positions_end=positions_at+packed_poses.size*2
     if existing[:28]!=data[:28] or len(existing)<positions_end:
