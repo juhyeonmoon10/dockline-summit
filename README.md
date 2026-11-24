@@ -58,4 +58,6 @@ Esc 메뉴 또는 로비 오른쪽 위 설정에서 마우스 감도를 0.10–3
 
 경비팀은 남색 헬멧과 고글을, 상대 팀은 붉은 재킷과 헤드셋을 착용합니다. 두 캐릭터는 DOCKLINE용으로 Tripo에서 생성했습니다. [캐릭터 변환 스크립트](art-source/customs/)에서 이동·조준 동작을 연결하고 WebGL 모델과 경량판을 만듭니다. 1인칭 가죽 장갑은 이전 대응팀 모델에서 추출했습니다.
 
-산탄총은 게임에 쓰던 모델을 렌더링한 이미지를 바탕으로 Tripo에서 다시 만들었습니다. 게임 안에서 발사 후 펌프가 움직이도록 앞손잡이를 별도 부품으로 분리했습니다. [Toon Shooter 원본](art-source/toon-shooter/README.txt)에는 캐릭터 동작과 일부 총기의 출처가 있습니다. [외부 코드·모델·녹음 이용 조건](dist/assets/)과 [글꼴 라이선스](dist/fonts/OFL.txt)를 포함합니다.
+산탄총은 게임에 쓰던 모델을 렌더링한 이미지를 바탕으로 Tripo에서 다시 만들었습니다. 게임 안에서 발사 후 펌프가 움직이도록 앞손잡이를 별도 부품으로 분리했습니다. [산탄총 모델 변환 스크립트](art-source/blasters/bake-bulkhead.py)
+
+[Toon Shooter 원본](art-source/toon-shooter/README.txt)에는 캐릭터 동작과 일부 총기의 출처가 있습니다. [외부 코드·모델·녹음 이용 조건](dist/assets/)과 [글꼴 라이선스](dist/fonts/OFL.txt)를 포함합니다.
