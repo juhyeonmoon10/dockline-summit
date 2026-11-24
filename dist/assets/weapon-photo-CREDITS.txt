@@ -1,9 +1,16 @@
-DOCKLINE weapon reference photographs
+DOCKLINE weapon models and reference photographs
 
-The following nine photographs provided the exterior references for new Tripo game props.
-Photograph credits and rights statements apply to the cited original images.
-The Trident reference shows an empty magazine well. Its animated magazine comes
-from the new Breaker Tripo mesh; the rest of Trident uses its own FAMAS export.
+Trident (burst) — “FAMAS” by Frostoise
+Creator and model: https://sketchfab.com/3d-models/famas-7d35e14ad8874d148ce9cc46e5765a6b
+Creative Commons Attribution 4.0 International: https://creativecommons.org/licenses/by/4.0/
+Source GLB: https://huggingface.co/datasets/allenai/objaverse/blob/main/glbs/000-089/7d35e14ad8874d148ce9cc46e5765a6b.glb
+Community GLB SHA-256: 2e33d643608d7afb28f7ccdb3eb8efb80ea3483a07fb722092a0935d7a611e0f
+Adaptation by DOCKLINE: fitted to the game's hands and reload animation, prepared
+materials and geometry for browser rendering, and rendered the Lite edition sprites.
+
+Nine photographs provided the references for the first set of Tripo models.
+Eight are used in the current game. The earlier Trident reference is kept below
+for attribution and comparison. Photograph credits apply to the original images.
 Valve’s CS2 Workshop Style Guide informed the evaluation of materials in the game:
 https://www.counter-strike.net/workshop/workshopstyleguide
 
@@ -43,7 +50,7 @@ Original photograph SHA-256: 3fbcbc3d4541d581f45120cd29e3689ff00f343d0f6162ea215
 Tripo reference image SHA-256: ced5c46c1bde4c6c9512c0f246b2119eae483df9ad9fda5dfb4f4e4fd6c6a0b0
 Tripo GLB SHA-256: 6e4bf68fa051c997543c03807fa2c1431657233f6eb5e15111f8b889595b73de
 
-Trident (burst) — FAMAS F1
+Previous Trident model — FAMAS F1 photo reference
 Famas (1).jpg — Бонзо (Bonzo)
 https://commons.wikimedia.org/wiki/File:Famas_%281%29.jpg
 Public domain worldwide by the photographer https://creativecommons.org/publicdomain/mark/1.0/

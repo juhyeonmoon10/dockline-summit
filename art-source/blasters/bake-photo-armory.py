@@ -349,12 +349,13 @@ def join_atlases(temp,output,prefix,donor):
         atlas.save(temp/fname,lossless=suffix=='-orm',quality=95,method=4)
 
 
-def bake(args,data,record):
+def bake(args,data,record,*,authored_groups=None,write_maps=None,lod_colors=None):
     raw,p,n,uv,faces,side,lo,hi,base,digest=data
     if digest!=record['sourceSha256']:
         raise ValueError('Source GLB differs from the approved registration view')
     q,n=surface_fit(p,n,lo,hi,record)
-    n=soften_normals(n,faces)
+    if authored_groups is None:
+        n=soften_normals(n,faces)
     polymer=None
     if args.kind=='shotgun':
         stock_sides(q,n,side)
@@ -372,7 +373,7 @@ def bake(args,data,record):
         faces=faces[~in_polygon(side[faces].mean(1),record['omitStand'])]
     for mask in record.get('extraMasks',[]):
         faces=faces[~in_polygon(side[faces].mean(1),mask)]
-    groups=split_parts(p,faces,side,record)
+    groups=authored_groups if authored_groups is not None else split_parts(p,faces,side,record)
     donor=record.get('photoMagazine')
     if donor:
         dp,dn,du,dc,df,donor_hash=borrowed_magazine(args,donor,side,q)
@@ -380,10 +381,13 @@ def bake(args,data,record):
         q=np.vstack((q,dp));n=np.vstack((n,dn));c=np.vstack((c,dc))
         uv=np.vstack((uv*[.75,1],du*[.25,1]+[.75,0]))
     held={name:pack_part(q,n,c,f,uv) for name,f in groups.items()}
-    preview={name:reduced_color(args,name,q,n,c,f,max(36,round(LOD_BUDGET['preview']*len(f)/len(faces)))) for name,f in groups.items()}
-    carried={'body':reduced_color(args,'carried',q,n,c,faces,LOD_BUDGET['carried'])}
-    asset={'sourceSha256':digest,'sourceTriangles':raw.triangles(),'completeExterior':True,'maps':['normal','orm'],
+    paint=c if lod_colors is None else lod_colors
+    preview={name:reduced_color(args,name,q,n,paint,f,max(36,round(LOD_BUDGET['preview']*len(f)/len(faces)))) for name,f in groups.items()}
+    carried={'body':reduced_color(args,'carried',q,n,paint,faces,LOD_BUDGET['carried'])}
+    asset={'sourceSha256':digest,'sourceTriangles':raw.triangles(),'completeExterior':True,'maps':record.get('maps',['normal','orm']),
            'held':held,'preview':preview,'carried':carried}
+    if 'sourceCredit' in record:
+        asset['sourceCredit']=record['sourceCredit']
     if donor:asset['magazineSourceSha256']=donor_hash
     if args.kind=='sniper':
         asset['contacts']={k:contact(q,groups['bolt'] if k=='bolt' else groups['body'],pt)
@@ -397,7 +401,9 @@ def bake(args,data,record):
     prefix='dockline-shotgun' if shotgun else 'armory-'+args.kind
     args.output.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(dir=args.output) as tmp:
-        out=Path(tmp);textures(raw,base,out,prefix,shotgun,polymer)
+        out=Path(tmp)
+        if write_maps is None:textures(raw,base,out,prefix,shotgun,polymer)
+        else:write_maps(out,prefix)
         if donor:join_atlases(out,args.output,prefix,donor['source'])
         (out/(prefix+'-data.js')).write_text('export const '+('shotgunData' if shotgun else 'assetData')+'='+json.dumps(asset,separators=(',',':'))+';\n',encoding='utf-8')
         generated=list(out.iterdir());replaced=[]
@@ -415,7 +421,7 @@ def bake(args,data,record):
                 if previous:os.replace(previous,target)
                 else:target.unlink(missing_ok=True)
             raise
-    print('Baked original Tripo exterior', args.kind, {k:len(v) for k,v in groups.items()},flush=True)
+    print('Baked exterior',args.kind,{k:len(v) for k,v in groups.items()},flush=True)
 
 
 if __name__=='__main__':

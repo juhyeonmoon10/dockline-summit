@@ -14,12 +14,17 @@ hand poses and animation in dist/blaster.js and dist/render.js.
 
 Dockline generated game props
 
-The nine current guns use individual public-domain photographs as Tripo inputs.
-bake-photo-armory.py prepares the resulting exterior meshes to display in DOCKLINE.
-dist/assets/weapon-photo-CREDITS.txt lists the reference photograph, creator, rights
-statement, input checksum, and Tripo export checksum for each gun.
-The Trident reference has an empty magazine well. Its magazine for the reload
-animation comes from the new Breaker Tripo export. Bake Breaker before Trident.
+Eight current guns use individual public-domain photographs as Tripo inputs.
+bake-photo-armory.py prepares those exterior meshes for DOCKLINE.
+The current Trident uses Frostoise's FAMAS under CC BY 4.0. See
+dist/assets/weapon-photo-CREDITS.txt for its GLB source and the photograph,
+creator, rights statement, and checksums for each of the earlier Tripo exports.
+For the historical photo-based Trident only, bake Breaker first to provide the
+magazine that was missing from the reference photo.
+
+To rebuild the current Trident, download the credited GLB, then run from the
+repository root with Python 3.11 or later, NumPy, Pillow and gltfpack:
+    python art-source/blasters/bake-community-famas.py SOURCE.glb GLTFPACK_PATH STAGE_DIR --output dist/assets
 
 The two knives use separate Tripo image-to-3D exports.
 The SHA-256 hashes below identify their original local GLBs.

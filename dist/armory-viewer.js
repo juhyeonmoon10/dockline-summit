@@ -292,7 +292,7 @@ export function openArmoryViewer({weapon='rifle',equippedPrimary='rifle',equippe
       <aside class="armory-rail" aria-label="무기 선택">${choices}</aside>
       <section class="armory-display" aria-label="선택한 무기">
         <canvas class="armory-bench" aria-hidden="true"></canvas>
-        <div class="armory-identity"><div><p class="armory-kind"></p><h3 class="armory-name"></h3></div><select class="armory-picker" aria-label="다른 무기 보기">${options}</select></div>
+        <div class="armory-identity"><div><p class="armory-kind"><span class="armory-slot"></span><span class="armory-credit" hidden> · 모델 <a href="./assets/weapon-photo-CREDITS.txt" target="_blank" rel="noopener">Frostoise · CC BY 4.0</a></span></p><h3 class="armory-name"></h3></div><select class="armory-picker" aria-label="다른 무기 보기">${options}</select></div>
         <div class="armory-viewport"><div class="armory-surface"></div></div>
         <div class="armory-tools">
           <button type="button" class="armory-spin" aria-pressed="false" title="자동 회전">${icon('spin')}<span>자동 회전</span></button>
@@ -322,7 +322,8 @@ export function openArmoryViewer({weapon='rifle',equippedPrimary='rifle',equippe
     for(const b of buttons)b.setAttribute('aria-pressed',String(b.dataset.id===id));
     const chosen=buttons.find(b=>b.dataset.id===id);
     if(chosen&&chosen.offsetParent)chosen.scrollIntoView({block:'nearest',inline:'nearest'});
-    $('.armory-kind').textContent=(isKnife(id)?'근접 슬롯':isSecondaryWeapon(id)?'보조 슬롯':'주무기 슬롯')+' / '+typeOf(id);
+    $('.armory-slot').textContent=(isKnife(id)?'근접 슬롯':isSecondaryWeapon(id)?'보조 슬롯':'주무기 슬롯')+' / '+typeOf(id);
+    $('.armory-credit').hidden=id!=='burst';
     $('.armory-name').textContent=nameOf(id);
     const w=isKnife(id)?WEAPONS.knife:WEAPONS[id];
     const stats=[['기본 피해',w.pellets?w.damage+' × '+w.pellets:w.damage],

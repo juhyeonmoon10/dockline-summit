@@ -6,7 +6,7 @@ function mount(y,z,scale,eyeZ,x=0){
 const mounts=Object.freeze({
   rifle:mount(.1752,-.119,.72,-.353),
   smg:mount(.1212,-.055,.70,-.328,.008),
-  burst:mount(.1409,-.060,.72,-.358,.016),
+  burst:mount(.1871,-.060,.72,-.358),
   marksman:mount(.1545,-.225,.78,-.394),
   lmg:mount(.1932,-.020,.74,-.365),
   pistol:mount(.1048,-.067,.55,-.302)

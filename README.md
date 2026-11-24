@@ -58,7 +58,7 @@ Esc 메뉴 또는 로비 오른쪽 위 설정에서 마우스 감도를 0.10–3
 
 경비팀은 남색 헬멧과 고글을, 상대 팀은 붉은 재킷과 헤드셋을 착용합니다. 두 캐릭터는 DOCKLINE용으로 Tripo에서 생성했습니다. [캐릭터 변환 스크립트](art-source/customs/)에서 이동·조준 동작을 연결하고 WebGL 모델과 경량판을 만듭니다. 1인칭 가죽 장갑은 이전 대응팀 모델에서 추출했습니다.
 
-총기 9종은 각 총기의 실제 외형을 담은 퍼블릭 도메인 사진을 한 장씩 Tripo에 입력해 새로 만들었습니다. 브레이커는 M4A1, 룩아웃은 스코프가 달린 M24, 벌크헤드는 Mossberg 590A1 사진에서 외형과 표면색을 가져왔습니다. 생성한 3D 모델을 게임 좌표에 맞추고 손에 들었을 때와 상대 플레이어가 들었을 때에 맞게 면 수를 조정했습니다. [사진 9장의 출처와 모델 해시](dist/assets/weapon-photo-CREDITS.txt) · [게임용 모델 변환 코드](art-source/blasters/bake-photo-armory.py)
+브레이커(M4A1), 룩아웃(M24), 벌크헤드(Mossberg 590A1)를 포함한 총기 8종은 각각 퍼블릭 도메인 사진 한 장을 Tripo에 입력해 만들었습니다. 트라이던트는 Frostoise가 제작한 FAMAS 모델을 CC BY 4.0으로 사용합니다. 게임 속 손 위치에 맞춰 외형을 배치하고 1인칭, 상대 플레이어, 경량판에 맞는 모델과 이미지를 준비했습니다. [Frostoise의 FAMAS](https://sketchfab.com/3d-models/famas-7d35e14ad8874d148ce9cc46e5765a6b) · [모델 및 사진 출처](dist/assets/weapon-photo-CREDITS.txt) · [Tripo 모델 변환 코드](art-source/blasters/bake-photo-armory.py)
 
 금속과 폴리머의 광택이 1인칭에서 어떻게 읽히는지는 Valve의 CS2 워크숍 스타일 가이드를 참고했습니다. 장비실의 **무기 자세히 보기**에서 모델을 회전·확대할 수 있고, 사격장에서는 **F**로 손에 든 무기를 살펴볼 수 있습니다. [Valve 스타일 가이드](https://www.counter-strike.net/workshop/workshopstyleguide)
 

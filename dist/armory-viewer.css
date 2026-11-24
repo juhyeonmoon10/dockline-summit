@@ -41,6 +41,8 @@
 .armory-bench { grid-area: 1 / 1 / 4 / 2; position: absolute; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
 .armory-identity { display: flex; justify-content: space-between; align-items: center; padding: clamp(17px,3.4vh,31px) clamp(17px,3vw,34px) 0; min-width: 0; gap: 8px; }
 .armory-kind { margin: 0 0 4px; color: #f5e4ad; font-size: 11px; font-weight: 660; line-height: 1.3; letter-spacing: .005em; }
+.armory-credit, .armory-credit a { color: #e2e6dd; }
+.armory-credit a { text-underline-offset: 2px; }
 .armory-name { color: #f8fbf5; margin: 0; font-family: inherit; font-weight: 800; font-size: clamp(24px,3.5vw,46px); line-height: 1.2; letter-spacing: -.065em; text-shadow: 0 1px 2px #18201a60; }
 .armory-picker { display: none; }
 .armory-viewport { position: relative; min-height: 0; overflow: hidden; }
