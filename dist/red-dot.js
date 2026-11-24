@@ -1,9 +1,9 @@
 import * as T from './assets/three.module.min.js';
 import {Parts} from './arena-parts.js';
 import {gunFit} from './gun-fit.js';
-import {opticFit,REFLEX_APERTURE,insideReflexWindow} from './optic-fit.js';
+import {opticFit,fallbackOpticFit,REFLEX_APERTURE,insideReflexWindow} from './optic-fit.js';
 
-const frameMat=new T.MeshStandardMaterial({vertexColors:true,roughness:.61,metalness:.43,side:T.DoubleSide});
+const frameMat=new T.MeshStandardMaterial({vertexColors:true,roughness:.55,metalness:.39,side:T.DoubleSide});
 const glassMat=new T.MeshBasicMaterial({color:0x77c8be,transparent:true,opacity:.105,depthWrite:false,side:T.DoubleSide});
 let hardware,glass;
 function makeHousing(){
@@ -19,9 +19,9 @@ function makeHousing(){
     }
     parts.indices.push(start,start+1,start+2,start,start+2,start+3);
   }
-  const contours=[ring(1,1,.006),ring(1.045,1.065,.009),ring(1.13,1.14,.009),
-    ring(1.18,1.21,.005),ring(1.18,1.21,-.020),ring(1.13,1.15,-.024),ring(1,1,-.024)];
-  const finishes=['#697172','#373f40','#747d7a','#474e50','#394144','#596264','#303b3c'];
+  const contours=[ring(1,1,.004),ring(1.024,1.04,.0065),ring(1.083,1.09,.0065),
+    ring(1.11,1.14,.0035),ring(1.105,1.135,-.012),ring(1.075,1.09,-.015),ring(1,1,-.015)];
+  const finishes=['#323636','#242727','#454947','#232627','#292c2d','#373b3b','#141818'];
   for(let layer=0;layer<contours.length;layer++){
     const near=contours[layer],far=contours[(layer+1)%contours.length];
     for(let i=0;i<near.length;i++){
@@ -31,25 +31,45 @@ function makeHousing(){
   }
   // The housing overhangs a narrower rail shoe. The exposed heel and
   // clamping hardware stay visible when inspecting the gun from behind.
-  parts.cube(0,-.045,.008,.055,.010,.087,'#333b3d');
-  parts.cube(0,-.039,.003,.064,.010,.093,'#505858');
-  parts.cube(0,-.033,.008,.074,.012,.079,'#3b4545');
-  for(const side of [-1,1]){
-    parts.beam([side*.035,-.030,.039],[side*.041,-.013,.003],.006,.010,'#4b5354');
-    parts.cube(side*.028,-.045,.014,.004,.010,.063,'#727978');
-    parts.six(side*.033,-.039,.020,.013,.004,.013,'#89918b',0,0,Math.PI/2);
-    parts.cube(side*.0352,-.039,.020,.001,.0022,.0075,'#343d3f',.43);
+  // Chamfered outlines give the shoe a continuous edge highlight in the inspect pose.
+  function footprint(width,front,back,y,cut){
+    const w=width/2;
+    return [[-w+cut,y,front],[w-cut,y,front],[w,y,front+cut],[w,y,back-cut],
+      [w-cut,y,back],[-w+cut,y,back],[-w,y,back-cut],[-w,y,front+cut]];
   }
-  parts.cube(.040,-.019,-.007,.012,.024,.027,'#444d4e');
-  parts.tube(.047,-.018,-.008,.021,.005,.021,'#626b6b',0,0,Math.PI/2);
-  parts.cube(.050,-.018,-.008,.001,.003,.012,'#30383b',-.31);
-  parts.cube(0,-.0289,.030,.018,.0028,.010,'#626c68');
-  parts.cube(0,-.027,.030,.008,.0018,.004,'#a56e60');
+  const shoe=[footprint(.049,-.030,.042,-.050,.006),footprint(.055,-.033,.044,-.047,.006),
+    footprint(.057,-.034,.044,-.042,.005),footprint(.066,-.030,.041,-.039,.006),
+    footprint(.066,-.027,.039,-.033,.007),footprint(.060,-.023,.035,-.030,.007)];
+  const coating=['#292c2d','#1b2021','#3a3e3c','#24292a','#343838'];
+  for(let j=1;j<shoe.length;j++){
+    for(let i=0;i<8;i++){
+      const k=(i+1)%8;quad(shoe[j-1][k],shoe[j-1][i],shoe[j][i],shoe[j][k],coating[j-1]);
+    }
+  }
+  for(const [layer,hue] of [[shoe[0],'#202426'],[shoe.at(-1),'#262b2c']]){
+    const start=parts.points.length/3;color.set(hue);
+    const y=layer===shoe[0]?-1:1;
+    for(const pt of layer){parts.points.push(...pt);parts.normals.push(0,y,0);parts.colors.push(color.r,color.g,color.b);}
+    for(let i=1;i<7;i++)parts.indices.push(start,start+(y>0?i+1:i),start+(y>0?i:i+1));
+  }
+  for(const side of [-1,1]){
+    parts.beam([side*.029,-.032,.031],[side*.039,-.013,.002],.004,.007,'#2c3132');
+    parts.six(side*.033,-.038,.015,.009,.003,.009,'#49504d',0,0,Math.PI/2);
+    parts.cube(side*.0347,-.038,.015,.0007,.0014,.0058,'#1c2021',.43);
+  }
+  parts.tube(.039,-.018,-.004,.015,.007,.015,'#343b3b',0,0,Math.PI/2);
+  parts.cube(.0427,-.018,-.004,.0007,.0018,.008,'#202526',-.31);
+  parts.cube(0,-.029,.027,.012,.002,.007,'#363c3d');
+  parts.cube(0,-.0278,.027,.005,.001,.003,'#835c51');
   return parts.mesh(frameMat).geometry;
 }
 
+export function placeRedDot(group,fit){
+  group.position.set(fit.x,fit.y,fit.z);group.scale.setScalar(fit.scale);
+  group.userData.mount=fit;
+}
 export function redDotMount(id){
-  const fit=opticFit(id);
+  const fit=fallbackOpticFit(id);
   if(!fit)return null;
   if(!hardware){
     hardware=makeHousing();
@@ -58,16 +78,16 @@ export function redDotMount(id){
   }
   const group=new T.Group(),frame=new T.Mesh(hardware,frameMat),window=new T.Mesh(glass,glassMat);
   group.name='reflex-sight';frame.name='reflex-housing';window.name='reflex-window';
-  group.position.set(fit.x,fit.y,fit.z);group.scale.setScalar(fit.scale);
+  placeRedDot(group,fit);
   window.renderOrder=1;group.add(frame,window);return group;
 }
 
 const pivot=new T.Vector3(),turnedPivot=new T.Vector3();
-const aimedRise={marksman:.55,pistol:.60};
+const aimedRise={rifle:.30,burst:.47,marksman:.55,pistol:.32};
 // Applied to the existing sway, recoil and equip pose. At full ADS the actual
 // aperture is at eyeZ; recoil turns the gun mostly about that contact.
-export function seatReflex(rig,id,aim){
-  const fit=opticFit(id);
+export function seatReflex(rig,id,aim,window){
+  const fit=window?.parent?.userData.mount??opticFit(id);
   if(!aim||!fit)return;
   // These fore-ends otherwise climb through the target at the crest of the
   // recoil animation. Keep their kick back into the shoulder and their roll.

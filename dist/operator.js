@@ -7,6 +7,7 @@ import { knifeMesh,knifePose,animateCarriedKnife } from './knife.js';
 import { knifeAttackDuration,knifeClipPhase } from './knife-motion.js';
 import { normalizeKnifeSkin } from './knife-types.js';
 import { assetUrl } from './asset-url.js';
+import {supportArm,restoreSupport,poseSupport} from './operator-support.js';
 
 const sources=[null,null];
 let loading;
@@ -61,10 +62,11 @@ export function createOperator(team){
    if(name==='Index1R')hand=object;
    if(name==='ShoulderL'||name==='ShoulderR')aimArms.push({bone:object,pose:new T.Quaternion()});
  });
- return {group,model,mixer,actions,loadout,loadouts,revolver:revolverAction(loadouts.revolver),hand,aimArms,aimed:false,clip:'Idle_Shoot',active:null};
+ return {group,model,mixer,actions,loadout,loadouts,revolver:revolverAction(loadouts.revolver),hand,aimArms,aimed:false,support:supportArm(model),clip:'Idle_Shoot',active:null};
 }
 export function updateOperator(rig,player,dt,swing,cylinderCycle){
  // Restore the animation pose before mixing the next frame or changing guns.
+ restoreSupport(rig.support);
  if(rig.aimed){for(const arm of rig.aimArms)arm.bone.quaternion.copy(arm.pose);rig.aimed=false;}
  const knifeSkin=normalizeKnifeSkin(player.knifeSkin),cutLength=knifeAttackDuration(knifeSkin);
  const cutting=player.active==='knife'&&swing&&swing.age<cutLength;
@@ -114,6 +116,7 @@ export function updateOperator(rig,player,dt,swing,cylinderCycle){
    rig.knifeSkin=skin;animateCarriedKnife(rig.loadouts.knife,skin,cutting?Infinity:rig.knifeAge,-.055);rig.knifeAge+=dt;
  }
  if(rig.active!==player.active){for(const [key,item] of Object.entries(rig.loadouts))item.visible=key===player.active;rig.active=player.active;}
+ poseSupport(rig.support,rig.loadout,player.active);
  if(player.active==='revolver')poseRevolver(rig.revolver,player,cylinderCycle);
 }
 export function disposeOperator(rig){rig.mixer.stopAllAction();rig.model.traverse(object=>{if(object.isSkinnedMesh)object.skeleton.dispose();});}

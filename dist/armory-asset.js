@@ -41,12 +41,15 @@ async function readAsset(id){
   const assetData=await armoryData(id);
   if(!assetData)return null;
   const paint=await material(id,assetData.maps);
+  if(assetData.completeExterior)paint.normalScale.setScalar(.23);
   const parts={};
   for(const [name,source] of Object.entries(assetData.held)){
     const mesh=new T.Mesh(decodeArmoryGeometry(source),paint);mesh.name=name;
     mesh.userData.previewGeometry=decodeArmoryGeometry(assetData.preview[name]);
     parts[name]=mesh;
   }
+  if(assetData.completeExterior)parts.body.userData.completeExterior=true;
+  if(assetData.contacts)parts.body.userData.photoContacts=assetData.contacts;
   loaded.set(id,parts);return parts;
 }
 

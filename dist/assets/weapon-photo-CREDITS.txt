@@ -1,0 +1,89 @@
+DOCKLINE weapon reference photographs
+
+The following nine photographs provided the exterior references for new Tripo game props.
+Photograph credits and rights statements apply to the cited original images.
+The Trident reference shows an empty magazine well. Its animated magazine comes
+from the new Breaker Tripo mesh; the rest of Trident uses its own FAMAS export.
+Valve’s CS2 Workshop Style Guide informed the evaluation of materials in the game:
+https://www.counter-strike.net/workshop/workshopstyleguide
+
+Breaker (rifle) — M4A1 carbine
+M4A1 Carbine.jpg — Jeff Johnson, Naval Surface Warfare Center
+https://commons.wikimedia.org/wiki/File:M4A1_Carbine.jpg
+PD-USGov-Navy https://creativecommons.org/publicdomain/mark/1.0/
+Preparation: Original framing; PNG conversion.
+Original photograph SHA-256: a111b296ea956e6ff5b45bb4d8b0b6c65d0027b209a2f6171c5888abea4ebebf
+Tripo reference image SHA-256: 6ca1b44eed856a317bd9c51ff647f386cfdc6dd8b5962286bebded75a96ddd05
+Tripo GLB SHA-256: f4ba5d2735ac1dc18907916a605b28700f8fce59347cd2d4dfa30de160991c1c
+
+Bulkhead (shotgun) — Mossberg 590A1
+PEO Mossberg 590A1.jpg — PEO Soldier, U.S. Army
+https://commons.wikimedia.org/wiki/File:PEO_Mossberg_590A1.jpg
+PD-USGov-Army https://creativecommons.org/publicdomain/mark/1.0/
+Preparation: Removed excess white border and resized.
+Original photograph SHA-256: e4699d31f59db5660ef75d9c1afbac33c7a3f3cf939a196c18ba01c2361869b7
+Tripo reference image SHA-256: d6c129324e1fbe33445acbc253a9a19795439c2953d1098c2ccf738c692bbe83
+Tripo GLB SHA-256: 34c4a0f60e38366a1fa1253f4c3e01a91a2759d78d1103ed6705ba6502db3adc
+
+Lookout (sniper) — M24 SWS
+PEO M24 SWS.jpg — PEO Soldier, U.S. Army
+https://commons.wikimedia.org/wiki/File:PEO_M24_SWS.jpg
+PD-USGov-Army https://creativecommons.org/publicdomain/mark/1.0/
+Preparation: Resized on original white background.
+Original photograph SHA-256: e255b60f49ed35c216ce3253c76997612b2e798b353c75edd1066c50d1bd1d06
+Tripo reference image SHA-256: 18b010677da9446b4ba5484f34aa58c2f8462af15b83b279aa5d47ad0c350b2d
+Tripo GLB SHA-256: 389b4a6646105928e09ae863efe230ebf7e35a2dd57228c450d4a0757b6cf48d
+
+Skipper (smg) — MP5A3
+MP5A3.jpg — Mattes
+https://commons.wikimedia.org/wiki/File:MP5A3.jpg
+Public domain worldwide by the photographer https://creativecommons.org/publicdomain/mark/1.0/
+Preparation: Removed the yellow table background.
+Original photograph SHA-256: 3fbcbc3d4541d581f45120cd29e3689ff00f343d0f6162ea215d6ec3afeeedb3
+Tripo reference image SHA-256: ced5c46c1bde4c6c9512c0f246b2119eae483df9ad9fda5dfb4f4e4fd6c6a0b0
+Tripo GLB SHA-256: 6e4bf68fa051c997543c03807fa2c1431657233f6eb5e15111f8b889595b73de
+
+Trident (burst) — FAMAS F1
+Famas (1).jpg — Бонзо (Bonzo)
+https://commons.wikimedia.org/wiki/File:Famas_%281%29.jpg
+Public domain worldwide by the photographer https://creativecommons.org/publicdomain/mark/1.0/
+Preparation: Masked display table, sling and neighbouring objects; levelled the photograph on white.
+Original photograph SHA-256: c5b8fdc3d6a5e43f6487a39c95d2daf44fc5529da1ec844705f72b071a6035fa
+Tripo reference image SHA-256: b3bbd25553cebecfa1437dbc99aab8de1585eef078a4f448fc7945e5bb0d150b
+Tripo GLB SHA-256: f37bc0a4fb79ee87dd02ab9dffd42ee859412a4b6acf921e74ec47e6db5f5ddb
+
+Glassfin (marksman) — M110 SASS
+M110 SASS, DVIDS 4846157 — Thomas Alvarez, Idaho Army National Guard
+https://www.dvidshub.net/image/4846157/m110-sass
+Public domain as identified by DVIDS https://creativecommons.org/publicdomain/mark/1.0/
+Preparation: Official image preview; PNG conversion.
+Original photograph SHA-256: e2e5d122afcf73dde93a438f93a1e268ef2ffff74460f1ac26c00420842d4c5d
+Tripo reference image SHA-256: c9a8ad5aec83d6ea1e6c845ba6ff0736bcafb550520d85efc8a6f3e560f3b5dc
+Tripo GLB SHA-256: 31066cbc51093ce69bdfdc2163c61ddf7e5caa03b6312de9ca7d138347a2b6a1
+
+Capstan (lmg) — M249 Para
+PEO M249 Para ACOG.jpg — PEO Soldier, U.S. Army
+https://commons.wikimedia.org/wiki/File:PEO_M249_Para_ACOG.jpg
+PD-USGov-Army https://creativecommons.org/publicdomain/mark/1.0/
+Preparation: Resized on original white background.
+Original photograph SHA-256: 51b1682daf3d959cdfb9a28a4b9950a0382dcd0759c201a3399e40df81e477ca
+Tripo reference image SHA-256: 7dcf77d8198dbba42bb743ba6128af2bcf27c85137217b563a48aaeed5b298b8
+Tripo GLB SHA-256: 5966b30fc4eeab492d72fa933116aef48edee9ab437e14959f368f405162c6e6
+
+Pistol (pistol) — Beretta M9
+M9-pistolet.jpg — PEO Soldier, U.S. Army; Wikimedia tonal adjustments by Hohum
+https://commons.wikimedia.org/wiki/File:M9-pistolet.jpg
+PD-USGov-Army https://creativecommons.org/publicdomain/mark/1.0/
+Preparation: Original framing; PNG conversion.
+Original photograph SHA-256: 65ae7bd4e91a02e91455037f2c4d4a175977a062d29dbb16c3f494d1118ffacb
+Tripo reference image SHA-256: d971dd66ab30084298bd5d8dc75c8f91f618d95c710f40353fe737b5dbb90be8
+Tripo GLB SHA-256: f12979f956c07ddd396ea29c0b22c115b07d1ea8e8fb84fa5ef5c85e3817c7ac
+
+Tidelock (revolver) — Dan Wesson revolver, 1972
+Dan Wesson Arms Revolver-NMAH-AHB2015q025080.jpg — Robin Schaefer, Smithsonian Institution, National Museum of American History
+https://americanhistory.si.edu/collections/object/nmah_1110347
+Public domain, U.S. federally funded Smithsonian photograph https://creativecommons.org/publicdomain/mark/1.0/
+Preparation: Masked the museum tag, cord and table; cropped on white.
+Original photograph SHA-256: 7adf9772d14b6a2b0b4b8841dde3c3ef6b865fc0c502fd547c994c97b0bab33d
+Tripo reference image SHA-256: 65fd59a9af639a091c3831a839a71ff1d7ba5db04d205feb205bea4c85a285dc
+Tripo GLB SHA-256: fbc65ec3d7ce9da9be0dce1f5f30a90470ccc32373a58e1b345325b3cade56aa

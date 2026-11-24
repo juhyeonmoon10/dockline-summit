@@ -27,6 +27,7 @@ scene = bpy.context.scene
 rig = next(o for o in scene.objects if o.type == 'ARMATURE')
 mesh = max((o for o in scene.objects if o.type == 'MESH'), key=lambda o: len(o.data.polygons))
 hand = next(b for b in rig.pose.bones if b.name.replace('.','').replace('_','') == 'Index1R')
+left_hand=next(b for b in rig.pose.bones if b.name.replace('.','').replace('_','')=='Index1L')
 shoulders = [b for b in rig.pose.bones if b.name.replace('.','').replace('_','') in ('ShoulderL','ShoulderR')]
 if len(shoulders) != 2: raise RuntimeError('Missing aiming shoulder bones')
 arm_bones = {b.name for shoulder in shoulders for b in [shoulder, *shoulder.children_recursive]}
@@ -121,6 +122,12 @@ if not arm_groups: raise RuntimeError('Missing arm skin weights')
 arm_weights = np.array([min(1.,sum(group.weight for group in vertices[int(i)].groups
                                   if group.group in arm_groups)) for i in used] + [1.])
 arm_weights = np.rint(arm_weights*255).astype('u1')
+support_influence={'UpperArmL':.13,'LowerArmL':.59,'Index1L':1.}
+support_groups={g.index:support_influence.get(g.name.replace('.','').replace('_',''),0.) for g in mesh.vertex_groups}
+finger_group=next(g.index for g in mesh.vertex_groups if g.name==left_hand.name)
+support_weights=np.array([[min(1.,sum(g.weight*support_groups[g.group] for g in vertices[int(i)].groups)),
+                           min(1.,sum(g.weight for g in vertices[int(i)].groups if g.group==finger_group))] for i in used]+[[0,0]])
+support_weights=np.rint(support_weights*255).astype('u1')
 colours=[]
 samples=[(.33,.33,.34),(.65,.19,.16),(.16,.65,.19),(.19,.16,.65)]
 for t in triangles:
@@ -138,6 +145,7 @@ for t in triangles:
 colors=np.asarray(colours,dtype='u1')
 poses=[]
 arm_pivots=[]
+left_pivots=[]
 descriptors=[]
 fps=scene.render.fps/scene.render.fps_base
 for name,count in clips:
@@ -158,6 +166,8 @@ for name,count in clips:
         points=[obj.matrix_world@obj.data.vertices[int(i)].co for i in used]
         eval_rig=rig.evaluated_get(deps)
         points.append(eval_rig.matrix_world@eval_rig.pose.bones[hand.name].matrix.translation)
+        left=eval_rig.matrix_world@eval_rig.pose.bones[left_hand.name].matrix.translation
+        left_pivots.append((-left.x,left.z,left.y))
         pivot = sum((eval_rig.matrix_world@eval_rig.pose.bones[bone.name].matrix.translation
                      for bone in shoulders), points[-1]*0)/2
         arm_pivots.append((-pivot.x,pivot.z,pivot.y))
@@ -173,6 +183,9 @@ all_poses*=1.8/height
 arm_pivots=np.asarray(arm_pivots)
 arm_pivots[:,1]-=ground
 arm_pivots*=1.8/height
+left_pivots=np.asarray(left_pivots)
+left_pivots[:,1]-=ground
+left_pivots*=1.8/height
 # Physics already owns the player's vertical root, including jump height. The
 # donor clips supply limb motion but must not add a second jump or float a foot.
 offset=0
@@ -182,6 +195,7 @@ for (name,_),(count,_) in zip(clips,descriptors):
             floor=np.min(frame[:-1,1])
             frame[:,1]-=floor
             arm_pivots[index,1]-=floor
+            left_pivots[index,1]-=floor
     offset+=count
 if not np.isfinite(all_poses).all() or np.abs(all_poses).max()>8: raise RuntimeError('Invalid pose coordinates')
 data=bytearray(struct.pack('<4sHH',b'DLC1',len(used),len(triangles)))
@@ -204,11 +218,15 @@ if basis:
     except KeyError: raise RuntimeError('Existing atlas poses differ; refusing to replace the original animation')
     if len(set(order))!=len(arm_weights): raise RuntimeError('Ambiguous vertex mapping')
     arm_weights=arm_weights[order]
+    support_weights=support_weights[order]
     data=bytearray(existing[:positions_end])
 data.extend(struct.pack('<4sHH',b'ARM1',len(arm_weights),len(arm_pivots)))
 data.extend(arm_weights.tobytes())
 if len(data)%2: data.append(0)
 data.extend(np.rint(arm_pivots*1000).astype('<i2').tobytes())
+data.extend(struct.pack('<4sHH',b'LHD1',len(support_weights),len(left_pivots)))
+data.extend(support_weights.tobytes())
+data.extend(np.rint(left_pivots*1000).astype('<i2').tobytes())
 dst.write_bytes(data)
 print('LITE',dst.name,'vertices',len(used),'triangles',len(triangles),'bytes',len(data),
       'idle height',round(height,3),'mean sRGB',colors.mean(axis=0).round().astype(int).tolist(),

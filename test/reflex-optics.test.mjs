@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {Group,PerspectiveCamera,Raycaster,Vector3} from '../dist/assets/three.module.min.js';
 import {PRIMARY_WEAPONS} from '../dist/balance.js';
 import {gunModel,poseHeldSleeves} from '../dist/render.js';
+import {loadGunAppearance} from '../dist/blaster.js';
 import {opticFit,reflexEngaged} from '../dist/optic-fit.js';
 import {makeReflexDot,projectReflexDot,seatReflex} from '../dist/red-dot.js';
 import {gunPresentation} from '../dist/weapon-view.js';
@@ -16,27 +17,32 @@ function view(id){
     const hip=1-aim,fit=gun.userData.fit;
     rig.position.set(hip*.188,-.174*hip-(fit.sight*.91+.009)*aim,(id==='pistol'?-.35:-.422)+.029*aim+kick*.080);
     rig.rotation.set(.012*hip+.16*kick,.025*hip+.036*kick,-.032*hip+.044*kick);
-    seatReflex(rig,id,aim);poseHeldSleeves(gun,id);rig.updateMatrixWorld(true);
+    seatReflex(rig,id,aim,glass);poseHeldSleeves(gun,id);rig.updateMatrixWorld(true);
   }
   return {rig,gun,glass,shoulder};
 }
 
-test('receiver-mounted sights leave the optical axis open and rest on the body',()=>{
+test('receiver-mounted sights leave the optical axis open and rest on the body before and after loading',async()=>{
   const ray=new Raycaster(),down=new Vector3(0,-1,0),forward=new Vector3(0,0,-1);
   for(const id of firearms){
-    const {gun,glass,shoulder}=view(id),fit=opticFit(id);
-    const housing=gun.userData.body.getObjectByName('reflex-housing');
-    assert.equal(glass.parent,housing.parent);
-    const receiver=gun.userData.body.children.filter(mesh=>mesh!==glass.parent);
-    // Model-local gun before shoulder transform, using the centre of the clamping shoe.
-    ray.set(new Vector3(fit.x,.8,fit.z+.01*fit.scale),down);
-    const top=ray.intersectObjects(receiver)[0].point.y;
-    assert.ok(Math.abs(top-(fit.y-.050*fit.scale))<.015,id+' mount contact');
-    shoulder(1);
-    ray.set(new Vector3(),forward);
-    const intersections=ray.intersectObject(gun).filter(hit=>hit.object.visible);
-    assert.ok(intersections.length>0&&intersections.every(hit=>hit.object===glass),id+' open line of sight');
-    assert.ok(Math.abs(intersections[0].distance+fit.eyeZ)<1e-5);
+    const {rig,gun,glass,shoulder}=view(id);
+    for(const ready of [false,true]){
+      if(ready)await loadGunAppearance(gun.userData.body);
+      rig.position.set(0,0,0);rig.rotation.set(0,0,0);rig.scale.setScalar(1);rig.updateMatrixWorld(true);
+      const fit=glass.parent.userData.mount;
+      const housing=gun.userData.body.getObjectByName('reflex-housing');
+      assert.equal(glass.parent,housing.parent);
+      const receiver=gun.userData.body.children.filter(mesh=>mesh!==glass.parent);
+      // Model-local gun before shoulder transform, using the centre of the clamping shoe.
+      ray.set(new Vector3(fit.x,.8,fit.z+.01*fit.scale),down);
+      const top=ray.intersectObjects(receiver)[0].point.y;
+      assert.ok(Math.abs(top-(fit.y-.050*fit.scale))<.015,id+' mount contact');
+      rig.scale.setScalar(.91);shoulder(1);
+      ray.set(new Vector3(),forward);
+      const intersections=ray.intersectObject(gun).filter(hit=>hit.object.visible);
+      assert.ok(intersections.length>0&&intersections.every(hit=>hit.object===glass),id+' open line of sight');
+      assert.ok(Math.abs(intersections[0].distance+fit.eyeZ)<1e-5);
+    }
   }
   for(const id of ['sniper','shotgun','revolver','knife']){
     assert.equal(opticFit(id),null);assert.equal(reflexEngaged(id,1),false);
@@ -75,7 +81,7 @@ test('the animated fore-end stays clear of the target at peak ADS recoil on eith
       const kick=recoil*.64;
       rig.position.set(0,-fit.sight*.91-.009,(id==='pistol'?-.321:-.393)+kick*profile.push);
       rig.rotation.set(kick*profile.pitch,kick*profile.yaw*side,kick*profile.roll*side);
-      seatReflex(rig,id,1);poseHeldSleeves(gun,id);rig.updateMatrixWorld(true);
+      seatReflex(rig,id,1,glass);poseHeldSleeves(gun,id);rig.updateMatrixWorld(true);
       const contacts=ray.intersectObject(gun).filter(it=>it.object.visible);
       assert.ok(contacts.length>0&&contacts.every(it=>it.object===glass),id+' obscured target at '+recoil);
     }

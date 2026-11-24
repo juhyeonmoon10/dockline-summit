@@ -7,6 +7,43 @@ import {fieldViews} from '../dist/assets/field-frames.js';
 import {ImpactParticlePool} from '../dist/surface-fx.js';
 import {singleShotSpan} from '../dist/shot-path.js';
 import {loadCarriedArmory} from '../dist/armory-data.js';
+import {opticFit} from '../dist/optic-fit.js';
+
+test('a remote photo gun carries the mounted reflex window exactly once',async()=>{
+  const scene=Object.assign(Object.create(LiteRenderer.prototype),{
+    operatorStates:new Map(),meleeSwings:new Map(),remoteMuzzles:new Map()
+  });
+  for(const active of ['rifle','shotgun','sniper','smg','burst','marksman','lmg','pistol','revolver']){
+    const parts=await loadCarriedArmory(active);
+    assert.ok(parts.body.completeExterior,active+' uses the complete photo exterior');
+    const faces=[],player={id:'remote',team:0,x:0,y:0,z:0,yaw:0,pitch:0,active,grounded:true};
+    scene.remoteOperator(faces,player,{x:0,y:1,z:2,sp:0,cp:1,sy:0,cy:1},0,true);
+    // The edge glint is one short quad; unmodified weapon triangles have 3 vertices.
+    const windows=faces.filter(f=>f.vertices.length===4&&f.material===0x829c98);
+    assert.equal(windows.length,opticFit(active)?1:0,active);
+  }
+});
+
+test('Lite draws the separated photo drum when a remote revolver swings open',async()=>{
+  const parts=await loadCarriedArmory('revolver');
+  const scene=Object.assign(Object.create(LiteRenderer.prototype),{
+    operatorStates:new Map(),meleeSwings:new Map(),remoteMuzzles:new Map()
+  });
+  const actor={id:'remote',team:0,x:0,y:0,z:0,yaw:0,pitch:0,active:'revolver',grounded:true,ammo:6};
+  const cam={x:0,y:1,z:2,sp:0,cp:1,sy:0,cy:1};
+  function draw(reload){
+    const faces=[];
+    scene.remoteOperator(faces,{...actor,reload,reloadDuration:1},cam,0,true);
+    return faces.filter(face=>face.vertices.length===3);
+  }
+  const idle=draw(0),swing=draw(.87),open=draw(.5);
+  const modelTriangles=Object.values(parts.reload).reduce((total,part)=>total+part.index.length/3,0);
+  assert.equal(open.length-idle.length,modelTriangles-parts.body.index.length/3);
+  assert.equal(swing.length,open.length);
+  const drumCount=parts.reload.drum.index.length/3;
+  assert.deepEqual(swing.at(-drumCount-1).vertices,open.at(-drumCount-1).vertices);
+  assert.notDeepEqual(swing.at(-drumCount).vertices,open.at(-drumCount).vertices);
+});
 
 test('every carried gun emits at the centre of its posed barrel before and after art arrives',async()=>{
   const team=liteOperator(0),previous=team.model;

@@ -3,7 +3,8 @@ import * as T from './assets/three.module.min.js';
 import { guns } from './assets/toon-guns.js';
 import { blasters } from './assets/blaster-geometry.js';
 import { Parts } from './arena-parts.js';
-import { redDotMount } from './red-dot.js';
+import { redDotMount,placeRedDot } from './red-dot.js';
+import { opticFit } from './optic-fit.js';
 import { makeRevolver } from './revolver.js';
 import {scatterModel} from './scatter-model.js';
 import {cachedArmoryAsset,copyArmoryPart,loadArmoryAsset} from './armory-asset.js';
@@ -11,11 +12,69 @@ export { gunFit } from './gun-fit.js';
 
 const cache=new Map();
 const retained=new Set(['magazine','bolt','reflex-sight','scope-housing','ocular-glass','cylinder-hinge','hammer','iron-sights']);
+const bindPose=new WeakMap();
+const movingParts={magazine:'magazine',bolt:'bolt',drum:'cylinder',hammer:'hammer'};
+const emptyGeometry=new T.BufferGeometry();
+for(const name of ['position','normal','color'])emptyGeometry.setAttribute(name,new T.Float32BufferAttribute([],3));
+function rememberActionPose(model){
+  model.updateMatrixWorld(true);
+  for(const name of Object.values(movingParts)){
+    const object=model.getObjectByName(name);
+    if(object)bindPose.set(object,object.matrixWorld.clone().invert());
+  }
+}
+// Poses retain their Object3D identity when a download finishes during a reload.
+// Source triangles are in gun space, so attach them in the node's original rest frame.
+function fitPhotoAction(target,source){
+  if(!target)return;
+  const endFaces=target.children.filter(c=>c.name==='cylinder-inserts'||c.name==='cylinder-faces');
+  target.clear();
+  if(target.isMesh)target.geometry=emptyGeometry;
+  if(source){
+    const visual=copyArmoryPart(source);
+    visual.name='photo-'+source.name;
+    visual.applyMatrix4(bindPose.get(target));
+    target.add(visual);
+  }
+  for(const caps of endFaces)target.add(caps);
+}
+function seatPhotoCylinder(model,parts){
+  const bounds=new T.Box3().setFromObject(parts.drum),center=bounds.getCenter(new T.Vector3());
+  const width=(bounds.max.x-bounds.min.x)/.102,length=(bounds.max.z-bounds.min.z)/.126;
+  const hinge=model.getObjectByName('cylinder-hinge'),drum=model.getObjectByName('cylinder');
+  hinge.position.set(center.x-.022*width,center.y-.061*width,0);
+  drum.position.set(.022*width,.061*width,0);
+  bindPose.set(drum,new T.Matrix4().makeTranslation(-center.x,-center.y,0));
+  for(const cap of drum.children.filter(c=>c.name==='cylinder-inserts'||c.name==='cylinder-faces')){
+    cap.scale.set(width,width,length);
+    cap.position.z=bounds.max.z+.020*length;
+  }
+  model.userData.photoCylinder={rear:bounds.max.z,scale:width};
+  const hammer=model.getObjectByName('hammer');
+  if(parts.hammer&&hammer){
+    const b=new T.Box3().setFromObject(parts.hammer);
+    hammer.position.set((b.min.x+b.max.x)*.5,b.min.y,b.min.z+.003);
+    bindPose.set(hammer,new T.Matrix4().makeTranslation(-hammer.position.x,-hammer.position.y,-hammer.position.z));
+  }
+}
 function setGunAppearance(model,parts){
   if(!parts?.body||model.userData.armoryImported)return false;
   for(const child of [...model.children])if(!retained.has(child.name))model.remove(child);
+  if(parts.body.userData.completeExterior){
+    const sight=model.getObjectByName('reflex-sight');
+    if(sight)placeRedDot(sight,opticFit(model.name));
+    for(const name of ['scope-housing','iron-sights','swing-arm']){
+      const old=model.getObjectByName(name);
+      if(old)old.removeFromParent();
+    }
+    if(parts.drum)seatPhotoCylinder(model,parts);
+    for(const [part,name] of Object.entries(movingParts))fitPhotoAction(model.getObjectByName(name),parts[part]);
+    const oldLens=model.getObjectByName('ocular-glass');
+    if(oldLens)oldLens.visible=false;
+    model.userData.photoContacts=parts.body.userData.photoContacts;
+  }
   const exterior=copyArmoryPart(parts.body);exterior.name='tripo-exterior';model.add(exterior);
-  model.userData.armoryImported=true;return true;
+  model.userData.armoryImported=true;model.dispatchEvent({type:'appearancechange'});return true;
 }
 export function loadGunAppearance(model){
   if(model.name==='shotgun')return Promise.resolve(false);
@@ -27,6 +86,7 @@ export function loadGunAppearance(model){
 
 function gunInstance(kind){
   const model=cache.get(kind).clone(),parts=cachedArmoryAsset(kind);
+  rememberActionPose(model);
   if(parts)setGunAppearance(model,parts);
   else if(typeof document!=='undefined'){
     // Every player owns a complete hidden inventory. Request a model when its

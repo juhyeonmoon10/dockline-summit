@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { decodeLiteOperator, posedOperator, operatorGrip } from '../dist/lite-operator.js';
+import { supportPads } from '../dist/operator-pads.js';
 
 const asBuffer=data=>data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength);
 const player=(active='sniper',pitch=0,yaw=0)=>({active,pitch,yaw,x:2,y:.3,z:-4,seat:0,speed:0,grounded:true,slide:0});
@@ -18,9 +19,28 @@ for(const team of ['guard','responder']){
     assert.equal(model.aimWeights.length,model.count+1);
     assert.equal(model.aimWeights[model.count],255);
     assert.equal(model.aimPivots.length,frames*3);
+    const shoulderEnd=originalEnd+8+model.aimWeights.byteLength+(model.aimWeights.byteLength%2)+frames*6;
+    const shoulderOnly=decodeLiteOperator(asBuffer(data.subarray(0,shoulderEnd)));
+    assert.equal(shoulderOnly.supportWeights,null);
+    assert.deepEqual(shoulderOnly.aimPivots,model.aimPivots);
+    assert.equal(model.supportWeights.length,(model.count+1)*2);
+    assert.equal(model.supportPivots.length,frames*3);
     for(const end of [originalEnd-1,originalEnd+1,data.length-1])assert.throws(()=>decodeLiteOperator(asBuffer(data.subarray(0,end))));
     const wrong=Buffer.from(data);wrong[originalEnd]=0;
     assert.throws(()=>decodeLiteOperator(asBuffer(wrong)),/arm data/);
+  });
+  test(`${team}: changing props places the weighted support glove on each prop's own contact`,()=>{
+    const a=posedOperator(model,player('rifle'),0,null,{});
+    const b=posedOperator(model,player('pistol'),0,null,{});
+    let glove=0;
+    for(let i=0;i<=model.count;i++){
+      const weight=model.supportWeights[i*2]/255;
+      if(weight>.9)glove++;
+      for(let axis=0;axis<3;axis++){
+        near(a[i*3+axis]-b[i*3+axis],weight*.86*(supportPads.rifle[axis]-supportPads.pistol[axis]),'support displacement');
+      }
+    }
+    assert.ok(glove>3);
   });
   test(`${team}: sniper aim preserves body and rotates weighted arms and grip`,()=>{
     const level=posedOperator(model,player(),0,null,{});

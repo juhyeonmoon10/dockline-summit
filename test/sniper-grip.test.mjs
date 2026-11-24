@@ -6,7 +6,10 @@ import {loadGunAppearance,sniperContacts} from '../dist/blaster.js';
 import { WEAPONS } from '../dist/balance.js';
 import { reloadPose, shotCycle } from '../dist/weapon-view.js';
 
-const front=new T.Vector3(...sniperContacts.support),rear=new T.Vector3(...sniperContacts.grip);
+function rests(body){
+  const contacts=body.userData.photoContacts??sniperContacts;
+  return {front:new T.Vector3(...contacts.support),rear:new T.Vector3(...contacts.grip),knob:new T.Vector3(...contacts.bolt)};
+}
 const samePoint=(a,b)=>a.distanceTo(b)<1e-6;
 function pose(gun,age=Infinity,progress=0,empty=false){
   const duration=empty ? WEAPONS.sniper.emptyReload : WEAPONS.sniper.reload;
@@ -38,6 +41,7 @@ test('the Lookout fore-end and rear grip meet the actual glove surfaces before a
   const {body,support,strong}=gunModel('sniper').userData;
   for(const ready of [false,true]){
    if(ready)await loadGunAppearance(body);
+   const {front,rear}=rests(body);
    for(const [hand,point] of [[support,front],[strong,rear]]){
     assert.ok(samePoint(hand.position,point));
     const bodyGap=surfaceDistance(body,point),handGap=surfaceDistance(hand,point);
@@ -49,13 +53,13 @@ test('the Lookout fore-end and rear grip meet the actual glove surfaces before a
 
 test('the forward hand remains planted while the rear hand follows the moving bolt',()=>{
   const g=gunModel('sniper'),{support,strong,bolt}=g.userData;
+  const {front,rear,knob}=rests(g.userData.body);
   for(let i=0;i<=110;i++){
     const sec=i/120;
     pose(g,sec);
     assert.ok(samePoint(support.position,front));
     if(sec>.15 && sec<.72){
-      const knob=new T.Vector3(...sniperContacts.bolt).applyMatrix4(bolt.matrix);
-      assert.ok(samePoint(strong.position,knob));
+      assert.ok(samePoint(strong.position,knob.clone().applyMatrix4(bolt.matrix)));
     }
   }
   assert.ok(samePoint(strong.position,rear));
@@ -63,6 +67,7 @@ test('the forward hand remains planted while the rear hand follows the moving bo
 
 test('a hand supports the rifle throughout both reloads and the other hand carries the magazine',()=>{
   const g=gunModel('sniper'),{support,strong,magazine,magGrip}=g.userData;
+  const {front,rear}=rests(g.userData.body);
   for(const empty of [true,false]){
     for(let i=0;i<=300;i++){
       const t=i/300;

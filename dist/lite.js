@@ -4,7 +4,7 @@ import { eyeHeight, WEAPONS } from './sim.js';
 import { loadLiteOperators, liteOperator, posedOperator, operatorGrip } from './lite-operator.js';
 import { approachAim, cameraAim, canAim, weaponFov, reloadPose, shotKickResponse, shoulderedKick, shotFlashDuration, LOCAL_IGNITION_LIFE, scopeAfterShot, sniperScopeVisible } from './weapon-view.js';
 import { fieldViews } from './assets/field-frames.js';
-import { opticFit,reflexEngaged } from './optic-fit.js';
+import { opticFit,reflexEngaged,REFLEX_APERTURE } from './optic-fit.js';
 import {gunFit} from './gun-fit.js';
 import {cachedCarriedArmory,loadCarriedArmory} from './armory-data.js';
 import { drawFallbackSight,drawReflexDot } from './lite-reflex.js';
@@ -331,6 +331,24 @@ const carriedGuns={
 };
 
 const carriedSurfaces=new WeakMap();
+// At a distance the thin edge of the glass reads as a glint. Leave its centre
+// open so the opaque world rasterizer preserves the scene through the window.
+const carriedReflexFaces=[];
+const opticRing=(sx,sy,z)=>REFLEX_APERTURE.map(([x,y])=>[x*sx,y*sy,z-y*.15]);
+const inner=opticRing(1,1,.006),front=opticRing(1.18,1.21,.006),back=opticRing(1.18,1.21,-.020);
+for(let i=0;i<inner.length;i++){
+  const j=(i+1)%inner.length;
+  carriedReflexFaces.push([[front[i],front[j],inner[j],inner[i]],0x697172],
+    [[back[i],back[j],front[j],front[i]],0x414a4b]);
+}
+carriedReflexFaces.push([[[-.029,-.026,.003],[.029,-.026,.003],[.029,-.023,.003],[-.029,-.023,.003]],0x829c98]);
+function drawCarriedReflex(dst,transform,optic,body){
+  const s=optic.scale*.86,x=optic.x*.86,y=optic.y*.86,z=optic.z*.86;
+  body(x,y-.050*s,z+.008*s,.066*s,.020*s,.089*s,0x424b4b);
+  for(const [points,paint] of carriedReflexFaces){
+    quad(dst,points.map(([lx,ly,lz])=>transform(x+lx*s,y+ly*s,z+lz*s)),paint);
+  }
+}
 function drawCarriedGun(dst,part,transform,fit){
   const {position,color,index}=part;
   let detail=carriedSurfaces.get(part);
@@ -356,6 +374,7 @@ function drawCarriedGun(dst,part,transform,fit){
   }
   for(let i=0;i<index.length;i+=3)dst.push({material:detail.surfaces[i/3],shade:2,
     vertices:[world[index[i]],world[index[i+1]],world[index[i+2]]]});
+  if(!fit)return;
   const noseX=(fit.muzzleX||0)*.86,noseY=fit.muzzleY*.86,noseZ=detail.front*.86;
   const rim=[];
   for(let i=0;i<8;i++){
@@ -364,6 +383,23 @@ function drawCarriedGun(dst,part,transform,fit){
   }
   dst.push({material:0x252b2c,shade:1,vertices:rim});
   return transform(noseX,noseY,noseZ);
+}
+
+// The idle low-detail mesh is one piece. While the hinge is open use the
+// photo preview's separated surfaces so the stationary drum isn't drawn twice.
+function drawCarriedRevolverReload(dst,parts,transform,swing,ammo){
+  const tip=drawCarriedGun(dst,parts.body,transform,gunFit.revolver);
+  drawCarriedGun(dst,parts.hammer,transform);
+  const turn=(6-(ammo??6))%6*Math.PI/3,cs=Math.cos(turn),sn=Math.sin(turn);
+  const ch=Math.cos(swing),sh=Math.sin(swing);
+  const hingeX=-.022*.86,hingeY=-.042*.86,drumY=.019*.86;
+  const turnDrum=(x,y,z)=>{
+    const dx=x*cs-(y-drumY)*sn-hingeX;
+    const dy=x*sn+(y-drumY)*cs+drumY-hingeY;
+    return transform(hingeX+dx*ch-dy*sh,hingeY+dx*sh+dy*ch,z);
+  };
+  drawCarriedGun(dst,parts.drum,turnDrum);
+  return tip;
 }
 
 function heldEquipment(dst,p,[x,y,z],age,side=1){
@@ -398,12 +434,18 @@ function heldEquipment(dst,p,[x,y,z],age,side=1){
     }
     return;
   }
-  const imported=cachedCarriedArmory(p.active)?.body;
-  if(!imported&&p.active!=='shotgun')loadCarriedArmory(p.active);
+  const carried=cachedCarriedArmory(p.active),imported=carried?.body;
+  if(!imported)loadCarriedArmory(p.active);
   let importedTip;
   if(imported){
-    importedTip=drawCarriedGun(dst,imported,transform,gunFit[p.active]);
-    if(p.active!=='revolver'){
+    const reload=carried.reload&&p.reload>0&&p.reloadDuration>0
+      ?revolverCylinderSwing(1-p.reload/p.reloadDuration):0;
+    importedTip=reload>0
+      ?drawCarriedRevolverReload(dst,carried.reload,transform,reload,p.ammo)
+      :drawCarriedGun(dst,imported,transform,gunFit[p.active]);
+    const optic=imported.completeExterior&&opticFit(p.active);
+    if(optic)drawCarriedReflex(dst,transform,optic,body);
+    if(p.active!=='revolver'||imported.completeExterior){
       const [mx,my,mz]=importedTip;
       return {x:mx,y:my,z:mz,forward:{x:sy*co,y:si,z:-cy*co}};
     }

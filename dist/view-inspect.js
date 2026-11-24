@@ -5,13 +5,13 @@ import { createKnifeGesture,sampleKnifeGesture } from './knife-motion.js';
 // rolls on the shoulder. The long holds give the receiver and sights time to read.
 const guns={
   rifle:    {duration:3.9, depth:.68, x:.164, lift:.26, face:1.20, reveal:.79, cant:1.10},
-  smg:      {duration:3.1, depth:.562,x:.115, lift:.34, face:1.10, reveal:.47, cant:1.24},
-  burst:    {duration:3.65,depth:.68, x:.159, lift:.31, face:1.14, reveal:.68, cant:.97},
-  shotgun:  {duration:3.85,depth:.69, x:.194, lift:.14, face:1.18, reveal:.83, cant:1.24},
-  sniper:   {duration:4.35,depth:.87, x:.275, lift:.24, face:1.03, reveal:.79, cant:.71},
-  marksman: {duration:4.05,depth:.81, x:.219, lift:.28, face:1.09, reveal:.71, cant:.88},
-  lmg:      {duration:4.3, depth:.79, x:.185, lift:.12, face:1.07, reveal:.89, cant:.72},
-  pistol:   {duration:3.15,depth:.405,x:.086, lift:.39, face:1.20, reveal:.43, cant:1.69},
+  smg:      {duration:3.1, depth:.562,x:.054, lift:.34, face:1.10, reveal:.47, cant:1.24},
+  burst:    {duration:3.65,depth:.70, x:.036, lift:.31, face:1.14, reveal:.68, cant:.97},
+  shotgun:  {duration:3.85,depth:.69, x:.136, lift:.14, face:1.18, reveal:.83, cant:1.24},
+  sniper:   {duration:4.35,depth:.87, x:.193, lift:.24, face:1.03, reveal:.79, cant:.71},
+  marksman: {duration:4.05,depth:.81, x:.135, lift:.28, face:1.09, reveal:.71, cant:.88},
+  lmg:      {duration:4.3, depth:.79, x:.163, lift:.12, face:1.07, reveal:.89, cant:.72},
+  pistol:   {duration:3.15,depth:.419,x:.061, lift:.39, face:1.20, reveal:.43, cant:1.69},
   revolver: {duration:3.50,depth:.462,x:.107, lift:.26, face:1.21, reveal:.49, cant:1.47}
 };
 export function inspectDuration(id){

@@ -1,6 +1,6 @@
 import * as T from './assets/three.module.min.js';
 import { blasterMesh, gunFit, sniperContacts } from './blaster.js';
-import {ironTips,SHOTGUN_PUMP_TRAVEL} from './gun-fit.js';
+import {fittedIronTip,SHOTGUN_PUMP_TRAVEL} from './gun-fit.js';
 import { reflexEngaged } from './optic-fit.js';
 import { makeReflexDot,projectReflexDot,seatReflex } from './red-dot.js';
 import { PRIMARY_WEAPONS,SECONDARY_WEAPONS,isSecondaryWeapon } from './balance.js';
@@ -40,15 +40,19 @@ const tracerColors={pistol:0xffdbab,revolver:0xffddb5,smg:0xffcc8e,rifle:0xffe2a
 // Apex and feed are fractions of the reload; release and seating are the shared Foley contacts.
 const palmPad=new T.Vector3(-.008,-.070,.010);
 const ironPoint=new T.Vector3();
-export function shoulderIron(rig,key,aim){
-  const tip=ironTips[key];
+export function shoulderIron(rig,key,aim,body){
+  const tip=fittedIronTip(key,body);
   if(!tip||aim<=0)return;
   // Most of the movement stays in the wrists and receiver. Keep a small
   // visual lift at the front sight and a sliver of daylight over the blade.
-  const weight=.90*aim**3;
+  const shoulder=aim**3;
+  const pitch=(key==='revolver'&&body?.userData.armoryImported) ? .025*shoulder : 0;
+  if(pitch)rig.rotateX(pitch);
   ironPoint.fromArray(tip).multiply(rig.scale).applyQuaternion(rig.quaternion).add(rig.position);
-  rig.position.x-=(key==='shotgun'?aim**3:weight)*ironPoint.x;
-  rig.position.y-=weight*(ironPoint.y+.00055);
+  const restX=tip[0]*rig.scale.x;
+  const restY=(tip[1]*Math.cos(pitch)-tip[2]*Math.sin(pitch))*rig.scale.y-gunFit[key].sight*.91-.009;
+  rig.position.x-=shoulder*(ironPoint.x-(key==='shotgun'?0:.10)*(ironPoint.x-restX));
+  rig.position.y-=shoulder*(ironPoint.y+.00055-.10*(ironPoint.y-restY));
 }
 const magazineHandling={
   rifle:   {grip:[-.0226,-.1740,-.2483],  apex:.405,feed:.51,drop:.190,side:-.072,back:.055,pitch:-.22,turn:.28,wrist:.39,roll:.39,center:.042},
@@ -75,7 +79,7 @@ function limb(parts,a,b,from,to,hue) {
 }
 function glove(support,fit) {
   const group=new T.Group(),hand=articulatedGlove(support);
-  const side=support?-1:1,center=support?fit.support:0,grip=support?-.066:fit.grip;
+  const side=support?-1:1,center=support?fit.support:0,grip=support?(fit.supportGrip??-.066):fit.grip;
   hand.position.set(0,grip+.067,center);
   hand.userData.stockGrip=!support;
   if(!support&&fit===gunFit.shotgun){
@@ -119,14 +123,15 @@ function placeSleeve(gun,hand,shoulder) {
 
 function placeSniperHands(data,reach,grasp) {
   const {support,strong,magazine,bolt,magGrip}=data;
+  const rests=data.body.userData.photoContacts??sniperContacts;
   // Both moving props are authored in the gun's local space. Transform their
   // contact points after posing them, including their rotation on removal.
   magazine.updateMatrix();bolt.updateMatrix();
   gripTarget.copy(magGrip).applyMatrix4(magazine.matrix);
-  support.position.fromArray(sniperContacts.support).lerp(gripTarget,reach);
+  support.position.fromArray(rests.support).lerp(gripTarget,reach);
   support.rotation.set(-.17*reach,-.12*reach,(.48+magazine.rotation.z)*reach);
-  gripTarget.fromArray(sniperContacts.bolt).applyMatrix4(bolt.matrix);
-  strong.position.fromArray(sniperContacts.grip).lerp(gripTarget,grasp);
+  gripTarget.fromArray(rests.bolt).applyMatrix4(bolt.matrix);
+  strong.position.fromArray(rests.grip).lerp(gripTarget,grasp);
   // Move around the outside of the receiver while the right hand is in transit.
   strong.position.x+=.042*4*grasp*(1-grasp);
   strong.rotation.set(-.37*grasp,.20*grasp,-.46*grasp);
@@ -173,6 +178,18 @@ export function gunModel(type,skin='karambit') {
     placeSniperHands(group.userData,0,0);
     placeSleeve(group,support,leftShoulder);placeSleeve(group,strong,rightShoulder);
   }
+  const fitImportedHands=()=>{
+    const contacts=body.userData.photoContacts;
+    if(body.userData.photoCylinder)group.userData.loader.scale.setScalar(body.userData.photoCylinder.scale);
+    if(!contacts?.magazine)return;
+    if(sniper){
+      group.userData.magGrip.fromArray(contacts.magazine);
+      placeSniperHands(group.userData,0,0);
+    }else if(group.userData.handling){
+      group.userData.handling={...group.userData.handling,grip:contacts.magazine};
+    }
+  };
+  fitImportedHands();body.addEventListener('appearancechange',fitImportedHands);
   return group;
 }
 
@@ -250,7 +267,7 @@ export function animateHands(gun,player,reload,cycle) {
     action.hinge.updateMatrix();action.drum.updateMatrix();
     // The loader follows the open cylinder in gun space. The support wrist
     // comes back to the same point as the keyed parts return home.
-    gripTarget.set(0,0,-.020).applyMatrix4(action.drum.matrix).applyMatrix4(action.hinge.matrix);
+    gripTarget.set(0,0,body.userData.photoCylinder?.rear??-.020).applyMatrix4(action.drum.matrix).applyMatrix4(action.hinge.matrix);
     loader.position.copy(gripTarget);
     loader.position.x-=.016+.102*(leave+retreat);loader.position.y-=.176*(leave+retreat);
     loader.position.z+=.020+.077*leave+.095*retreat;
@@ -975,8 +992,8 @@ export class ArenaRenderer {
       this.gunRig.rotation.y+=-.20*cycle.grasp-.11*reloadWeight+.020*this.recoil;
       this.gunRig.rotation.z-=.33*cycle.grasp+.73*reloadWeight;
     }
-    seatReflex(this.gunRig,key,this.aim);
-    shoulderIron(this.gunRig,key,this.aim);
+    seatReflex(this.gunRig,key,this.aim,weapon.userData.window);
+    shoulderIron(this.gunRig,key,this.aim,weapon.userData.body);
     const inspectAge=key==='knife'&&this.meleeAge<knifeAttackDuration(knifeSkin)?Infinity:view.inspectAge;
     if(key==='knife'){
       poseHeldKnife(this.gunRig,weapon,knifeSkin,t-this.knifeEquippedAt,inspectAge,
@@ -985,8 +1002,8 @@ export class ArenaRenderer {
     const inspection=inspectionPose(key==='knife'?knifeSkin:key,inspectAge);
     applyInspection(this.gunRig,inspection);
     poseHeldSleeves(weapon,key,inspection?.weight,inspection?.freeHand);
-    this.reflexActive=Boolean(canAim(focus,true)&&!inspection&&reflexEngaged(key,this.aim));
-    projectReflexDot(this.reflexDot,weapon.userData.window,this.reflexActive,this.gunCamera,this.canvas.clientHeight||this.res.h);
+    const lookingThroughGlass=canAim(focus,true)&&!inspection&&reflexEngaged(key,this.aim);
+    this.reflexActive=projectReflexDot(this.reflexDot,weapon.userData.window,lookingThroughGlass,this.gunCamera,this.canvas.clientHeight||this.res.h);
     this.barrelTip.position.set(fit.muzzleX??0,fit.muzzleY,fit.muzzle);
     if(key==='knife'||this.flashTime<=0)this.flash.visible=false;
     this.ring.material.opacity=game.phase==='overtime'?.70+.19*Math.sin(t*5):.32;

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {Group,PerspectiveCamera,Vector3} from '../dist/assets/three.module.min.js';
 import {PRIMARY_WEAPONS,SECONDARY_WEAPONS} from '../dist/balance.js';
 import {gunModel,poseHeldKnife,poseHeldSleeves} from '../dist/render.js';
+import {loadGunAppearance} from '../dist/blaster.js';
 import {inspectDuration,inspectionPose,applyInspection,ringFlourish} from '../dist/view-inspect.js';
 import {KARAMBIT_RING,KNIFE_TIMING} from '../dist/knife-types.js';
 
@@ -29,7 +30,7 @@ test('draw and inspect move the grip across the view even after the blade has en
   }
 });
 
-test('every firearm shows the receiver and top with the full weapon framed during the shoulder roll',()=>{
+test('every firearm shows the receiver and top with the full weapon framed during the shoulder roll',async()=>{
   for(const key of [...PRIMARY_WEAPONS,...SECONDARY_WEAPONS]){
     const rig=new Group(),model=gunModel(key);rig.scale.setScalar(.91);rig.add(model);
     const duration=inspectDuration(key);
@@ -54,9 +55,17 @@ test('every firearm shows the receiver and top with the full weapon framed durin
       assert.ok(muzzle.x<-.35,key+' keeps the barrel on the left throughout the roll');
       return new Vector3(1,0,0).applyQuaternion(rig.quaternion);
     };
-    const first=side(.26),second=side(.76);
-    for(const fraction of [.14,.37,.51,.57,.62,.69,.84])side(fraction);
-    assert.ok(first.dot(second)<.66,key+' reveals a different surface');
+    const checkRoll=()=>{
+      const first=side(.26),second=side(.76);
+      for(const fraction of [.14,.37,.51,.57,.62,.69,.84,.88])side(fraction);
+      assert.ok(first.dot(second)<.66,key+' reveals a different surface');
+    };
+    checkRoll();
+    if(key!=='shotgun'){
+      await loadGunAppearance(model.userData.body);
+      assert.ok(model.userData.body.userData.armoryImported,key+' loaded its final exterior');
+      checkRoll();
+    }
     poseHeldSleeves(model,key);
     assert.equal(model.userData.supportMount.position.length(),0);
   }

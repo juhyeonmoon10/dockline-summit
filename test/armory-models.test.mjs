@@ -1,10 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFile} from 'node:fs/promises';
 import {PRIMARY_WEAPONS,SECONDARY_WEAPONS} from '../dist/balance.js';
 import {blasterMesh,loadGunAppearance} from '../dist/blaster.js';
-import {loadCarriedArmory} from '../dist/armory-data.js';
+import {armoryData,loadCarriedArmory} from '../dist/armory-data.js';
 import {opticFit} from '../dist/optic-fit.js';
 import {Raycaster,Vector3} from '../dist/assets/three.module.min.js';
+
+test('each gun ships the full exterior from its credited Tripo export',async()=>{
+  const ids=[...PRIMARY_WEAPONS,...SECONDARY_WEAPONS];
+  const credits=await readFile(new URL('../dist/assets/weapon-photo-CREDITS.txt',import.meta.url),'utf8');
+  const records=credits.split(/\r?\n\r?\n/);
+  const sources=new Set();
+  for(const id of ids){
+    const record=records.find(section=>section.split('\n',1)[0].includes('('+id+')'));
+    const sha=record?.match(/^Tripo GLB SHA-256: ([a-f0-9]{64})\s*$/m)?.[1];
+    assert.ok(sha,id+' has a credited source');
+    const data=await armoryData(id);
+    assert.equal(data.sourceSha256,sha,id+' package matches the source credit');
+    assert.equal(data.completeExterior,true,id+' replaces the whole earlier body');
+    sources.add(sha);
+  }
+  assert.equal(sources.size,ids.length,'each gun uses a separate source export');
+});
 
 test('Tripo gun bodies replace the fallback while retaining each player’s action and sights',async()=>{
   for(const id of [...PRIMARY_WEAPONS,...SECONDARY_WEAPONS].filter(id=>id!=='shotgun')){

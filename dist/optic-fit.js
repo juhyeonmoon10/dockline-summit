@@ -1,21 +1,28 @@
 // Gun-local centre of the optical glass, housing scale and the glass's final
 // camera-space Z when the player shoulders that particular viewmodel.
-function mount(y,z,scale,eyeZ){
-  return Object.freeze({x:0,y,z,scale,eyeZ});
+function mount(y,z,scale,eyeZ,x=0){
+  return Object.freeze({x,y,z,scale,eyeZ});
 }
 const mounts=Object.freeze({
-  rifle:mount(.178,-.112,1.00,-.353),
-  smg:mount(.134,-.055,.84,-.328),
-  burst:mount(.152,-.062,1.00,-.358),
-  marksman:mount(.108,-.149,1.08,-.394),
-  lmg:mount(.182,-.011,1.07,-.365),
-  pistol:mount(.127,-.067,.72,-.302)
+  rifle:mount(.1752,-.119,.72,-.353),
+  smg:mount(.1212,-.055,.70,-.328,.008),
+  burst:mount(.1409,-.060,.72,-.358,.016),
+  marksman:mount(.1545,-.225,.78,-.394),
+  lmg:mount(.1932,-.020,.74,-.365),
+  pistol:mount(.1048,-.067,.55,-.302)
 });
 export const opticFit=id=>Object.hasOwn(mounts,id)?mounts[id]:null;
+// The lightweight model displayed during the first download has its own receiver.
+const fallbackMounts={
+  rifle:mount(.1891,-.112,1,-.353), smg:mount(.134,-.055,.84,-.328),
+  burst:mount(.152,-.062,1,-.358), marksman:mount(.108,-.149,1.08,-.394),
+  lmg:mount(.182,-.011,1.07,-.365), pistol:mount(.127,-.067,.72,-.302)
+};
+export const fallbackOpticFit=id=>Object.hasOwn(fallbackMounts,id)?fallbackMounts[id]:null;
 // A narrower window passes the eye slightly later in the shoulder animation.
 // Hand off from the hip crosshair once the whole luminous bead fits.
-const eyeEntry={smg:.875,pistol:.895};
-export const reflexEngaged=(id,aim)=>Boolean(opticFit(id)&&aim>=(eyeEntry[id]??.84));
+const eyeEntry={smg:.91,pistol:.935};
+export const reflexEngaged=(id,aim)=>Boolean(opticFit(id)&&aim>=(eyeEntry[id]??.90));
 
 // The full opening spans .076 x .054 model units. The lower shoulders
 // and the two bevels at the crown give it a clear silhouette in profile.

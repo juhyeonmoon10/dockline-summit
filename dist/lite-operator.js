@@ -2,6 +2,7 @@
 // Only positions change between frames. Triangle topology and hues stay shared.
 import {knifeAttackDuration,knifeClipPhase} from './knife-motion.js';
 import {assetUrl} from './asset-url.js';
+import {supportPads,supportPalmTurn} from './operator-pads.js';
 const CLIPS=['Idle_Shoot','Run_Gun','Jump_Idle','Duck','Punch'];
 const sources=['customs-guard','customs-responder'];
 const teams=sources.map(()=>({model:null,promise:null,failed:false}));
@@ -20,14 +21,22 @@ export function decodeLiteOperator(buffer){
   const positionsAt=(28+9*triangles+1)&~1,stride=(count+1)*3;
   const positionsEnd=positionsAt+stride*frames*2;
   if(buffer.byteLength<positionsEnd)throw Error('Incomplete character atlas');
-  let aimWeights=null,aimPivots=null;
+  let aimWeights=null,aimPivots=null,supportWeights=null,supportPivots=null;
   if(buffer.byteLength>positionsEnd){
     const extension=positionsEnd,weightsAt=extension+8,pivotsAt=(weightsAt+count+2)&~1;
     if(buffer.byteLength<weightsAt||String.fromCharCode(...bytes.subarray(extension,extension+4))!=='ARM1'||
       header.getUint16(extension+4,true)!==count+1||header.getUint16(extension+6,true)!==frames||
-      buffer.byteLength!==pivotsAt+frames*6)throw Error('Invalid character arm data');
+      buffer.byteLength<pivotsAt+frames*6)throw Error('Invalid character arm data');
     aimWeights=new Uint8Array(buffer,weightsAt,count+1);
     aimPivots=new Int16Array(buffer,pivotsAt,frames*3);
+    const hand=pivotsAt+frames*6;
+    if(buffer.byteLength>hand){
+      const influence=hand+8,fingers=influence+(count+1)*2;
+      if(buffer.byteLength!==fingers+frames*6||String.fromCharCode(...bytes.subarray(hand,hand+4))!=='LHD1'||
+        header.getUint16(hand+4,true)!==count+1||header.getUint16(hand+6,true)!==frames)throw Error('Invalid character hand data');
+      supportWeights=new Uint8Array(buffer,influence,(count+1)*2);
+      supportPivots=new Int16Array(buffer,fingers,frames*3);
+    }
   }
   const indices=new Uint16Array(buffer,28,triangles*3);
   for(const index of indices)if(index>=count)throw Error('Invalid character vertex');
@@ -37,7 +46,8 @@ export function decodeLiteOperator(buffer){
     const channel=n=>Math.min(255,Math.round((n*.96+8)*light));
     colors[t*4+shade]=((255<<24)|(channel(bytes[at+2])<<16)|(channel(bytes[at+1])<<8)|channel(bytes[at]))>>>0;
   }
-  return {count,indices,colors,clips,stride,positions:new Int16Array(buffer,positionsAt,stride*frames),aimWeights,aimPivots};
+  return {count,indices,colors,clips,stride,positions:new Int16Array(buffer,positionsAt,stride*frames),
+    aimWeights,aimPivots,supportWeights,supportPivots};
 }
 
 export function loadLiteOperators(){
@@ -82,12 +92,30 @@ export function posedOperator(model,player,clock,swing,state){
   const pivotA=(clip.first+a)*3,pivotB=(clip.first+b)*3,pivots=model.aimPivots;
   const pivotY=aim?(pivots[pivotA+1]+(pivots[pivotB+1]-pivots[pivotA+1])*weight)*.001:0;
   const pivotZ=aim?(pivots[pivotA+2]+(pivots[pivotB+2]-pivots[pivotA+2])*weight)*.001:0;
+  const pad=model.supportPivots&&supportPads[player.active];
+  let leftX=0,leftZ=0,moveX=0,moveY=0,moveZ=0;
+  if(pad){
+    const left=model.supportPivots,hand=model.stride-3;
+    const mix=(array,i,j)=>.001*(array[i]+(array[j]-array[i])*weight);
+    leftX=mix(left,pivotA,pivotB);leftZ=mix(left,pivotA+2,pivotB+2);
+    moveX=mix(positions,first+hand,second+hand)+.86*pad[0]-leftX;
+    moveY=mix(positions,first+hand+1,second+hand+1)+.045+.86*pad[1]-mix(left,pivotA+1,pivotB+1);
+    moveZ=mix(positions,first+hand+2,second+hand+2)+.86*pad[2]-leftZ;
+  }
+  const palmCos=Math.cos(supportPalmTurn),palmSin=Math.sin(supportPalmTurn);
   if(!state.world||state.world.length!==model.stride)state.world=new Float32Array(model.stride);
   const world=state.world;
   for(let i=0;i<model.stride;i+=3){
-    const x=(positions[first+i]+(positions[second+i]-positions[first+i])*weight)*.001;
+    let x=(positions[first+i]+(positions[second+i]-positions[first+i])*weight)*.001;
     let y=(positions[first+i+1]+(positions[second+i+1]-positions[first+i+1])*weight)*.001;
     let z=(positions[first+i+2]+(positions[second+i+2]-positions[first+i+2])*weight)*.001;
+    if(pad){
+      const arm=model.supportWeights[i/3*2]/255,glove=model.supportWeights[i/3*2+1]/255;
+      const dx=x-leftX,dz=z-leftZ;
+      x+=moveX*arm+(dx*palmCos+dz*palmSin-dx)*glove;
+      y+=moveY*arm;
+      z+=moveZ*arm+(-dx*palmSin+dz*palmCos-dz)*glove;
+    }
     if(aim){
       const influence=model.aimWeights[i/3]/255,dy=y-pivotY,dz=z-pivotZ;
       y+=(dy*cp-dz*sp-dy)*influence;z+=(dy*sp+dz*cp-dz)*influence;

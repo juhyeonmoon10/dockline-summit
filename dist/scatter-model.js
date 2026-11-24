@@ -16,7 +16,7 @@ export const scatterTextureReady=typeof document==='undefined'?Promise.resolve()
   readMap('dockline-shotgun.webp',true),readMap('dockline-shotgun-normal.webp'),readMap('dockline-shotgun-finish.webp')
 ]).then(([base,normal,pbr])=>{
   if(base.status==='fulfilled'){finish.map=base.value;finish.vertexColors=false;}
-  if(normal.status==='fulfilled'){finish.normalMap=normal.value;finish.normalScale.setScalar(.31);}
+  if(normal.status==='fulfilled'){finish.normalMap=normal.value;finish.normalScale.setScalar(shotgunData.completeExterior ? .23 : .31);}
   if(pbr.status==='fulfilled'){
     finish.roughnessMap=pbr.value;finish.metalnessMap=pbr.value;finish.roughness=1;finish.metalness=1;
   }
@@ -51,6 +51,7 @@ export function scatterModel(){
     const mesh=new T.Mesh(unpack(shotgunData.held[name]),finish);mesh.name=name;
     mesh.userData.previewGeometry=unpack(shotgunData.preview[name]);group.add(mesh);
   }
+  if(shotgunData.completeExterior){group.userData.armoryImported=true;return group;}
   for(const [part,form,paint] of [['front-shell',upper,metal],['slide-bed',lower,metal],['front-inset',boreFace,capped]]){
     const item=new T.Mesh(form,paint);item.name=part;group.add(item);
   }
