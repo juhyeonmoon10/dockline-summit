@@ -41,6 +41,27 @@ function topLeft(dx,dy,winding){
   return dy*winding<0||(dy===0&&dx*winding>0);
 }
 
+// Three diffuse and three reflected-light channels in linear color space.
+function lightAt(out,i,nx,ny,nz,material,studio,roughness,metalness){
+  if(material.isMeshBasicMaterial){
+    out[i]=out[i+1]=out[i+2]=1;out[i+3]=out[i+4]=out[i+5]=0;return;
+  }
+  const inv=1/(Math.sqrt(nx*nx+ny*ny+nz*nz)||1),x=nx*inv,y=ny*inv,z=nz*inv;
+  const key=Math.max(0,-.46*x+.68*y+.57*z),rim=Math.max(0,.70*x+.43*y-.57*z);
+  const highlight=Math.max(0,-.26*x+.37*y+.89*z),square=highlight*highlight;
+  const fourth=square*square,eighth=fourth*fourth,shine=.12*eighth*eighth*square;
+  if(!studio){
+    out[i]=out[i+1]=out[i+2]=.68+.86*key+.42*rim;
+    out[i+3]=out[i+4]=out[i+5]=shine;return;
+  }
+  const rx=2*z*x,ry=2*z*y,rz=2*z*z-1;
+  const strip=Math.max(0,1-Math.abs(ry-.63-rx*.08)/(.09+roughness*.34))*
+    Math.max(0,1-Math.abs(rx+.15)/1.22)*Math.max(.12,rz);
+  const reflect=(.025+.38*metalness)*(1.05-roughness*.66)*strip,fill=.49+.16*(1+y);
+  out[i]=fill+1.02*key+.28*rim;out[i+1]=fill+.89*key+.42*rim;out[i+2]=fill+.76*key+.64*rim;
+  out[i+3]=.80*reflect+shine*.53;out[i+4]=.93*reflect+shine*.56;out[i+5]=reflect+shine*.67;
+}
+
 // Each visible hand gets its own posed vertices. Its source geometry is
 // shared by both hands and across weapons, even while their fingers move independently.
 const posedMeshes=new WeakMap();
@@ -81,6 +102,28 @@ export function createCanvasPreview(canvas,{studio=false}={}){
   const ctx=canvas.getContext('2d');
   if(!ctx)throw new Error('Canvas 2D unavailable');
   const projected=new WeakMap();
+  const vertexLight=new WeakMap(),faceLight=new Float32Array(6),surfaceInputs=new WeakMap();
+  // These attributes and texture samples are fixed in model space as the player rotates the item.
+  function inputsFor(geo,atlas,orm,material){
+    let inputs=surfaceInputs.get(geo);
+    if(inputs&&inputs.atlas===atlas&&inputs.orm===orm)return inputs;
+    const {normal,uv,position}=geo.attributes,count=position.count;
+    const normals=new Float32Array(3*count);
+    const coords=atlas?new Float32Array(2*count):null,finish=orm?new Float32Array(2*count):null;
+    for(let i=0;i<count;i++){
+      normals[i*3]=normal?normal.getX(i):0;normals[i*3+1]=normal?normal.getY(i):0;normals[i*3+2]=normal?normal.getZ(i):1;
+      if(!atlas)continue;
+      const u=uv.getX(i),v=uv.getY(i);
+      coords[i*2]=u*atlas.width;coords[i*2+1]=(material.map.flipY?1-v:v)*atlas.height;
+      if(orm){
+        const x=Math.max(0,Math.min(orm.width-1,Math.floor(u*orm.width)));
+        const y=Math.max(0,Math.min(orm.height-1,Math.floor((material.roughnessMap.flipY?1-v:v)*orm.height)));
+        const k=4*(y*orm.width+x);
+        finish[i*2]=orm.data[k+1]/255;finish[i*2+1]=orm.data[k+2]/255;
+      }
+    }
+    inputs={atlas,orm,normals,coords,finish};surfaceInputs.set(geo,inputs);return inputs;
+  }
   const normal=new T.Matrix3();
   let pixels,depth,packed;
 
@@ -89,7 +132,7 @@ export function createCanvasPreview(canvas,{studio=false}={}){
     const ax=xyz[a],ay=xyz[a+1],az=xyz[a+2],bx=xyz[b],by=xyz[b+1],cx=xyz[c],cy=xyz[c+1];
     if(!Number.isFinite(ax+bx+cx))return;
     const ux=bx-ax,uy=by-ay,vx=cx-ax,vy=cy-ay,area=ux*vy-uy*vx;
-    if(Math.abs(area)<.012 || (surface&&area>0))return;
+    if(Math.abs(area)<.012 || (surface&&area*surface.cull>0))return;
     const x0=Math.max(0,Math.ceil(Math.min(ax,bx,cx)-.5)),x1=Math.min(w-1,Math.floor(Math.max(ax,bx,cx)-.5));
     const y0=Math.max(0,Math.ceil(Math.min(ay,by,cy)-.5)),y1=Math.min(h-1,Math.floor(Math.max(ay,by,cy)-.5));
     const sx=vy/area,sy=-vx/area,tx=-uy/area,ty=ux/area;
@@ -97,6 +140,8 @@ export function createCanvasPreview(canvas,{studio=false}={}){
     const opaque=(ink>>>24)===255,winding=Math.sign(area);
     const edgeU=opaque||topLeft(ax-cx,ay-cy,winding),edgeV=opaque||topLeft(ux,uy,winding);
     const edgeW=opaque||topLeft(cx-bx,cy-by,winding);
+    const shading=surface?.light;
+    const ia=a*2,ib=b*2,ic=c*2;
     for(let y=y0;y<=y1;y++){
       let u=(x0+.5-ax)*sx+(y+.5-ay)*sy,v=(x0+.5-ax)*tx+(y+.5-ay)*ty;
       for(let x=x0,index=y*w+x0;x<=x1;x++,index++,u+=sx,v+=tx){
@@ -110,13 +155,19 @@ export function createCanvasPreview(canvas,{studio=false}={}){
         if(writeDepth)depth[index]=z;
         if(surface){
           const s=surface,atlas=s.atlas;
-          const xTex=Math.min(atlas.width-1,Math.max(0,Math.floor(s.x+u*s.ux+v*s.vx)));
-          const yTex=Math.min(atlas.height-1,Math.max(0,Math.floor(s.y+u*s.uy+v*s.vy)));
-          const texel=(yTex*atlas.width+xTex)*4,t=atlas.data;
-          const r=channel(toLinear[t[texel]]*s.r+s.addR);
-          const g=channel(toLinear[t[texel+1]]*s.g+s.addG);
-          const b=channel(toLinear[t[texel+2]]*s.b+s.addB);
-          packed[index]=(255<<24)|(b<<16)|(g<<8)|r;
+          const vb=s.perspective?u*xyz[b+2]/z:u,vc=s.perspective?v*xyz[c+2]/z:v,va=1-vb-vc;
+          let red=va*shading[ia]+vb*shading[ib]+vc*shading[ic];
+          let green=va*shading[ia+1]+vb*shading[ib+1]+vc*shading[ic+1];
+          let blue=va*shading[ia+2]+vb*shading[ib+2]+vc*shading[ic+2];
+          if(atlas){
+            const xTex=Math.min(atlas.width-1,Math.max(0,Math.floor(s.x+vb*s.ux+vc*s.vx)));
+            const yTex=Math.min(atlas.height-1,Math.max(0,Math.floor(s.y+vb*s.uy+vc*s.vy)));
+            const at=(yTex*atlas.width+xTex)*4,t=atlas.data;
+            red=toLinear[t[at]]*red+va*shading[ia+3]+vb*shading[ib+3]+vc*shading[ic+3];
+            green=toLinear[t[at+1]]*green+va*shading[ia+4]+vb*shading[ib+4]+vc*shading[ic+4];
+            blue=toLinear[t[at+2]]*blue+va*shading[ia+5]+vb*shading[ib+5]+vc*shading[ic+5];
+          }
+          packed[index]=(255<<24)|(channel(blue)<<16)|(channel(green)<<8)|channel(red);
         }else packed[index]=opaque?ink:over(ink,packed[index]);
       }
     }
@@ -158,42 +209,48 @@ export function createCanvasPreview(canvas,{studio=false}={}){
         const alpha=material.transparent?Math.round(Math.max(0,Math.min(1,material.opacity))*255):255;
         if(!alpha)continue;
         const base=material.color,roughness=material.roughness??.76,metal=material.metalness??0;
-        const studioLit=studio&&!material.isMeshBasicMaterial;
+        const smooth=alpha===255 && !mesh.isSkinnedMesh && mesh.userData.previewGeometry && (nor||atlas);
+        let surface;
+        if(smooth){
+          let light=vertexLight.get(mesh);
+          if(!light||light.length!==6*pos.count){light=new Float32Array(6*pos.count);vertexLight.set(mesh,light);}
+          const orm=atlas&&material.roughnessMap===material.metalnessMap?studioAtlas(material.roughnessMap):null;
+          const input=inputsFor(geo,atlas,orm,material);
+          for(let i=0;i<pos.count;i++){
+            const nx=input.normals[3*i],ny=input.normals[3*i+1],nz=input.normals[3*i+2],j=6*i;
+            const rough=input.finish?roughness*input.finish[2*i]:roughness;
+            const metallic=input.finish?metal*input.finish[2*i+1]:metal;
+            lightAt(light,j,normals[0]*nx+normals[3]*ny+normals[6]*nz,
+              normals[1]*nx+normals[4]*ny+normals[7]*nz,normals[2]*nx+normals[5]*ny+normals[8]*nz,material,studio,rough,metallic);
+            light[j]*=base.r;light[j+1]*=base.g;light[j+2]*=base.b;
+            if(!atlas){
+              light[j]=light[j]*(col?col.getX(i):1)+light[j+3];
+              light[j+1]=light[j+1]*(col?col.getY(i):1)+light[j+4];
+              light[j+2]=light[j+2]*(col?col.getZ(i):1)+light[j+5];
+            }
+          }
+          const winding=Math.sign(mesh.matrixWorld.determinant());
+          surface={light,atlas,coords:input.coords,perspective:Boolean(focal),cull:material.side===T.DoubleSide?0:material.side===T.BackSide?-winding:winding};
+        }
         for(let offset=group.start,end=group.start+group.count;offset+2<end;offset+=3){
           const a=ix?ix[offset]:offset,b=ix?ix[offset+1]:offset+1,c=ix?ix[offset+2]:offset+2;
+          if(surface){
+            if(atlas){
+              const coords=surface.coords;
+              surface.x=coords[2*a];surface.y=coords[2*a+1];
+              surface.ux=coords[2*b]-surface.x;surface.vx=coords[2*c]-surface.x;
+              surface.uy=coords[2*b+1]-surface.y;surface.vy=coords[2*c+1]-surface.y;
+            }
+            triangle(a*3,b*3,c*3,points,-1,w,h,true,surface);
+            continue;
+          }
           const lx=nor?nor.getX(a)+nor.getX(b)+nor.getX(c):0;
           const ly=nor?nor.getY(a)+nor.getY(b)+nor.getY(c):0;
           const lz=nor?nor.getZ(a)+nor.getZ(b)+nor.getZ(c):1;
           const nx=normals[0]*lx+normals[3]*ly+normals[6]*lz,ny=normals[1]*lx+normals[4]*ly+normals[7]*lz,nz=normals[2]*lx+normals[5]*ly+normals[8]*lz;
-          const length=Math.hypot(nx,ny,nz)||1;
-          const key=Math.max(0,(-.46*nx+.68*ny+.57*nz)/length);
-          const rim=Math.max(0,(.70*nx+.43*ny-.57*nz)/length);
-          const light=material.isMeshBasicMaterial?1:.68+.86*key+.42*rim;
-          const shine=material.isMeshBasicMaterial?0:.12*Math.pow(Math.max(0,(-.26*nx+.37*ny+.89*nz)/length),18);
+          lightAt(faceLight,0,nx,ny,nz,material,studio,roughness,metal);
           const r=base.r*(col?col.getX(a):1),g=base.g*(col?col.getY(a):1),blue=base.b*(col?col.getZ(a):1);
-          let redLight=light,greenLight=light,blueLight=light,addR=shine,addG=shine,addB=shine;
-          if(studioLit){
-            // Different panel reflections on rough polymer and bright blade bevels.
-            const x=nx/length,y=ny/length,z=nz/length;
-            const rx=2*z*x,ry=2*z*y,rz=2*z*z-1;
-            const strip=Math.max(0,1-Math.abs(ry-.63-rx*.08)/(.09+roughness*.34))*
-              Math.max(0,1-Math.abs(rx+.15)/1.22)*Math.max(.12,rz);
-            const reflect=(.025+.38*metal)*(1.05-roughness*.66)*strip;
-            const fill=.49+.16*(1+y);
-            redLight=fill+1.02*key+.28*rim;greenLight=fill+.89*key+.42*rim;blueLight=fill+.76*key+.64*rim;
-            addR=.80*reflect+shine*.53;addG=.93*reflect+shine*.56;addB=reflect+shine*.67;
-          }
-          if(atlas&&alpha===255){
-            const uv=geo.attributes.uv,x=uv.getX(a)*atlas.width;
-            const vScale=material.map.flipY?-atlas.height:atlas.height;
-            const va=uv.getY(a),y=(material.map.flipY?1-va:va)*atlas.height;
-            triangle(a*3,b*3,c*3,points,-1,w,h,true,{atlas,x,y,
-              ux:uv.getX(b)*atlas.width-x,vx:uv.getX(c)*atlas.width-x,
-              uy:(uv.getY(b)-va)*vScale,vy:(uv.getY(c)-va)*vScale,
-              r:redLight*base.r,g:greenLight*base.g,b:blueLight*base.b,addR,addG,addB});
-            continue;
-          }
-          const redOut=r*redLight+addR,greenOut=g*greenLight+addG,blueOut=blue*blueLight+addB;
+          const redOut=r*faceLight[0]+faceLight[3],greenOut=g*faceLight[1]+faceLight[4],blueOut=blue*faceLight[2]+faceLight[5];
           const ink=(alpha<<24)|(channel(blueOut)<<16)|(channel(greenOut)<<8)|channel(redOut);
           if(alpha===255)triangle(a*3,b*3,c*3,points,ink,w,h);
           else{

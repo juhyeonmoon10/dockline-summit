@@ -11,6 +11,7 @@ from PIL import Image,ImageDraw,ImageFilter
 tools=Path(__file__).resolve().parent
 repo=tools.parent.parent
 Surface=runpy.run_path(str(tools/'bake-bulkhead.py'))['Surface']
+surfaces=runpy.run_path(str(tools/'knife_surfaces.py'))
 registration={'karambit': {'matrix': [[-0.0573877917592758, -0.43654825513921436, -0.17781349538792116], [0.44429824259518225, -0.08373690652919798, 0.13619322914891874], [-0.11391429192845297, -0.10667335807264165, 0.6207714151789914]], 'offset': [-0.21518483423271711, -0.0006676846748034579, -0.05492985791595888]}, 'balisong': {'matrix': [[0.1528404295112177, -0.5527962985986807, -0.10594545166667248], [0.5184067668025852, 0.1459227479078462, 0.11394622128740113], [-0.07100807674191424, -0.12452504235985076, 0.6038431935753262]], 'offset': [-0.12054532022506714, 0.022816784197526124, -0.019449686494529574]}}
 
 def reference_labels(reference):
@@ -48,30 +49,14 @@ def balisong_labels(p):
                   [229,227,218,200,186,174,164,162,164,180,201,221,240,255])
     return np.where(p[:,1]>.086,1,np.where(p[:,0]<(gap-220)/1900,2,0))
 
-def satin_normals(pos,normals):
-    # Keep the scanned silhouette and near-edge normals. Integrate the highlight
-    # across the broad face; the generator bakes many little dents into that face.
-    normal=normals.copy()
-    lo=pos.min(0)[:2];unit=max(np.ptp(pos,axis=0)[:2])/145
-    cells=np.maximum(np.floor((pos[:,:2]-lo)/unit).astype(int),0)
-    w,h=cells.max(0)+1
-    for side in [-1,1]:
-        weight=np.clip((normals[:,2]*side-.15)*1.5,0,1)
-        accum=np.zeros((h,w,4),'f4');x,y=cells.T
-        np.add.at(accum,(y,x),np.column_stack((normals, np.ones(len(normals))))*weight[:,None])
-        for axis in (0,1):
-            accum=sum(np.roll(accum,k,axis=axis)*np.exp(-(k/3.8)**2) for k in range(-8,9))
-        smooth=accum[y,x,:3]/np.maximum(accum[y,x,3:],1e-10)
-        influence=np.clip((normals[:,2]*side-.15)*1.8,0,.95)[:,None]
-        normal=normal*(1-influence)+smooth*influence
-    return normal/np.maximum(np.linalg.norm(normal,axis=1,keepdims=True),1e-10)
-
 def write_model(name,source_file,reference,temp,output):
     source=Surface(source_file)
     mat=np.asarray(registration[name]['matrix'])
     offset=np.asarray(registration[name]['offset'])
     classify=balisong_labels if name=='balisong' else reference_labels(reference)
     prefix='armory-'+name
+    script="import * as art from './dist/knife-art.js'; console.log(JSON.stringify(art[process.argv[1]+'BladeSections']));"
+    guides=json.loads(subprocess.check_output(['node','--input-type=module','-e',script,name],cwd=repo))
     material=source.doc['materials'][0];pbr=material['pbrMetallicRoughness'];imgs=source.doc['images']
     maps=[]
     def bake_map(field,suffix):
@@ -82,6 +67,7 @@ def write_model(name,source_file,reference,temp,output):
             a[:,:,1]=np.clip(50+.81*a[:,:,1],0,255)
             a[:,:,2]=np.clip(.88*a[:,:,2],0,255)
             tex=Image.fromarray(a)
+        tex=surfaces['knife_atlas'](tex,suffix)
         tex.save(output/(prefix+suffix+'.webp'),quality=94,method=5)
         return np.asarray(tex)
     color=bake_map(pbr['baseColorTexture'],'')
@@ -95,23 +81,44 @@ def write_model(name,source_file,reference,temp,output):
         pos=pos@mat+offset
         normal=mesh.access(mesh.doc['meshes'][0]['primitives'][0]['attributes']['NORMAL'])@np.linalg.inv(mat).T
         normal/=np.maximum(np.linalg.norm(normal,axis=1,keepdims=True),1e-10)
-        coords=np.clip((uv*1024).astype(int),0,1023)
-        rgb=color[coords[:,1],coords[:,0]]
+        uv=uv.copy()
+        uv[:,1]*=.75
         facepart=classify(pos[faces].mean(1))
         if name=='balisong':pos[:,:2]-=[.0051,.0025]
-        else:pos[:,:2]+=[.0037,.0012]
+        else:
+            pos[:,:2]+=[.0037,.0012]
+            # The geometric nearest-part split leaves tiny patches of silver blade
+            # stuck to the black scanned grip at the heel. Include them in the resurfaced part.
+            sample=np.clip((uv*1024).astype(int),0,1023)
+            light=color[sample[:,1],sample[:,0]].mean(1)
+            heel=(pos[faces,1].mean(1)>.003)&(light[faces].mean(1)>92)
+            facepart[heel]=0
         primitives={}
         for i,p in enumerate(reference):
             owned=faces[facepart==i]
             if not len(owned):raise ValueError('empty part '+p['name'])
             idx,ix=np.unique(owned,return_inverse=True)
-            n=satin_normals(pos[idx],normal[idx]) if p['name']=='blade' else normal[idx]
-            attrs={'positions':np.rint((pos[idx]-p['pivot'])*10000).astype('<i2'),
-                'normals':np.rint(n*127).astype('i1'),'faces':ix.astype('<u2'),'colors':rgb[idx]}
-            if level=='held':attrs['uv']=np.rint(np.clip(uv[idx],0,1)*65535).astype('<u2')
-            assert len(idx)<65536
+            if p['name']=='blade':
+                if level=='held':
+                    rows=surfaces['fit_sections'](guides,p['pivot'],pos,owned)
+                    if name=='karambit':
+                        inset=rows[0].copy()
+                        inset[:4]+=.95*(rows[0,:4]-rows[2,:4])
+                        rows=np.vstack((inset,rows))
+                vertices,n,ix,part_uv=surfaces['blade_mesh'](rows,level)
+            elif name=='karambit' and p['name']=='fittings':
+                if level=='held':ring=surfaces['fit_ring'](pos,owned)
+                vertices,n,ix,part_uv=surfaces['ring_mesh'](ring,level)
+            else:
+                vertices,n,part_uv=pos[idx]-p['pivot'],normal[idx],uv[idx]
+                n=surfaces['handle_normals'](vertices,ix.reshape(-1,3),n)
+            px=np.clip((part_uv*1024).astype(int),0,1023)
+            attrs={'positions':np.rint(vertices*10000).astype('<i2'),
+                'normals':np.rint(n*127).astype('i1'),'faces':ix.astype('<u2'),'colors':color[px[:,1],px[:,0]]}
+            if level=='held':attrs['uv']=np.rint(np.clip(part_uv,0,1)*65535).astype('<u2')
+            assert len(vertices)<65536
             primitives[p['name']]={k:encode(v) for k,v in attrs.items()}
-            print(name,level,p['name'],len(owned),flush=True)
+            print(name,level,p['name'],ix.size//3,flush=True)
         data[level]=primitives
     (output/(prefix+'-data.js')).write_text('export const assetData='+json.dumps(data,separators=(',',':'))+';\n',encoding='utf8')
 

@@ -6,6 +6,7 @@ Dependencies: NumPy, Pillow, gltfpack 1.3.
 import argparse
 import base64
 import io
+import runpy
 import json
 from pathlib import Path
 import struct
@@ -46,85 +47,7 @@ class Surface:
             strides=(view.get('byteStride',size*dtype.itemsize),dtype.itemsize))
 
 
-def bake_finish(surface, positions, uv, faces, albedo, output):
-    size=1024
-    albedo=albedo.resize((size,size),Image.Resampling.LANCZOS)
-    colors=np.array(albedo)
-    material=surface.doc['materials'][0]
-    def image_at(index,res):
-        im=surface.doc['images'][surface.doc['textures'][index]['source']]
-        return Image.open(io.BytesIO(surface.view(im['bufferView']))).convert('RGB').resize((res,res),Image.Resampling.LANCZOS)
-    normal=image_at(material['normalTexture']['index'],size)
-    normal.save(output/'dockline-shotgun-normal.webp',quality=94,method=6)
-    original_rm=np.asarray(image_at(material['pbrMetallicRoughness']['metallicRoughnessTexture']['index'],size)).astype(float)/255.
-    roughness=np.zeros((size,size,3),np.uint8)+np.array([255,174,68],'u1')
-    # Interpolate positions into the existing artist UV islands to keep the grain running
-    # along the wood on both sides even where the original export split its surface.
-    mask=np.zeros((size,size),bool);xyz=np.zeros((size,size,3),'f4')
-    puv=uv*size-.5
-    for ids in faces:
-        a,b,c=puv[ids];ab=b-a;ac=c-a
-        determinant=ab[0]*ac[1]-ab[1]*ac[0]
-        if abs(determinant)<1e-8:continue
-        lo=np.maximum(np.floor(np.min([a,b,c],axis=0)).astype(int),0)
-        hi=np.minimum(np.ceil(np.max([a,b,c],axis=0)).astype(int),size-1)
-        if np.any(hi<lo):continue
-        y,x=np.mgrid[lo[1]:hi[1]+1,lo[0]:hi[0]+1]
-        qa=x-a[0];qb=y-a[1]
-        s=(qa*ac[1]-qb*ac[0])/determinant;t=(ab[0]*qb-ab[1]*qa)/determinant
-        take=(s>=-.01)&(t>=-.01)&(s+t<=1.01)
-        yy,xx=y[take],x[take]
-        xyz[yy,xx]=positions[ids[0]]+s[take,None]*(positions[ids[1]]-positions[ids[0]])+t[take,None]*(positions[ids[2]]-positions[ids[0]])
-        mask[yy,xx]=True
-    # Dilate position into a small gutter around UV islands for mip filtering.
-    for _ in range(5):
-        old=mask.copy()
-        for axis,direction in ((0,1),(0,-1),(1,1),(1,-1)):
-            take=~mask&np.roll(old,direction,axis)
-            xyz[take]=np.roll(xyz,direction,axis)[take];mask[take]=True
-    x,y,z=np.moveaxis(xyz,-1,0)
-    rgb=colors.astype('f4')/255.;r,g,b=np.moveaxis(rgb,-1,0)
-    brightness=(r*.24+g*.63+b*.13)
-    rng=np.random.default_rng(1442);micro=rng.normal(0,1,(size,size)).astype('f4')
-    wood=(z>-.133)&(r-g>.026)&(r-b>.045)&mask
-    rubber=(((z>-.692)&(z<-.544)&(y<-.008))|((z>.125)&(brightness<.29)))&mask&~wood
-    metal=mask&~wood&~rubber
-    vein=np.sqrt((x*.86-.074)**2+(y+.142+.007*np.sin(z*25))**2)
-    phase=vein*1930+8.7*np.sin(z*19+y*18)+2.9*np.sin(z*39+x*29)
-    grain=np.cos(phase)*.028+np.cos(2.1*phase+.6)*.012+np.cos(phase*.27)*.023
-    pore=np.maximum(0,np.cos(phase*2.9+np.sin(z*78)))**9
-    polished=1+grain-pore*.046+.009*micro
-    walnut=np.array([.394,.289,.208],dtype='f4')+(brightness-.43)[:,:,None]*np.array([.40,.34,.29])
-    rgb[wood]=(walnut*polished[:,:,None])[wood]
-    rib=np.clip((np.sin((z+.689)*282)+.62)*1.9,0,1)
-    texture=(brightness-.36)*.36+.014*micro-.027*(1-rib)
-    polymer=np.array([.237,.244,.238])+texture[:,:,None]
-    rgb[rubber]=polymer[rubber]
-    grain_m=.98+micro*.008+.008*np.sin(z*1400+y*75)
-    steel=rgb*np.array([.83,.89,.94])*grain_m[:,:,None]
-    rgb[metal]=steel[metal]
-    rough=np.clip(.64+.12*(original_rm[:,:,1]-.5)+micro*.013,0,1)
-    metal_value=np.clip(.36+.18*(original_rm[:,:,2]-.5)+.045*(brightness-.4),0,1)
-    rough[wood]=np.clip(.68+.08*pore[wood]+.018*micro[wood],.51,.84);metal_value[wood]=.012
-    rough[rubber]=np.clip(.87+.035*micro[rubber],.71,.98);metal_value[rubber]=.005
-    roughness[:,:,1]=np.rint(rough*255).astype('u1');roughness[:,:,2]=np.rint(metal_value*255).astype('u1')
-    result=Image.fromarray(np.rint(np.clip(rgb,0,1)*255).astype('u1'))
-    result.save(output/'dockline-shotgun.webp',quality=94,method=6)
-    Image.fromarray(roughness).resize((512,512),Image.Resampling.LANCZOS).save(output/'dockline-shotgun-finish.webp',quality=91,method=6)
-    return result
-
-
-def winding(coord, polygon):
-    inside = np.zeros(len(coord), dtype=bool)
-    before = polygon[-1]
-    for after in polygon:
-        x0,y0=before
-        x1,y1=after
-        if y0 != y1:
-            y=coord[:,1]
-            inside ^= ((y0>y)!=(y1>y)) & (coord[:,0]<(x1-x0)*(y-y0)/(y1-y0)+x0)
-        before=after
-    return inside
+surfaces=runpy.run_path(str(Path(__file__).with_name('bulkhead_surfaces.py')))
 
 
 def encode(a):
@@ -136,7 +59,7 @@ def main():
     parser.add_argument('source',type=Path);parser.add_argument('packer',type=Path);parser.add_argument('output',type=Path)
     args=parser.parse_args()
     config={'axes':['-z','y','x'], 'anchor':[-.0037,.1934,-.4913], 'target':[.0003,.0169,-.7374],
-            'scale':.9318, 'slider':[[-.6915,-.091],[-.5454,-.091],[-.5454,-.0082],[-.6915,-.0082]]}
+            'scale':.9318}
     basis=np.zeros((3,3),dtype='f4')
     for i,axis in enumerate(config['axes']):
         basis[i,'xyz'.index(axis[-1])]=-1 if axis.startswith('-') else 1
@@ -163,41 +86,44 @@ def main():
             positions=(positions@basis.T-config['anchor'])*config['scale']+config['target']
             positions=positions.astype('f4')
             if np.linalg.det(basis)<0: faces=faces[:,[0,2,1]]
-            # The reconstruction has tiny needle-like projections on the textured ribs.
-            # Keep their comb pattern and round their outer profile to match the glove.
-            gripband=(positions[:,2]>-.7)&(positions[:,2]<-.54)&(positions[:,1]<-.007)
-            lateral=positions[:,0]
-            lateral[gripband]=np.sign(lateral[gripband])*(np.minimum(abs(lateral[gripband]),.039)+np.maximum(0,abs(lateral[gripband])-.039)*.22)
             stream=mesh.doc['meshes'][0]['primitives'][0]['attributes']
-            norm=mesh.access(stream['NORMAL']).astype('f4')@basis.T
-            norm/=np.maximum(np.linalg.norm(norm,axis=1)[:,None],1e-10)
+            normals=mesh.access(stream['NORMAL']).astype('f4')@basis.T
+            normals/=np.maximum(np.linalg.norm(normals,axis=1,keepdims=True),1e-10)
             centroids=positions[faces].mean(1)
-            pump=winding(centroids[:,[2,1]],config['slider'])
-            # The image-derived shell folded its round end onto its side. Replace the
-            # exposed straight run while retaining the actual sight, pump and housing.
-            front=(centroids[:,2]<-.409)&~pump
-            sight=front&(centroids[:,2]<-.703)&(centroids[:,2]>-.735)&(centroids[:,1]>.038)
-            keep=~front|sight
-            if not pump.any() or pump.all(): raise ValueError('Check isolated pump sliver')
+            x,y,z=centroids.T
+            sight=(z<-.703)&(z>-.735)&(y>.0617)
+            # These curved details retain their source shape. The broad planar and
+            # wooden surfaces surrounding them are rebuilt to match the source profile.
+            trigger=(z>-.192)&(z<-.159)&(y<-.074)&(y>-.130)&(abs(x)<.009)
+            lever=(x>.046)&(z>-.212)&(z<-.175)&(y>-.022)&(y<.038)
+            keep=sight|trigger|lever
+            ids,index=np.unique(faces[keep],return_inverse=True)
+            if key=='held':
+                albedo=surfaces['atlas'](mesh.textures[tid],original,args.output)
+            raw_uv=uv[ids].copy()
+            raw_uv[:,1]*=.25
+            parts=[(positions[ids],normals[ids],index.reshape(-1,3),raw_uv)]
+            parts.extend(surfaces['surface'](name,key) for name in ('receiver','stock','pad','sight'))
+            parts.append(surfaces['guard'](key))
             channels={}
-            if tid is not None:
-                if key=='held':
-                    im=bake_finish(original,positions,uv,faces,mesh.textures[tid],args.output)
-                ip=np.minimum((np.clip(uv,0,1)*im.size).astype(int),np.array(im.size)-1)
-                cols=np.asarray(im)[ip[:,1],ip[:,0]]
-            else: cols=np.round(np.tile(base,(len(positions),1))*255).astype('u1')
-            for name,mask in [('body',~pump&keep),('pump',pump)]:
-                ids,indices=np.unique(faces[mask],return_inverse=True)
-                if len(ids)>65535: raise ValueError('Part too large for packed indices')
-                attrs={
-                    'positions':np.rint(positions[ids]*10000).astype('<i2'),
-                    'normals':np.rint(norm[ids]*127).astype('i1'),
-                    'colors':cols[ids],
-                    'faces':indices.astype('<u2'),
-                }
-                if key=='held' and uv is not None: attrs['uv']=np.rint(np.clip(uv[ids],0,1)*65535).astype('<u2')
+            for name,components in [('body',parts),('pump',[surfaces['surface']('pump',key)])]:
+                vertex_total=0
+                polygons=[]
+                for vertices,_,tri,_ in components:
+                    polygons.append(tri+vertex_total)
+                    vertex_total+=len(vertices)
+                if vertex_total>65535:raise ValueError('Part too large for packed indices')
+                vertices=np.concatenate([part[0] for part in components])
+                normal=np.concatenate([part[1] for part in components])
+                part_uv=np.concatenate([part[3] for part in components])
+                px=np.clip((part_uv*albedo.shape[0]).astype(int),0,albedo.shape[0]-1)
+                attrs={'positions':np.rint(vertices*10000).astype('<i2'),
+                       'normals':np.rint(normal*127).astype('i1'),
+                       'colors':albedo[px[:,1],px[:,0]],
+                       'faces':np.concatenate(polygons).astype('<u2')}
+                if key=='held':attrs['uv']=np.rint(np.clip(part_uv,0,1)*65535).astype('<u2')
                 channels[name]={k:encode(a) for k,a in attrs.items()}
-                print(key,name,len(ids),'vertices',len(faces[mask]),'triangles')
+                print(key,name,len(vertices),'vertices',len(attrs['faces']),'triangles')
             dataset[key]=channels
     (args.output/'dockline-shotgun-data.js').write_text('// Quantized render geometry for the Dockline game prop.\nexport const shotgunData='+
         json.dumps(dataset,separators=(',',':'))+';\n',encoding='utf-8')
