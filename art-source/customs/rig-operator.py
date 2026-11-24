@@ -1,7 +1,8 @@
 """Bind a reduced T-pose GLB to an adult skeleton and retarget the bundled CC0 motions.
 
 Run in Blender's background Python. Arguments: reduced GLB, Soldier.gltf, output GLB,
-then optional degrees to turn about the vertical axis before binding.
+then optional degrees to turn about the vertical axis before binding. Pass
+--curl-support-hand after the rotation for a palm-down, open-handed Tripo pose.
 """
 import math
 from pathlib import Path
@@ -13,7 +14,7 @@ from mathutils import Matrix, Quaternion, Vector
 
 args = sys.argv[sys.argv.index('--') + 1:]
 character, donor, output = map(Path, args[:3])
-angle = math.radians(float(args[3])) if len(args) > 3 else 0
+angle = math.radians(float(args[3])) if len(args)>3 and args[3]!='--curl-support-hand' else 0
 bpy.ops.wm.read_factory_settings(use_empty=True)
 bpy.ops.import_scene.gltf(filepath=str(character.resolve()))
 mesh = next(o for o in bpy.context.scene.objects if o.type == 'MESH')
@@ -31,6 +32,37 @@ for vertex, point in zip(verts, coords):
     vertex.co = point
 mesh.name = 'Customs uniform'
 mesh.data.update()
+
+# An open T-pose can put four straight fingers through or beyond the carried
+# fore-end. Shape the distal glove in rest space, keeping the thumb, wrist and
+# attachment bones in place. Keep the supplied per-corner shading through the
+# bend (including texture seams and the gaps between the fingers).
+if '--curl-support-hand' in args[3:]:
+    fingertip = float(np.max(coords[:,0]))
+    knuckles = fingertip - .091
+    knuckle_ring = coords[np.abs(coords[:,0]-knuckles)<.008]
+    palm_z = float(np.median(knuckle_ring[:,2]))
+    across = np.maximum(0,coords[:,0]-knuckles)
+    radius = .038
+    bend = np.minimum(across/radius,math.radians(138))
+    sin_a,cos_a = np.sin(bend),np.cos(bend)
+    beyond = np.maximum(0,across-radius*bend)
+    up = coords[:,2]-palm_z
+    curled_x = knuckles+(radius+up)*sin_a+beyond*cos_a
+    curled_z = palm_z-radius+(radius+up)*cos_a-beyond*sin_a
+    corner_vertex=np.empty(len(mesh.data.loops),dtype=np.int32)
+    mesh.data.loops.foreach_get('vertex_index',corner_vertex)
+    normals=np.empty(len(corner_vertex)*3,dtype=np.float32)
+    mesh.data.corner_normals.foreach_get('vector',normals)
+    normals=normals.reshape(-1,3)
+    nx,nz=normals[:,0].copy(),normals[:,2].copy()
+    cs,ss=cos_a[corner_vertex],sin_a[corner_vertex]
+    normals[:,0]=cs*nx+ss*nz
+    normals[:,2]=-ss*nx+cs*nz
+    for idx in np.flatnonzero(across):
+        verts[int(idx)].co=(float(curled_x[idx]),coords[idx,1],float(curled_z[idx]))
+    mesh.data.update()
+    mesh.data.normals_split_custom_set(normals)
 
 # Both axes and centring follow the actual export. Measure wrist height, arm span,
 # and leg separation from the silhouette so differently dressed characters can share clips.

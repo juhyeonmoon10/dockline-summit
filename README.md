@@ -56,4 +56,4 @@ Esc 메뉴 또는 로비 오른쪽 위 설정에서 마우스 감도를 0.10–3
 - `node server.mjs` 실행 후 [로컬 게임](http://localhost:8787/)에서 확인하세요. 게임에 필요한 라이브러리는 저장소에 포함되어 있습니다.
 - 저장소의 **Settings → Pages → Source**를 **GitHub Actions**로 설정하세요. [배포 워크플로](.github/workflows/pages.yml)가 `main`에 변경 사항을 푸시할 때 게임과 최신 LAN 서버 ZIP을 함께 배포합니다. 공개 사이트에서는 방장의 브라우저가 경기를 진행하고, 행사장 LAN에서는 진행자 PC의 Node 서버가 경기를 진행합니다.
 
-두 팀의 세관 대원은 DOCKLINE용으로 Tripo에서 생성했습니다. [캐릭터 변환 스크립트](art-source/customs/)에서 원본에 이동·조준 동작을 연결하고 WebGL 모델과 경량판을 만듭니다. 1인칭 장갑은 현장 대응팀 원본에서 추출해 손가락 관절을 연결했습니다. [Toon Shooter 원본](art-source/toon-shooter/README.txt)에는 캐릭터 동작과 일부 총기의 출처가 있습니다. [외부 코드·모델·녹음 이용 조건](dist/assets/)과 [글꼴 라이선스](dist/fonts/OFL.txt)를 포함합니다.
+경비팀은 남색 헬멧과 고글을, 상대 팀은 붉은 재킷과 헤드셋을 착용합니다. 두 캐릭터는 DOCKLINE용으로 Tripo에서 생성했습니다. [캐릭터 변환 스크립트](art-source/customs/)에서 이동·조준 동작을 연결하고 WebGL 모델과 경량판을 만듭니다. 1인칭 가죽 장갑은 이전 대응팀 모델에서 추출했습니다. [Toon Shooter 원본](art-source/toon-shooter/README.txt)에는 캐릭터 동작과 일부 총기의 출처가 있습니다. [외부 코드·모델·녹음 이용 조건](dist/assets/)과 [글꼴 라이선스](dist/fonts/OFL.txt)를 포함합니다.

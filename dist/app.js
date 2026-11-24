@@ -199,6 +199,7 @@ async function openNetwork(invite=''){
   if(location.protocol==='file:'){
     showPanel('network','친구와 대전','<p>온라인 대전은 게임 사이트에서 방 코드를 입력하면 참가할 수 있어요.</p><div class="row"><a class="primary" href="https://juhyeonmoon10.github.io/dockline-summit/" target="_blank" rel="noopener">온라인 게임 열기</a></div>');return;
   }
+  renderer?.preloadOperators?.();
   const button=$('teamBtn');button.disabled=true;await canLAN;button.disabled=false;
   const digits=lan?4:6;
   showPanel('network', '친구와 대전', `

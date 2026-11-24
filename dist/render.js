@@ -512,6 +512,9 @@ export class ArenaRenderer {
     this.traceIndex=0;this.sparkIndex=0;
     this.sampleSeconds=0;this.sampleFrames=0;
   }
+  preloadOperators() {
+    return loadOperators();
+  }
   setMap(map) {
     let yard=this.yards.get(map.id);
     if(!yard){
