@@ -1,6 +1,6 @@
 import {karambitGripRotation,knifeAttackDuration,knifeDrawPose,knifePose,knifeWristPose} from './knife-motion.js';
 import {inspectionPose,ringFlourish} from './view-inspect.js';
-import {karambitBladeSections,karambitGripSections,knifeAngles} from './knife-art.js';
+import {karambitBladeSections,karambitGripSections,karambitRingRadii,knifeAngles} from './knife-art.js';
 import {KARAMBIT_RING} from './knife-types.js';
 
 // A flat, hinged silhouette for the first equip while the articulated meshes load.
@@ -12,33 +12,49 @@ function rotation(rx,ry,rz){
 
 // Keep the software silhouette tied to the same spine, edge and scallops as the armory mesh.
 // Every face is convex so the remote operator can feed it straight to its depth buffer.
-function karambitFaces(){
+function karambitFaces(detailed){
   const faces=[],add=(points,color)=>faces.push({points,color,css:'#'+color.toString(16).padStart(6,'0')});
   const point=(s,t)=>[s[0]+(s[2]-s[0])*t,s[1]+(s[3]-s[1])*t];
-  const steel=[0xa9bcc3,0x596e78,0x92a6ac,0xd2dfdc];
+  const steel=[0xb4b3b0,0xd1cfcb,0xf3f2ed,0xc7c6c2];
   const bevels=s=>[0,s[5],s[6],.84,1];
-  for(let i=1;i<karambitBladeSections.length;i++){
-    const a=karambitBladeSections[i-1],b=karambitBladeSections[i];
+  const blade=detailed?karambitBladeSections:karambitBladeSections.filter((s,i,rows)=>i%2===0||i===rows.length-1);
+  for(let i=1;i<blade.length;i++){
+    const a=blade[i-1],b=blade[i];
     const start=bevels(a),end=bevels(b);
     for(let j=0;j<steel.length;j++){
       add([point(a,start[j]),point(b,end[j]),point(b,end[j+1]),point(a,start[j+1])],steel[j]);
     }
   }
-  const [cx,cy]=KARAMBIT_RING,ring=(i,r)=>[cx+r*Math.cos(i*Math.PI/8),cy+r*Math.sin(i*Math.PI/8)];
-  for(let i=0;i<16;i++){
-    add([ring(i,.049),ring(i+1,.049),ring(i+1,.0345),ring(i,.0345)],i>=6&&i<=13?0x77b9ae:0x84989b);
+  const [cx,cy]=KARAMBIT_RING;
+  const segments=detailed?32:16;
+  const rings=Array.from({length:segments},(_,i)=>{
+    const angle=i*2*Math.PI/segments,[outer,inner]=karambitRingRadii(angle);
+    const radial=r=>[cx+r*Math.cos(angle),cy+r*Math.sin(angle)];
+    return [radial(outer),radial(inner+(outer-inner)*.23),radial(inner)];
+  });
+  for(let i=0;i<rings.length;i++){
+    const a=rings[i],b=rings[(i+1)%rings.length];
+    const lit=i<segments/3||i>segments*.82;
+    add([a[0],b[0],b[1],a[1]],lit?0xe6e4de:0xc5c3be);
+    add([a[1],b[1],b[2],a[2]],lit?0x898885:0xf3f2ec);
   }
-  const grip=karambitGripSections.filter((row,i)=>i%2===0||i===karambitGripSections.length-1);
+  // Keep the three finger-groove peaks on distant operators. Shallow ridges
+  // are smaller than a screen pixel at that scale.
+  const grip=detailed?karambitGripSections:karambitGripSections.filter(([y,l],i,rows)=>
+    i%4===0||i===rows.length-1||(i>0&&l<rows[i-1][1]&&l<=rows[i+1][1]));
   for(let i=1;i<grip.length;i++){
     const [y,l,r]=grip[i-1],[Y,L,R]=grip[i];
-    add([[l,y],[r,y],[R,Y],[L,Y]],0x344448);
+    if(detailed){
+      const shoulder=l+(r-l)*.39,nextShoulder=L+(R-L)*.39;
+      add([[l,y],[shoulder,y],[nextShoulder,Y],[L,Y]],0x363430);
+      add([[shoulder,y],[r,y],[R,Y],[nextShoulder,Y]],0x211f1c);
+    }else add([[l,y],[r,y],[R,Y],[L,Y]],0x211f1c);
   }
-  add([[-.050,.004],[.025,.020],[.021,.031],[-.058,.014]],0x84a9a2);
   return faces;
 }
-const flatKarambit=karambitFaces();
+const flatKarambit=karambitFaces(true);
 const carriedRotation=rotation(.24,-.24,-1.92);
-const carriedFaces=flatKarambit.map(({points,color})=>({
+const carriedFaces=karambitFaces(false).map(({points,color})=>({
   points:points.map(([x,y])=>carriedRotation(x-KARAMBIT_RING[0],y-KARAMBIT_RING[1],0)),color
 }));
 

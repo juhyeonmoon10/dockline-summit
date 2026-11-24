@@ -18,18 +18,28 @@ test('the karambit has a through-ring and the balisong has open scale windows on
   }
 });
 
-test('the karambit blade stays compact relative to its grip and turns back only near the tip',()=>{
+test('the photo-profile karambit sweeps forward to a long point and keeps its finger scallops open',()=>{
   const mesh=knifeMesh('karambit');
   const blade=mesh.getObjectByName('blade'),steel=new T.Box3().setFromObject(blade,true);
   const palm=new T.Box3().setFromObject(mesh.getObjectByName('grip'),true)
     .union(new T.Box3().setFromObject(mesh.getObjectByName('fittings'),true));
   const reach=steel.max.x-steel.min.x,gripLength=palm.max.y-palm.min.y;
-  assert.ok(reach<gripLength*.8,'blade should fit comfortably inside the handle-and-ring length');
+  assert.ok(reach>gripLength*.62&&reach<gripLength*.73,'silver crescent spans the reference proportions');
   const vertices=blade.geometry.attributes.position;
   let tip=0;
   for(let i=1;i<vertices.count;i++)if(vertices.getX(i)<vertices.getX(tip))tip=i;
   const hook=(steel.max.y-vertices.getY(tip))/reach;
-  assert.ok(hook>.18&&hook<.35,'the short claw ends just below the crown of the blade');
+  assert.ok(hook>0&&hook<.05,'the tip finishes close to the furthest forward point of the sweep');
+  mesh.updateMatrixWorld(true);
+  // Side-profile samples on the three separated hollows, guard and pointed ring tail.
+  for(const [x,y,solid] of [
+    [.0126,-.0223,false],[.0126,-.0550,true],[.0146,-.0835,false],
+    [.0112,-.1148,true],[.0119,-.1413,false],[-.0296,.0130,true],
+    [.018,-.267,true],[.0078,-.267,false]
+  ]){
+    const ray=new T.Raycaster(new T.Vector3(x,y,1),new T.Vector3(0,0,-1));
+    assert.equal(ray.intersectObject(mesh,true).length>0,solid,`profile at ${x},${y}`);
+  }
 });
 
 test('steel, cast metal, rubber and both curved inserts keep their own finishes after cloning',()=>{

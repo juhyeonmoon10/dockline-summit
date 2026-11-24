@@ -257,7 +257,8 @@ export class ArenaSound {
         [.68,'flipSwing',.11,1.14,-.035],[KNIFE_TIMING.balisong.inspectOpen,'hingeOpen',.35,1.04,.08]],inspectAge);
     }else if(item==='karambit'){
       events('inspect',[[.055,'gloveShift',.095],[.225,'ringSlip',.17,1.04,-.04],
-        [.31,'hookSwing',.14,1.15,-.08],[KNIFE_TIMING.karambit.inspectCatch,'ringCatch',.30,1.02,.065]],inspectAge);
+        [.31,'hookSwing',.14,1.15,-.08],[.76,'hookSwing',.11,1.24,.04],
+        [KNIFE_TIMING.karambit.inspectCatch,'ringCatch',.30,1.02,.065]],inspectAge);
     }else{
       const duration=inspectDuration(item);
       events('inspect',[[duration*.07,'gloveShift',.14,1.05,.06],[duration*.48,'gloveShift',.17,.86,-.06],

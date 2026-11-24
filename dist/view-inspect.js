@@ -23,12 +23,15 @@ const blend=(a,b,t)=>a+(b-a)*t;
 
 // Camera-space wrist keys: seconds, x/y/z, and pitch/yaw/roll. The
 // blade, hinge, and the individual fingers are driven separately.
+// Lift from the right, carry both rotations across an open palm, then hold the broadside.
 const hook=createKnifeGesture([
-  [0,.140,-.100,-.453,.30,-.40,.60],[.090,.056,-.103,-.519,-.22,-.24,-.45],
-  [.225,-.051,-.022,-.561,.13,.17,.13],[.305,-.193,.018,-.688,.20,.29,.31],
-  [.400,-.102,.027,-.725,.16,.31,.32],[.556,-.007,-.023,-.604,.12,.02,.41],
-  [KNIFE_TIMING.karambit.inspectCatch,.103,.003,-.572,.13,-.25,.46],
-  [.839,.118,.017,-.569,.05,-.34,.38],[KNIFE_TIMING.karambit.inspect,.140,-.100,-.453,.30,-.40,.60]
+  [0,.140,-.100,-.453,.30,-.40,.60],[.115,.113,-.112,-.505,.15,-.46,.12],
+  [.228,.078,-.064,-.62,-.22,-.24,-.35],[.360,.020,-.032,-.70,-.39,.16,-.65],
+  [.515,-.058,.013,-.70,-.24,.24,-.81],[.655,-.070,-.024,-.71,-.28,.12,-.54],
+  [.812,-.053,-.032,-.69,-.45,.12,-.34],[.942,-.009,.005,-.645,-.25,.03,-.02],
+  [KNIFE_TIMING.karambit.inspectCatch,.035,.012,-.61,.20,-.28,.49],
+  [1.13,.025,-.010,-.62,.11,-.18,.33],[1.43,.036,-.004,-.59,.16,-.34,.26],
+  [1.54,.058,-.014,-.56,.18,-.39,.29],[KNIFE_TIMING.karambit.inspect,.140,-.100,-.453,.30,-.40,.60]
 ]);
 const butterfly=createKnifeGesture([
   [0,.123,-.095,-.435,-.06,-.23,.72],[.088,.144,-.046,-.470,-.14,-.33,.85],
@@ -58,12 +61,18 @@ export function inspectionPose(id,age) {
     rz:blend(-.38,gun.cant,roll)+.12*settleRoll-.22*fall
   };
 }
+// Keep the angle unwrapped. The index stays in the ring through both passes and
+// the fingers close once, at the same instant as the catch sound.
+const ringRoll=createKnifeGesture([
+  [0,0,0],[.112,.32,.12],[.200,.12,.78],[.325,-1.90,1],
+  [.460,-4.89,1],[.545,-6.35,.87],[.630,-7.33,.95],
+  [.820,-10.32,1],[.951,-12.30,.67],[KNIFE_TIMING.karambit.inspectCatch,-Math.PI*4-.095,0],
+  [1.135,-Math.PI*4,0],[KNIFE_TIMING.karambit.inspect,-Math.PI*4,0]
+].map(([time,turn,grip])=>[time,0,0,0,0,0,0,turn,grip]));
 export function ringFlourish(age) {
   if(!(age>0&&age<KNIFE_TIMING.karambit.inspect))return null;
-  const grip=ease((age-.072)/.122)*ease((KNIFE_TIMING.karambit.inspectCatch-age)/.104);
-  const turn=.31*ease((age-.032)/.117)-(2*Math.PI+.31)*ease((age-.174)/.402)
-    -.155*Math.sin(Math.PI*ease((age-.576)/.084));
-  return {grip,turn};
+  const {turn,grip}=sampleKnifeGesture(ringRoll,age);
+  return {turn,grip};
 }
 
 export function applyInspection(rig,pose) {

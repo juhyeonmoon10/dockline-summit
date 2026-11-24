@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {drawCarriedKarambit,drawLiteKnife} from '../dist/lite-knife.js';
 import {knifePose} from '../dist/knife-motion.js';
 
-test('the compact karambit projects finite faces on cold equip, inspection and either slash',()=>{
+test('the silver karambit projects finite faces on cold equip, inspection and either slash',()=>{
   const player={knifeSkin:'karambit',speed:4};
   let paths=0;
   const context=new Proxy({canvas:{width:425,height:239}},{
@@ -32,4 +32,24 @@ test('the compact karambit projects finite faces on cold equip, inspection and e
     });
     assert.ok(faces>0);
   }
+});
+
+test('both flat views show the silver blade and ring, and the dark grip',()=>{
+  const carried=new Set(),held=new Set();
+  drawCarriedKarambit(knifePose(Infinity,1,'karambit'),(_,color)=>carried.add(color));
+  const ctx=new Proxy({canvas:{width:425,height:239}},{
+    get(target,key){return key in target?target[key]:()=>{};},
+    set(target,key,value){
+      if(key==='fillStyle')held.add(Number.parseInt(value.slice(1),16));
+      target[key]=value;return true;
+    }
+  });
+  drawLiteKnife(ctx,{knifeSkin:'karambit'},1,Infinity,Infinity,null);
+  for(const color of carried){
+    assert.ok(held.has(color),'cold equip should use the same finish as a remote player');
+    const channels=[color>>16,(color>>8)&255,color&255];
+    assert.ok(Math.max(...channels)-Math.min(...channels)<24,'blade, ring and grips are neutral tones');
+  }
+  assert.ok([...carried].filter(color=>(color>>16)>210).length>=2,'polished facets and ring lip');
+  assert.ok([...carried].some(color=>(color>>16)<54),'dark rubber grip');
 });

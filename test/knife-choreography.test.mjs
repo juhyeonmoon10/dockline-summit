@@ -78,11 +78,15 @@ test('actual blade meshes fit the narrow 4:3 weapon camera at every contact and 
   for(const skin of skins){
     const rig=new Group(),model=gunModel('knife',skin),pt=new Vector3();
     rig.scale.setScalar(.91);rig.add(model);
-    for(const action of [0,1,-1]){
-      for(let i=0;i<=30;i++){
-        const t=i/30,cut=action?knifeAttackDuration(skin)*t:Infinity;
-        const look=action?Infinity:inspectDuration(skin)*t;
-        poseHeldKnife(rig,model,skin,Infinity,look,cut,action||1);
+    const actions=[
+      {length:knifeAttackDuration(skin),side:1},{length:knifeAttackDuration(skin),side:-1},
+      {length:inspectDuration(skin),inspect:true}
+    ];
+    if(skin==='karambit')actions.push({length:KNIFE_TIMING.karambit.draw,draw:true});
+    for(const action of actions){
+      for(let i=0;i<=60;i++){
+        const t=action.length*i/60,cut=action.side?t:Infinity,look=action.inspect?t:Infinity;
+        poseHeldKnife(rig,model,skin,action.draw?t:Infinity,look,cut,action.side||1);
         applyInspection(rig,inspectionPose(skin,look));rig.updateMatrixWorld(true);
         const part=model.userData.body.getObjectByName('blade'),positions=part.geometry.attributes.position;
         for(let vertex=0;vertex<positions.count;vertex+=5){
@@ -94,7 +98,7 @@ test('actual blade meshes fit the narrow 4:3 weapon camera at every contact and 
   }
 });
 
-test('the glove leaves the compact claw visible at ready, inspection catch and both hits',()=>{
+test('the glove leaves the silver claw visible at ready, inspection catch and both hits',()=>{
   const rig=new Group(),model=gunModel('knife','karambit');
   rig.scale.setScalar(.91);rig.add(model);
   const blade=model.userData.body.getObjectByName('blade'),isolated=blade.clone();

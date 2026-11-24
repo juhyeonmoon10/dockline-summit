@@ -65,23 +65,25 @@ function plate(m,outline,z,half,bevel,surface,rim){
     quad(m,[...q[i],z-half],[...q[j],z-half],[...p[j],z-half+edge],[...p[i],z-half+edge],rim);
   }
 }
-// A machined annulus retains the open hole and stepped lips when viewed from the edge.
-function ring(m,x,y,z,outer,inner,h,faceColor,sideColor,lipColor,count=28){
-  const bevel=Math.min((outer-inner)*.22,h*.52),profile=[
-    [inner,-h+bevel],[inner+bevel,-h],[outer-bevel,-h],[outer,-h+bevel],
-    [outer,h-bevel],[outer-bevel,h],[inner+bevel,h],[inner,h-bevel]
-  ],tints=[lipColor,faceColor,lipColor,sideColor,lipColor,faceColor,lipColor,sideColor];
-  for(let i=0;i<count;i++){
-    const a=i*tau/count,b=(i+1)*tau/count;
-    const point=(j,angle)=>[x+profile[j][0]*Math.cos(angle),y+profile[j][0]*Math.sin(angle),z+profile[j][1]];
-    for(let j=0;j<profile.length;j++){
-      const k=(j+1)%profile.length;
-      // A single enamel insert runs across the visible outside of the loop.
-      // The polished inner lip remains continuous as the loop turns edge-on.
-      const enamel=i>=Math.floor(count*.41)&&i<Math.floor(count*.86);
-      const ink=enamel&&(j===1||j===5)?0x76c6b4:enamel&&j===3?0x548e85:tints[j];
-      quad(m,point(j,a),point(j,b),point(k,b),point(k,a),ink);
+// Both cheeks are continuous around the open center, with a broader shoulder
+// at the pointed rear of the profile. The bevel picks up the studio light.
+function silverRing(m){
+  const [x,y]=KARAMBIT_RING,steps=96,h=.013;
+  function section(angle){
+    const [outer,inner]=karambitRingRadii(angle);
+    return [[inner,-h+.0022],[inner+.0022,-h],[outer-.0020,-h],[outer,-h+.002],
+      [outer,h-.002],[outer-.0020,h],[inner+.0022,h],[inner,h-.0022]]
+      .map(([r,z])=>[x+r*Math.cos(angle),y+r*Math.sin(angle),z]);
+  }
+  const shades=[0x898682,0xe4e1db,0xf2f0eb,0xb5b4b0,0xf4f2ee,0xe4e1db,0x898682,0xc7c6c2];
+  let before=section(0);
+  for(let i=1;i<=steps;i++){
+    const after=section(i*tau/steps);
+    for(let j=0;j<shades.length;j++){
+      const k=(j+1)%shades.length;
+      quad(m,before[j],after[j],after[k],before[k],shades[j]);
     }
+    before=after;
   }
 }
 // A recessed centre and a polished shoulder read as separate surfaces in the turntable.
@@ -140,81 +142,131 @@ function groundBlade(m,stations,palette){
       [next[0],next[1],next[4]*.31],[s[0],s[1],s[4]*.31],palette[0][1]);
   }
 }
-// Section pairs are shared with the small silhouettes shown by the lite renderer.
-// The last two columns mark the spine facet and grind line across each section.
-// They converge into the point and cut diagonally across the shoulder.
-export const karambitBladeSections=[
-  [.014,.019,-.058,.019,.010,.045,.77], [.022,.049,-.059,.042,.0125,.043,.76],
-  [.024,.078,-.054,.056,.0135,.037,.71], [.019,.108,-.058,.075,.0135,.033,.44],
-  [.006,.136,-.068,.093,.013,.029,.37], [-.017,.161,-.084,.108,.012,.025,.35],
-  [-.045,.178,-.103,.120,.0108,.024,.37], [-.075,.187,-.125,.129,.009,.041,.44],
-  [-.106,.188,-.145,.133,.007,.11,.54], [-.136,.178,-.160,.135,.005,.23,.64],
-  [-.161,.158,-.173,.134,.0027,.36,.72], [-.183,.133,-.183,.133,0,.44,.77]
-];
-export const karambitGripSections=[
-  [-.181,.007,.033],[-.173,.003,.041],[-.161,-.004,.049],[-.149,-.006,.055],
-  [-.138,.001,.059],[-.129,.004,.061],[-.123,.001,.061],[-.116,-.009,.061],
-  [-.108,-.015,.061],[-.100,-.016,.060],[-.088,-.010,.058],[-.081,-.006,.056],
-  [-.075,-.008,.055],[-.067,-.021,.053],[-.060,-.025,.051],[-.052,-.024,.048],
-  [-.042,-.018,.045],[-.035,-.019,.043],[-.029,-.030,.041],[-.024,-.039,.039],
-  [-.015,-.044,.036],[-.006,-.045,.034],[.003,-.044,.030],[.010,-.054,.028],
-  [.017,-.067,.026],[.023,-.071,.024],[.030,-.065,.022],[.035,-.054,.021],
-  [.041,-.033,.018],[.044,-.012,.013],[.0445,-.002,.009]
-];
-function gripWidth(y){
-  let i=1;while(i<karambitGripSections.length-1&&y>karambitGripSections[i][0])i++;
-  const [a,l,r]=karambitGripSections[i-1],[b,L,R]=karambitGripSections[i],t=Math.max(0,Math.min(1,(y-a)/(b-a)));
-  return [mix(l,L,t),mix(r,R,t)];
+// The side profile is authored on a common artboard. Its origin at the finger
+// ring also anchors the first-person spin, equipment cards and software view.
+const artScale=.00068;
+function profilePoint(u,v){
+  return [KARAMBIT_RING[0]+(95-v)*artScale,KARAMBIT_RING[1]+(626-u)*artScale];
 }
+// Opposing contours advance together to give the silver face an uninterrupted sweep.
+export const karambitBladeSections=[
+  [219,50,290,166,.010,.12,.48],[202,58,275,166,.010,.14,.48],
+  [178,71,250,168,.010,.23,.47],[154,85,221,175,.0098,.27,.45],
+  [130,103,194,186,.0093,.23,.42],[105,124,165,200,.0086,.21,.40],
+  [82,146,137,217,.0078,.19,.37],[61,170,110,235,.0069,.16,.34],
+  [43,198,87,257,.0058,.14,.31],[28,226,66,281,.0048,.11,.29],
+  [16,257,49,304,.0039,.09,.27],[8,288,35,328,.0031,.08,.25],
+  [4,319,23,353,.0022,.07,.24],[3,348,15,376,.0014,.07,.22],
+  [5,373,11,391,.0007,.07,.22],[9,398,9,398,0,.07,.22]
+].map(([u,v,U,V,h,spine,ridge])=>[...profilePoint(u,v),...profilePoint(U,V),h,spine,ridge]);
+
+// Across each row the lower contour makes the guard and three finger scallops;
+// the upper contour holds the thumb notches and the uninterrupted back pad.
+const gripRows=[
+  [194,96,102],[199,89,107],[205,80,109],[210,72,109],[212,48,110],
+  [220,45,111],[235,44,116],[242,44,120],[246,48,123],[250,43,126],
+  [254,47,130],[258,43,135],[262,46,139],[266,41,144],[270,45,149],
+  [274,40,157],[278,43,170],[282,38,175],[286,41,176],[290,37,176],
+  [294,39,176],[298,35,176],[302,37,175],[305,33,154],[309,35,137],
+  [313,30,126],[317,32,118],[322,27,111],[326,29,106],[330,24,104],
+  [335,25,101],[340,19,99],[345,21,97],[350,15,96],[362,13,96],
+  [376,11,99],[388,9,105],[398,8,113],[404,8,106],[416,6,99],
+  [429,5,95],[443,4,93],[456,4,95],[470,3,100],[481,3,109],
+  [486,3,113],[493,3,106],[505,3,100],[518,3,97],[526,3,97],
+  [530,9,98],[535,11,99],[540,8,101],[543,4,102],[547,6,104],
+  [550,11,106],[556,13,111],[561,10,117],[564,6,99],[568,7,81],
+  [572,13,72],[578,16,64],[583,12,58],[585,8,55],[589,13,52],
+  [595,18,46],[600,17,43],[605,12,40],[609,13,39],[613,20,37],
+  [618,22,35],[624,18,34],[626,16,33],[635,19,31],[643,21,31],[644,28,30]
+];
+export const karambitGripSections=gripRows.map(([u,top,bottom])=>{
+  const [left,y]=profilePoint(u,bottom);
+  return [y,left,profilePoint(u,top)[0]];
+}).reverse();
+
+const loopOutline=[
+  [626,31],[652,31],[673,54],[697,78],[721,94],[701,106],[691,114],
+  [682,128],[673,141],[659,151],[642,157],[626,159],[608,157],
+  [591,151],[577,140],[568,126],[562,111],[561,94],[563,76],
+  [571,61],[582,47],[596,38],[611,33]
+].map(([u,v])=>[(95-v)*artScale,(626-u)*artScale]);
+export function karambitRingRadii(angle){
+  const dx=Math.cos(angle),dy=Math.sin(angle);
+  for(let i=0;i<loopOutline.length;i++){
+    const [x,y]=loopOutline[i],[X,Y]=loopOutline[(i+1)%loopOutline.length];
+    const den=dx*(Y-y)-dy*(X-x);
+    if(Math.abs(den)<1e-10)continue;
+    const t=(x*(Y-y)-y*(X-x))/den,k=(x*dy-y*dx)/den;
+    if(t>0&&k>=-1e-8&&k<=1.00000001)return [t,.034];
+  }
+  throw Error('Open karambit ring outline');
+}
+
 function karambit(){
   const blade=part('blade','steel'),grip=part('grip','grip'),metal=part('fittings','hardware');
   groundBlade(blade,karambitBladeSections,[
-    [0xa9c1c8,0x9aaeb5],[0x4c636d,0x829397],[0x899da3,0xb5c4c6],
-    [0xbccacb,0xdce3e2],[0xe4ebe4,0xf6f6ea]
+    [0x757c84,0x939a9f],[0x949fa6,0xb8bfc4],[0xdfe4e6,0xe1e5e6],
+    [0xc5cbce,0xe1e3e3],[0x969ea2,0xeef1f2]
   ]);
-  const tang=karambitGripSections.map(([y,l])=>[l-.0015,y]).concat(karambitGripSections.slice().reverse().map(([y,,r])=>[r+.0015,y]));
-  plate(metal,tang,0,.014,.0018,0x424d55,0x91a1a7);
-  // A continuous crown gives the rubber scales a convex surface and the open
-  // grooves a shadow that moves as the player rolls the hand.
-  const widths=[0,.060,.18,.41,.64,.83,.95,1],heights=[.0100,.0150,.0198,.0235,.0227,.0200,.015,.010];
-  const shell=(y,f,sign,lift=0)=>{
-    const [l,r]=gripWidth(y);
-    let j=1;while(j<widths.length-1&&f>widths[j])j++;
-    return [mix(l+.002,r-.002,f),y,sign*(mix(heights[j-1],heights[j],(f-widths[j-1])/(widths[j]-widths[j-1]))+lift)];
-  };
-  const shades=[0x202c30,0x283538,0x334346,0x38494a,0x304042,0x293539,0x222c31];
-  for(const side of [-1,1]){
-    function patch(a,b,c,d,ink){if(side===1)quad(grip,a,b,c,d,ink);else quad(grip,d,c,b,a,ink);}
-    for(let i=1;i<karambitGripSections.length;i++){
-      const y=karambitGripSections[i-1][0],Y=karambitGripSections[i][0];
-      for(let j=1;j<widths.length;j++){
-        const l=widths[j-1],r=widths[j];
-        patch(shell(y,l,side),shell(y,r,side),shell(Y,r,side),shell(Y,l,side),shades[j-1]);
-      }
-    }
-    // Interrupted ribs follow the palm. Each rib has a lit shoulder and a shadow line.
-    for(let row=0;row<5;row++){
-      const y=-.141+row*.027;
-      for(const [a,b,c,d] of [[.16,.44,.002,.013],[.44,.67,.013,.020],[.67,.84,.020,.018]]){
-        const p=shell(y+c,a,side,.0006),q=shell(y+d,b,side,.0006);
-        const r=shell(y+d+.003,b,side,.002),s=shell(y+c+.003,a,side,.002);
-        patch(p,q,r,s,0x5e7373);
-        patch(s,r,shell(y+d+.008,b,side,.0006),shell(y+c+.008,a,side,.0006),0x202c30);
-      }
-    }
-    // An angled metal collar marks the join at the blade shoulder.
-    for(let j=1;j<widths.length;j++){
-      const a=widths[j-1],b=widths[j];
-      const collar=(f,d)=>shell(.008+.016*f+d,f,side,.001);
-      const p=collar(a,0),q=collar(b,0),s=collar(a,.012),r=collar(b,.012);
-      const u=collar(a,.0025),v=collar(b,.0025);
-      if(side>0){quad(metal,u,v,r,s,0x627b7b);quad(metal,p,q,v,u,0xb0d7ce);}
-      else{quad(metal,s,r,v,u,0x627b7b);quad(metal,u,v,q,p,0xb0d7ce);}
-    }
-    pivotDisc(metal,.023,-.153,side*.0238,.0065);
-    pivotDisc(metal,-.010,.025,side*.0250,.006);
+  const outline=karambitGripSections.map(([y,l])=>[l,y])
+    .concat(karambitGripSections.slice().reverse().map(([y,,r])=>[r,y]));
+  plate(grip,outline,0,.012,.0005,0x222324,0x2c2d2e);
+  const fractions=[0,.05,.17,.35,.55,.76,.91,1];
+  const heights=[.012,.017,.022,.025,.026,.023,.019,.012];
+  const shades=[0x232425,0x2d2f30,0x393b3c,0x323435,0x292b2c,0x2b2d2e,0x222324];
+  // Each sculpted pad rolls towards its own finger hollow. The stippled insert
+  // and diagonally ribbed guard sit just proud of this continuous black shell.
+  function level(u){
+    let i=1;while(i<gripRows.length-1&&u>gripRows[i][0])i++;
+    const [a,t,b]=gripRows[i-1],[A,T,B]=gripRows[i],f=Math.min(1,Math.max(0,(u-a)/(A-a)));
+    return [mix(t,T,f),mix(b,B,f)];
   }
-  ring(metal,...KARAMBIT_RING,.049,.0345,.0137,0x56666a,0x38474a,0xbacccc,48);
+  function skin(u,v,side,lift=0){
+    const [top,bottom]=level(u),f=Math.min(1,Math.max(0,(bottom-v)/(bottom-top)));
+    let j=1;while(j<fractions.length-1&&f>fractions[j])j++;
+    const h=mix(heights[j-1],heights[j],(f-fractions[j-1])/(fractions[j]-fractions[j-1]));
+    const pad=1-Math.min(1,Math.abs(u-353)/50,Math.abs(u-443)/45,Math.abs(u-525)/41);
+    return [...profilePoint(u,v),side*(h+.006*pad*Math.sin(f*Math.PI)+lift)];
+  }
+  for(const side of [-1,1]){
+    function band(a,b,c,d,ink){
+      if(side*cross(a,b,c)>0)quad(grip,a,b,c,d,ink);else quad(grip,d,c,b,a,ink);
+    }
+    for(let i=1;i<gripRows.length;i++){
+      const [u,t,b]=gripRows[i-1],[U,T,B]=gripRows[i];
+      for(let j=1;j<fractions.length;j++){
+        const l=fractions[j-1],r=fractions[j];
+        band(skin(u,mix(b,t,l),side),skin(U,mix(B,T,l),side),
+          skin(U,mix(B,T,r),side),skin(u,mix(b,t,r),side),shades[j-1]);
+      }
+    }
+    // Pinched diagonal ribs on the triangular black guard panel.
+    for(let i=0;i<17;i++){
+      const a=i/17,b=(i+1)/17;
+      const left=t=>[232+47*t,61+73*t],right=t=>[330-34*t,51+81*t];
+      const p=t=>skin(...left(t),side,.0010),q=t=>skin(...right(t),side,.0010);
+      const m=t=>skin(...left(t),side,.0018),n=t=>skin(...right(t),side,.0018);
+      band(p(a),q(a),n(a+(b-a)*.36),m(a+(b-a)*.36),0x434647);
+      band(m(a+(b-a)*.36),n(a+(b-a)*.36),q(b),p(b),0x252627);
+    }
+    const insert=[[338,49,54],[345,31,49],[356,28,43],[370,25,41],
+      [383,24,46],[397,22,61],[403,22,61],[414,21,47],[428,20,37],
+      [444,19,33],[459,18,33],[476,18,39],[492,18,54],[498,18,51],
+      [511,18,39],[525,18,31],[533,22,25]];
+    for(let i=1;i<insert.length;i++){
+      const [u,t,b]=insert[i-1],[U,T,B]=insert[i];
+      const n=Math.ceil((U-u)/4);
+      for(let k=0;k<n;k++)for(let j=0;j<5;j++){
+        const at=(s,v,z)=>skin(mix(u,U,s),mix(mix(t,T,s),mix(b,B,s),v),side,z);
+        const l=k/n,r=(k+1)/n,top=j/5,bot=(j+1)/5;
+        const a=at(l,top,.0011),bb=at(r,top,.0011),c=at(r,bot,.0011),d=at(l,bot,.0011);
+        const center=at((l+r)/2,(top+bot)/2,.0016);
+        const facet=(p,q,ink)=>side<0?tri(grip,p,q,center,ink):tri(grip,q,p,center,ink);
+        facet(a,bb,0x303233);facet(bb,c,0x262829);facet(c,d,0x202122);facet(d,a,0x292b2c);
+      }
+    }
+  }
+  silverRing(metal);
   return [blade,grip,metal];
 }
 // Shape the two cast frames with different shoulders while keeping a continuous

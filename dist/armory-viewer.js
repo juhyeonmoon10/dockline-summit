@@ -96,6 +96,8 @@ function makeStage(host,preferLite,onZoom){
   const scene=new T.Scene(),orbit=new T.Group(),mount=new T.Group(),normalised=new T.Group();
   const camera=new T.OrthographicCamera(-1,1,1,-1,.01,20);camera.position.z=4;
   scene.add(orbit);orbit.add(mount);mount.add(normalised);stageLights(scene);
+  const silverFill=new T.DirectionalLight(0xf7fbff,1.45);
+  silverFill.position.set(.9,-.6,4);scene.add(silverFill);
   const bounds=new T.Box3(),center=new T.Vector3(),size=new T.Vector3(),point=new T.Vector3();
   const restPosition=new T.Vector3(),ringCenter=new T.Vector3(...KARAMBIT_RING);
   // A sparse convex envelope follows crooked blades as well as long barrels.
@@ -188,6 +190,7 @@ function makeStage(host,preferLite,onZoom){
   function select(value){
     if(model)normalised.remove(model);
     id=value;model=isKnife(id)?knifeMesh(id):blasterMesh(id);
+    silverFill.visible=id==='karambit';
     // Measure in the fresh instance's original frame, before it joins the hierarchy.
     model.updateMatrixWorld(true);
     bounds.setFromObject(model,true);bounds.getCenter(center);bounds.getSize(size);
@@ -206,7 +209,9 @@ function makeStage(host,preferLite,onZoom){
     });
     model.position.sub(center);restPosition.copy(model.position);normalised.add(model);normalised.scale.setScalar(1/extent);
     mount.position.set(0,0,0);
-    mount.rotation.set(isKnife(id)?.11:.24,isKnife(id)?-.23:Math.PI/2+.32,isKnife(id)?1.23:-.075,'ZXY');
+    if(id==='karambit')mount.rotation.set(.025,-.055,Math.PI/2,'ZXY');
+    else if(isKnife(id))mount.rotation.set(.11,-.23,1.23,'ZXY');
+    else mount.rotation.set(.24,Math.PI/2+.32,-.075,'ZXY');
     orbit.position.set(0,0,0);orbit.rotation.set(0,0,0);orbit.updateMatrixWorld(true);
     bounds.makeEmpty();
     for(const c of surface)bounds.expandByPoint(point.copy(c).applyMatrix4(mount.matrixWorld));

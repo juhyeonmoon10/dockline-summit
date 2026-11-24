@@ -74,7 +74,9 @@ test('the karambit ring tracks its contact through the spin and cancellation res
     assert.ok(point.distanceTo(attachment)<1e-8);
   }
   assert.ok(body.quaternion.angleTo(closed)<1e-7);
-  assert.ok(Math.abs(ringFlourish(.85).turn+Math.PI*2)<.001);
+  assert.ok(ringFlourish(.545).turn < -Math.PI*2 && ringFlourish(.545).grip>.8);
+  assert.equal(ringFlourish(1.135).turn,-Math.PI*4);
+  assert.equal(ringFlourish(1.135).grip,0);
   const blade=body.getObjectByName('blade'),vertices=blade.geometry.attributes.position;
   let tipIndex=0;
   for(let i=1;i<vertices.count;i++)if(vertices.getX(i)<vertices.getX(tipIndex))tipIndex=i;

@@ -453,9 +453,9 @@ export class ArenaRenderer {
     const claw=this.knifeViews.karambit.getObjectByName('blade');
     claw.material=claw.material.clone();
     claw.material.envMap=this.gunScene.environment;
-    claw.material.envMapIntensity=3.5;
-    claw.material.metalness=.34;claw.material.roughness=.51;
-    claw.material.color.setScalar(1.75);
+    claw.material.envMapIntensity=2.6;
+    claw.material.metalness=.41;claw.material.roughness=.40;
+    claw.material.color.setScalar(1.35);
     this.gunRig=new T.Group();this.gunRig.scale.setScalar(.91);
     Object.values(this.guns).forEach(g=>this.gunRig.add(g));
     this.gunRig.add(this.knifeViews.balisong);this.knifeViews.balisong.visible=false;
