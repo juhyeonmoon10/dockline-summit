@@ -1,4 +1,5 @@
 // The visible gun-local front cap is (muzzleX, muzzleY, muzzle). Forward is -Z.
+export const SHOTGUN_PUMP_TRAVEL=.132;
 export const gunFit={
  rifle:{muzzleX:.0014,muzzleY:.0753,muzzle:-.6164,support:-.335,grip:-.074,sight:.175,flash:.9},
  shotgun:{muzzleX:.0003,muzzleY:.0169,muzzle:-.7374,support:-.565,grip:-.068,sight:.067,flash:1.34},
@@ -12,6 +13,6 @@ export const gunFit={
 };
 // The top edge of each iron front sight is the point the player puts under a target.
 export const ironTips=Object.freeze({
- shotgun:Object.freeze([0,.076,-.727]),
+ shotgun:Object.freeze([.0002,.0742,-.7204]),
  revolver:Object.freeze([0,.0927,-.342])
 });

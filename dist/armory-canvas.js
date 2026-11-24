@@ -8,6 +8,22 @@ for(let i=0;i<=1024;i++){
   gamma[i]=Math.round(255*(x<=.0031308?12.92*x:1.055*Math.pow(x,1/2.4)-.055));
 }
 const channel=x=>gamma[Math.min(1024,Math.max(0,Math.round(x*1024)))];
+const toLinear=Float32Array.from({length:256},(_,i)=>{
+  const x=i/255;return x<=.04045?x/12.92:((x+.055)/1.055)**2.4;
+});
+const studioMaps=new WeakMap();
+function studioAtlas(texture){
+  const image=texture?.image;
+  if(!image?.width||!image.height)return null;
+  if(studioMaps.has(image))return studioMaps.get(image);
+  const scale=Math.min(1,1024/Math.max(image.width,image.height));
+  const tile=document.createElement('canvas');
+  tile.width=Math.max(1,Math.round(image.width*scale));tile.height=Math.max(1,Math.round(image.height*scale));
+  const ctx=tile.getContext('2d',{willReadFrequently:true});
+  ctx.drawImage(image,0,0,tile.width,tile.height);
+  const atlas=ctx.getImageData(0,0,tile.width,tile.height);
+  studioMaps.set(image,atlas);return atlas;
+}
 
 // Straight-alpha RGBA is required here: the same canvas also composites the
 // player's held model over the Lite arena and the catalogue's workbench.
@@ -69,11 +85,11 @@ export function createCanvasPreview(canvas,{studio=false}={}){
   let pixels,depth,packed;
 
   const translucent=[];
-  function triangle(a,b,c,xyz,ink,w,h,writeDepth=true){
+  function triangle(a,b,c,xyz,ink,w,h,writeDepth=true,surface=null){
     const ax=xyz[a],ay=xyz[a+1],az=xyz[a+2],bx=xyz[b],by=xyz[b+1],cx=xyz[c],cy=xyz[c+1];
     if(!Number.isFinite(ax+bx+cx))return;
     const ux=bx-ax,uy=by-ay,vx=cx-ax,vy=cy-ay,area=ux*vy-uy*vx;
-    if(Math.abs(area)<.012)return;
+    if(Math.abs(area)<.012 || (surface&&area>0))return;
     const x0=Math.max(0,Math.ceil(Math.min(ax,bx,cx)-.5)),x1=Math.min(w-1,Math.floor(Math.max(ax,bx,cx)-.5));
     const y0=Math.max(0,Math.ceil(Math.min(ay,by,cy)-.5)),y1=Math.min(h-1,Math.floor(Math.max(ay,by,cy)-.5));
     const sx=vy/area,sy=-vx/area,tx=-uy/area,ty=ux/area;
@@ -92,7 +108,16 @@ export function createCanvasPreview(canvas,{studio=false}={}){
         const z=az+u*dz1+v*dz2;
         if(z<=depth[index])continue;
         if(writeDepth)depth[index]=z;
-        packed[index]=opaque?ink:over(ink,packed[index]);
+        if(surface){
+          const s=surface,atlas=s.atlas;
+          const xTex=Math.min(atlas.width-1,Math.max(0,Math.floor(s.x+u*s.ux+v*s.vx)));
+          const yTex=Math.min(atlas.height-1,Math.max(0,Math.floor(s.y+u*s.uy+v*s.vy)));
+          const texel=(yTex*atlas.width+xTex)*4,t=atlas.data;
+          const r=channel(toLinear[t[texel]]*s.r+s.addR);
+          const g=channel(toLinear[t[texel+1]]*s.g+s.addG);
+          const b=channel(toLinear[t[texel+2]]*s.b+s.addB);
+          packed[index]=(255<<24)|(b<<16)|(g<<8)|r;
+        }else packed[index]=opaque?ink:over(ink,packed[index]);
       }
     }
   }
@@ -106,11 +131,15 @@ export function createCanvasPreview(canvas,{studio=false}={}){
     root.updateMatrixWorld(true);
     root.traverseVisible(mesh=>{
       if(!mesh.isMesh)return;
-      const geo=mesh.userData.previewGeometry??mesh.geometry;
+      // The lightweight vertex-color mesh has no atlas coordinates. Use the
+      // seamed model for textured close-ups in the orthographic armory only.
+      const atlas=studio&&!focal&&!mesh.isSkinnedMesh&&mesh.userData.previewGeometry&&
+        mesh.geometry.attributes.uv ? studioAtlas(mesh.material.map) : null;
+      const geo=atlas?mesh.geometry:mesh.userData.previewGeometry??mesh.geometry;
       const attrs=mesh.isSkinnedMesh?skinForPreview(mesh,geo):geo.attributes;
       const pos=attrs.position,col=geo.attributes.color,nor=attrs.normal;
       let points=projected.get(mesh);
-      if(!points){points=new Float32Array(pos.count*3);projected.set(mesh,points);}
+      if(!points||points.length!==pos.count*3){points=new Float32Array(pos.count*3);projected.set(mesh,points);}
       const m=mesh.matrixWorld.elements;
       for(let i=0,j=0;i<pos.count;i++,j+=3){
         const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i);
@@ -142,7 +171,7 @@ export function createCanvasPreview(canvas,{studio=false}={}){
           const light=material.isMeshBasicMaterial?1:.68+.86*key+.42*rim;
           const shine=material.isMeshBasicMaterial?0:.12*Math.pow(Math.max(0,(-.26*nx+.37*ny+.89*nz)/length),18);
           const r=base.r*(col?col.getX(a):1),g=base.g*(col?col.getY(a):1),blue=base.b*(col?col.getZ(a):1);
-          let redOut=r*light+shine,greenOut=g*light+shine,blueOut=blue*light+shine;
+          let redLight=light,greenLight=light,blueLight=light,addR=shine,addG=shine,addB=shine;
           if(studioLit){
             // Different panel reflections on rough polymer and bright blade bevels.
             const x=nx/length,y=ny/length,z=nz/length;
@@ -151,10 +180,20 @@ export function createCanvasPreview(canvas,{studio=false}={}){
               Math.max(0,1-Math.abs(rx+.15)/1.22)*Math.max(.12,rz);
             const reflect=(.025+.38*metal)*(1.05-roughness*.66)*strip;
             const fill=.49+.16*(1+y);
-            redOut=r*(fill+1.02*key+.28*rim)+.80*reflect+shine*.53;
-            greenOut=g*(fill+.89*key+.42*rim)+.93*reflect+shine*.56;
-            blueOut=blue*(fill+.76*key+.64*rim)+reflect+shine*.67;
+            redLight=fill+1.02*key+.28*rim;greenLight=fill+.89*key+.42*rim;blueLight=fill+.76*key+.64*rim;
+            addR=.80*reflect+shine*.53;addG=.93*reflect+shine*.56;addB=reflect+shine*.67;
           }
+          if(atlas&&alpha===255){
+            const uv=geo.attributes.uv,x=uv.getX(a)*atlas.width;
+            const vScale=material.map.flipY?-atlas.height:atlas.height;
+            const va=uv.getY(a),y=(material.map.flipY?1-va:va)*atlas.height;
+            triangle(a*3,b*3,c*3,points,-1,w,h,true,{atlas,x,y,
+              ux:uv.getX(b)*atlas.width-x,vx:uv.getX(c)*atlas.width-x,
+              uy:(uv.getY(b)-va)*vScale,vy:(uv.getY(c)-va)*vScale,
+              r:redLight*base.r,g:greenLight*base.g,b:blueLight*base.b,addR,addG,addB});
+            continue;
+          }
+          const redOut=r*redLight+addR,greenOut=g*greenLight+addG,blueOut=blue*blueLight+addB;
           const ink=(alpha<<24)|(channel(blueOut)<<16)|(channel(greenOut)<<8)|channel(redOut);
           if(alpha===255)triangle(a*3,b*3,c*3,points,ink,w,h);
           else{

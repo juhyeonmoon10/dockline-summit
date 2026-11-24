@@ -1,6 +1,7 @@
 import * as T from './assets/three.module.min.js';
 import {PRIMARY_WEAPONS,SECONDARY_WEAPONS,isSecondaryWeapon,WEAPONS} from './balance.js';
 import {blasterMesh} from './blaster.js';
+import {scatterTextureReady} from './scatter-model.js';
 import {knifeMesh,animateKnife} from './knife.js';
 import {KARAMBIT_RING,KNIFE_LABELS,KNIFE_TIMING} from './knife-types.js';
 import {ringFlourish} from './view-inspect.js';
@@ -190,6 +191,7 @@ function makeStage(host,preferLite,onZoom){
   function select(value){
     if(model)normalised.remove(model);
     id=value;model=isKnife(id)?knifeMesh(id):blasterMesh(id);
+    if(id==='shotgun')scatterTextureReady.then(()=>{if(!disposed&&id==='shotgun')request();});
     silverFill.visible=id==='karambit';
     // Measure in the fresh instance's original frame, before it joins the hierarchy.
     model.updateMatrixWorld(true);

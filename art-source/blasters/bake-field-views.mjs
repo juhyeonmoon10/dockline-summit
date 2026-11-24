@@ -7,6 +7,7 @@ export async function bakeFieldViews(kind,options={}){
     moduleAt('/render.js'),moduleAt('/blaster.js'),moduleAt('/sim.js'),moduleAt('/arena-map.js'),moduleAt('/assets/three.module.min.js'),moduleAt('/weapon-view.js'),moduleAt('/optic-fit.js'),
   ]);
   if(!Object.hasOwn(gunFit,kind))throw Error('Unknown field weapon '+kind);
+  if(kind==='shotgun')await (await moduleAt('/scatter-model.js')).scatterTextureReady;
   const canvas=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c;};
   const viewCanvas=canvas(640,360);viewCanvas.style.cssText='width:640px;height:360px;display:block';
   document.body.replaceChildren(viewCanvas);

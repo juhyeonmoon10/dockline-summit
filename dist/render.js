@@ -1,6 +1,6 @@
 import * as T from './assets/three.module.min.js';
 import { blasterMesh, gunFit, sniperContacts } from './blaster.js';
-import {ironTips} from './gun-fit.js';
+import {ironTips,SHOTGUN_PUMP_TRAVEL} from './gun-fit.js';
 import { reflexEngaged } from './optic-fit.js';
 import { makeReflexDot,projectReflexDot,seatReflex } from './red-dot.js';
 import { PRIMARY_WEAPONS,SECONDARY_WEAPONS,isSecondaryWeapon } from './balance.js';
@@ -47,7 +47,7 @@ export function shoulderIron(rig,key,aim){
   // visual lift at the front sight and a sliver of daylight over the blade.
   const weight=.90*aim**3;
   ironPoint.fromArray(tip).multiply(rig.scale).applyQuaternion(rig.quaternion).add(rig.position);
-  rig.position.x-=weight*ironPoint.x;
+  rig.position.x-=(key==='shotgun'?aim**3:weight)*ironPoint.x;
   rig.position.y-=weight*(ironPoint.y+.00055);
 }
 const magazineHandling={
@@ -266,7 +266,7 @@ export function animateHands(gun,player,reload,cycle) {
   }
   if(pump){
     // The front hand stays on the sliding grip until it reaches for a loose shell.
-    pump.position.z=.132*cycle.stroke;
+    pump.position.z=SHOTGUN_PUMP_TRAVEL*cycle.stroke;
     const time=player.reloadDuration ? 1-player.reload/player.reloadDuration : 1;
     support.position.set(-.053*reach-.060*pull, -.032*reach-.121*pull,
       (.32*reach+.058*pull)+pump.position.z*(1-reach));
@@ -787,13 +787,15 @@ export class ArenaRenderer {
         a.x=snap?p.x:damp(a.x,p.x,30,dt);a.z=snap?p.z:damp(a.z,p.z,30,dt);
         a.y=snap?p.y:damp(a.y,p.y,28,dt);a.group.position.set(a.x,a.y,a.z);
         a.group.rotation.y=-p.yaw;a.group.scale.y=damp(a.group.scale.y,!a.rig&&p.slide>0?.67:1,18,dt);
-        let cylinderCycle;
-        if(p.active==='revolver'){
-          const fired=this.shotsThisFrame.some(({event})=>event.actor===p.id&&event.weapon==='revolver');
-          a.revolverAge=fired?0:(a.revolverAge??Infinity)+dt;
-          cylinderCycle=shotCycle('revolver',a.revolverAge);
-        }else a.revolverAge=Infinity;
-        if(a.rig)updateOperator(a.rig,p,dt,this.meleeSwings.get(p.id),cylinderCycle);
+        let actionCycle;
+        if(p.active==='revolver'||p.active==='shotgun'){
+          const fired=this.shotsThisFrame.some(({event})=>event.actor===p.id&&event.weapon===p.active);
+          const previous=!snap&&a.cyclingWeapon===p.active?a.actionAge:Infinity;
+          a.actionAge=fired?0:previous+dt;
+          actionCycle=shotCycle(p.active,a.actionAge);
+        }
+        a.cyclingWeapon=p.active;
+        if(a.rig)updateOperator(a.rig,p,dt,this.meleeSwings.get(p.id),actionCycle);
         else {
         const knifeSkin=normalizeKnifeSkin(p.knifeSkin);
         if(a.active!==p.active||(p.active==='knife'&&a.knifeSkin!==knifeSkin)){
@@ -807,7 +809,7 @@ export class ArenaRenderer {
         a.loadout.position.set(.127,p.active==='knife'?1.11:1.166,-.277);
         a.loadout.rotation.y=p.active==='knife'?-.3+cut.ry:0;
         a.loadout.rotation.z=p.active==='knife'?.4+cut.rz:0;
-        if(a.revolver)poseRevolver(a.revolver,p,cylinderCycle);
+        if(a.revolver)poseRevolver(a.revolver,p,actionCycle);
         if(p.active==='knife'){
           a.loadout.rotation.x+=cut.rx-.18;
           animateCarriedKnife(a.loadout.children[0],knifeSkin,slash?Infinity:a.drawAge,0);a.drawAge+=dt;
@@ -817,6 +819,11 @@ export class ArenaRenderer {
         a.legs[0].rotation.x=step;a.legs[1].rotation.x=-step;
         a.torso.position.y=.016*Math.abs(step);
         a.torso.rotation.z=step*.043+cut.rz*.07;
+        }
+        if(p.active==='shotgun'){
+          const held=a.rig?.loadouts.shotgun??a.loadout.children[0];
+          if(a.pumpModel!==held){a.pumpModel=held;a.pump=held.getObjectByName('pump');}
+          a.pump.position.z=SHOTGUN_PUMP_TRAVEL*actionCycle.stroke;
         }
         let floor=0;
         for(const b of this.map.boxes)if(b.h<=a.y+.09 && Math.abs(a.x-b.x)<=b.w*.5 && Math.abs(a.z-b.z)<=b.d*.5)floor=Math.max(floor,b.h);

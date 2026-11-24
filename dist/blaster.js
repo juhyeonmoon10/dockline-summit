@@ -5,6 +5,7 @@ import { blasters } from './assets/blaster-geometry.js';
 import { Parts } from './arena-parts.js';
 import { redDotMount } from './red-dot.js';
 import { makeRevolver } from './revolver.js';
+import {scatterModel} from './scatter-model.js';
 export { gunFit } from './gun-fit.js';
 
 const cache=new Map();
@@ -144,26 +145,6 @@ function propMesh(parts,name,slot=0){
  mesh.name=name;breakerUV(mesh.geometry);return mesh;
 }
 
-// Keep the original pump's faces on the animated mesh only. Both parts keep the
-// authored local coordinates so cloning, hand placement and the resting pose agree.
-function takeFaces(geo,select){
- const kept=[],taken=[],idx=geo.index.array;
- for(let i=0;i<idx.length;i+=3){
-  const target=select(idx[i])?taken:kept;target.push(idx[i],idx[i+1],idx[i+2]);
- }
- const part=new T.BufferGeometry();
- const remap=new Map(),vertices=[];
- for(const old of taken)if(!remap.has(old)){remap.set(old,vertices.length);vertices.push(old);}
- for(const [name,attribute] of Object.entries(geo.attributes)){
-  const array=new attribute.array.constructor(vertices.length*attribute.itemSize);
-  for(const [next,old] of vertices.entries()){
-   const start=old*attribute.itemSize;
-   array.set(attribute.array.subarray(start,start+attribute.itemSize),next*attribute.itemSize);
-  }
-  part.setAttribute(name,new T.BufferAttribute(array,attribute.itemSize));
- }
- part.setIndex(taken.map(i=>remap.get(i)));geo.setIndex(kept);return part;
-}
 
 function propSurface(geo,kind,isMagazine){
  const {color,normal,position}=geo.attributes,style=finishes[kind],tone=new T.Color();
@@ -251,28 +232,7 @@ function sniperEyepiece(){
 
 function serviceDetails(model,kind){
  const p=finishes[kind],parts=new Parts();
- if(kind==='shotgun'){
-  const slide=new Parts();
-  for(const side of [-1,1]){
-   slide.beam([side*.029,-.042,-.678],[side*.029,-.042,-.546],.007,.009,p.coat);
-   for(let i=0;i<5;i++)slide.beam([side*.031,-.054,-.653+i*.021],[side*.031,-.042,-.660+i*.021],.004,.004,p.edge);
-   parts.beam([side*.036,-.021,-.369],[side*.036,-.021,-.130],.0023,.004,ink);
-   parts.beam([side*.036,-.017,-.337],[side*.036,-.017,-.249],.0025,.0017,p.edge);
-   for(const z of [-.345,-.141])parts.six(side*.0365,-.041,z,.010,.0035,.010,p.steel,0,0,halfTurn);
-  }
-  const pump=model.getObjectByName('pump');
-  pump.add(propMesh(slide,'molded-grips',2));
-  breakerShell(parts,[[.013,.020,-.058,-.035],[.058,.028,-.045,-.005],[.111,.031,-.041,.025],[.148,.029,-.040,.025]],p.coat,p.edge);
-  for(const side of [-1,1]){
-   for(let i=0;i<4;i++)parts.beam([side*.030,-.033,.092+i*.011],[side*.030,-.017,.100+i*.011],.0028,.0038,p.edge);
-  }
-  for(let i=0;i<3;i++)parts.cube(0,.044,-.321+i*.027,.036,.002,.004,ink);
-  parts.cube(-.018,.044,-.198,.007,.002,.012,p.mark);
-  const bead=new Parts();
-  bead.tube(0,.068,-.727,.007,.009,.007,'#68635b');
-  bead.piece(new T.SphereGeometry(.5,12,8),0,.072,-.727,.009,.008,.010,'#d2ab69');
-  model.add(propMesh(bead,'front-bead',1));
- }else if(kind==='sniper'){
+ if(kind==='sniper'){
   // One molded spine runs through both hand contacts and narrows into the raised comb.
   const furniture=new Parts();
   breakerShell(furniture,[[-.565,.018,.015,.055],[-.535,.024,-.008,.062],[-.468,.034,-.046,.064],
@@ -481,6 +441,7 @@ function arcadeDetails(kind,model){
 }
 
 export function blasterMesh(kind='rifle'){
+ if(kind==='shotgun')return scatterModel();
  if(kind==='revolver'){
   if(!cache.has(kind))cache.set(kind,makeRevolver());
   return cache.get(kind).clone();
@@ -494,16 +455,7 @@ export function blasterMesh(kind='rifle'){
   for(const [name,source] of Object.entries(sourceParts)){
    if(base&&(name==='scope'||(name==='magazine'&&kind==='lmg')))continue;
    const geo=geometry(source);
-   if(kind==='shotgun'&&name==='body'){
-    // The source assigns one grey swatch exclusively to the corrugated front grip.
-    const pumpColor=new T.Color('#5f5f5f').r;
-    const moving=takeFaces(geo,i=>Math.abs(geo.attributes.color.getX(i)-pumpColor)<.00001);
-    propSurface(geo,kind,false);
-    const tint=new T.Color(finishes.shotgun.coat),colors=moving.attributes.color;
-    for(let i=0;i<colors.count;i++)colors.setXYZ(i,tint.r,tint.g,tint.b);
-    moving.setAttribute('color',colors);breakerUV(moving);
-    const pump=new T.Mesh(moving,breakerPaint()[2]);pump.name='pump';model.add(pump);
-   }else if(kind==='rifle'){
+   if(kind==='rifle'){
     // Fold the raised backup ears flush with the Breaker's top rail.
     if(name==='body'){
      const pos=geo.attributes.position;
