@@ -8,6 +8,10 @@ export async function bakeFieldViews(kind,options={}){
   ]);
   if(!Object.hasOwn(gunFit,kind))throw Error('Unknown field weapon '+kind);
   if(kind==='shotgun')await (await moduleAt('/scatter-model.js')).scatterTextureReady;
+  else{
+    const {loadArmoryAsset}=await moduleAt('/armory-asset.js');
+    if(!await loadArmoryAsset(kind))throw Error('Missing finished armory model for '+kind);
+  }
   const canvas=(w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;return c;};
   const viewCanvas=canvas(640,360);viewCanvas.style.cssText='width:640px;height:360px;display:block';
   document.body.replaceChildren(viewCanvas);

@@ -1,6 +1,6 @@
 import * as T from './assets/three.module.min.js';
 import {PRIMARY_WEAPONS,SECONDARY_WEAPONS,isSecondaryWeapon,WEAPONS} from './balance.js';
-import {blasterMesh} from './blaster.js';
+import {blasterMesh,loadGunAppearance} from './blaster.js';
 import {scatterTextureReady} from './scatter-model.js';
 import {knifeMesh,animateKnife} from './knife.js';
 import {KARAMBIT_RING,KNIFE_LABELS,KNIFE_TIMING} from './knife-types.js';
@@ -188,12 +188,9 @@ function makeStage(host,preferLite,onZoom){
     panX=bound(px+(panX-px)*ratio,-.9,.9);panY=bound(py+(panY-py)*ratio,-.9,.9);
     zoom=newZoom;onZoom(zoom,rotating);request();
   }
-  function select(value){
-    if(model)normalised.remove(model);
-    id=value;model=isKnife(id)?knifeMesh(id):blasterMesh(id);
-    if(id==='shotgun')scatterTextureReady.then(()=>{if(!disposed&&id==='shotgun')request();});
-    silverFill.visible=id==='karambit';
-    // Measure in the fresh instance's original frame, before it joins the hierarchy.
+  function frameModel(){
+    normalised.remove(model);model.position.set(0,0,0);model.rotation.set(0,0,0);
+    if(isKnife(id))animateKnife(model,id);
     model.updateMatrixWorld(true);
     bounds.setFromObject(model,true);bounds.getCenter(center);bounds.getSize(size);
     const extent=Math.max(size.x,size.y,size.z,.01);
@@ -219,6 +216,20 @@ function makeStage(host,preferLite,onZoom){
     for(const c of surface)bounds.expandByPoint(point.copy(c).applyMatrix4(mount.matrixWorld));
     bounds.getSize(size);initialWidth=size.x;initialHeight=size.y;
     bounds.getCenter(center);mount.position.set(-center.x,-center.y,0);
+  }
+  function select(value){
+    if(model)normalised.remove(model);
+    id=value;model=isKnife(id)?knifeMesh(id):blasterMesh(id);
+    silverFill.visible=id==='karambit';
+    const current=model;
+    const ready=id==='shotgun'?scatterTextureReady:isKnife(id)?model.userData.armoryReady:loadGunAppearance(model);
+    const pendingFit=id!=='shotgun'&&!model.userData.armoryImported;
+    ready?.then(()=>{
+      if(disposed||current!==model)return;
+      if(pendingFit&&current.userData.armoryImported)frameModel();
+      request();
+    });
+    frameModel();
     reset();
   }
   function pan(dx,dy){panX=bound(panX+dx/host.clientWidth,-.9,.9);panY=bound(panY-dy/host.clientHeight,-.9,.9);}

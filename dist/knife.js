@@ -2,8 +2,10 @@ import * as T from './assets/three.module.min.js';
 import { knifeParts,knifeAngles,knifePartPose } from './knife-art.js';
 import { KNIFE_TIMING,KARAMBIT_RING } from './knife-types.js';
 import { knifeDrawPose } from './knife-motion.js';
+import { loadArmoryAsset } from './armory-asset.js';
 
 const templates=new Map();
+let balisongJoint;
 // Independent colour, roughness and normal fields keep the steel satin, the
 // cast hardware duller and the inset clear-coated when a reflection rolls past.
 const materials=new Map();
@@ -109,6 +111,20 @@ function buildMesh(part){
   const mesh=new T.Mesh(geom,material);mesh.name=part.name;
   mesh.position.fromArray(part.pivot);return mesh;
 }
+function innerBalisongJoint(){
+  if(!balisongJoint){
+    const source=knifeParts('balisong').find(part=>part.name==='blade'),points=[];
+    for(let i=0;i<source.positions.length;i+=9){
+      const tri=source.positions.subarray(i,i+9);
+      if(Math.max(tri[1],tri[4],tri[7])<.04)points.push(...tri);
+    }
+    const geometry=new T.BufferGeometry();
+    geometry.setAttribute('position',new T.Float32BufferAttribute(points,3));geometry.computeVertexNormals();
+    balisongJoint=new T.Mesh(geometry,new T.MeshStandardMaterial({color:0x768288,metalness:.62,roughness:.52,side:T.DoubleSide}));
+    balisongJoint.name='inner-joint';
+  }
+  return balisongJoint.clone();
+}
 // Geometry and material can be shared. Each clone owns its moving hinges.
 export function knifeMesh(skin='karambit'){
   skin=skin==='balisong'?'balisong':'karambit';
@@ -117,7 +133,19 @@ export function knifeMesh(skin='karambit'){
     for(const part of knifeParts(skin))group.add(buildMesh(part));
     templates.set(skin,group);
   }
-  return templates.get(skin).clone();
+  const model=templates.get(skin).clone();
+  model.userData.armoryReady=loadArmoryAsset(skin).then(parts=>{
+    if(!parts||!model.children.every(node=>parts[node.name]))return false;
+    for(const node of model.children){
+      const part=parts[node.name];
+      node.geometry=part.geometry;node.material=part.material;
+      node.userData.previewGeometry=part.userData.previewGeometry;
+    }
+    if(skin==='balisong')model.getObjectByName('blade').add(innerBalisongJoint());
+    model.userData.armoryImported=true;
+    return true;
+  });
+  return model;
 }
 export function animateKnife(mesh,skin,drawAge=Infinity,inspectAge=Infinity){
   if(skin!=='balisong')return;

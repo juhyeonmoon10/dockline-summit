@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as T from '../dist/assets/three.module.min.js';
 import { gunModel, animateHands } from '../dist/render.js';
-import { sniperContacts } from '../dist/blaster.js';
+import {loadGunAppearance,sniperContacts} from '../dist/blaster.js';
 import { WEAPONS } from '../dist/balance.js';
 import { reloadPose, shotCycle } from '../dist/weapon-view.js';
 
@@ -34,13 +34,16 @@ function surfaceDistance(group,anchor){
   return closest;
 }
 
-test('the Lookout fore-end and rear grip meet the actual glove surfaces at rest',()=>{
+test('the Lookout fore-end and rear grip meet the actual glove surfaces before and after the model loads',async()=>{
   const {body,support,strong}=gunModel('sniper').userData;
-  for(const [hand,point] of [[support,front],[strong,rear]]){
+  for(const ready of [false,true]){
+   if(ready)await loadGunAppearance(body);
+   for(const [hand,point] of [[support,front],[strong,rear]]){
     assert.ok(samePoint(hand.position,point));
     const bodyGap=surfaceDistance(body,point),handGap=surfaceDistance(hand,point);
     assert.ok(bodyGap<.004,'body surface gap '+bodyGap);
     assert.ok(handGap<.013,'glove surface gap '+handGap);
+   }
   }
 });
 

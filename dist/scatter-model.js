@@ -1,5 +1,6 @@
 import * as T from './assets/three.module.min.js';
 import {assetUrl} from './asset-url.js';
+import {decodeArmoryGeometry} from './armory-asset.js';
 import {shotgunData} from './assets/dockline-shotgun-data.js';
 
 const finish=new T.MeshStandardMaterial({roughness:.80,metalness:.12,vertexColors:true});
@@ -22,21 +23,10 @@ export const scatterTextureReady=typeof document==='undefined'?Promise.resolve()
   finish.needsUpdate=true;
 });
 
-const bytes=s=>Uint8Array.from(atob(s),c=>c.charCodeAt(0));
-const linear=Float32Array.from({length:256},(_,i)=>{
-  const c=i/255;return c<=.04045?c/12.92:((c+.055)/1.055)**2.4;
-});
 const geometry=new Map();
 function unpack(source){
-  if(geometry.has(source))return geometry.get(source);
-  const geo=new T.BufferGeometry();
-  const positions=new Int16Array(bytes(source.positions).buffer);
-  geo.setAttribute('position',new T.Float32BufferAttribute(Float32Array.from(positions,n=>n*.0001),3));
-  geo.setAttribute('normal',new T.Int8BufferAttribute(new Int8Array(bytes(source.normals).buffer),3,true));
-  geo.setAttribute('color',new T.Float32BufferAttribute(Float32Array.from(bytes(source.colors),n=>linear[n]),3));
-  if(source.uv)geo.setAttribute('uv',new T.Uint16BufferAttribute(new Uint16Array(bytes(source.uv).buffer),2,true));
-  geo.setIndex(new T.BufferAttribute(new Uint16Array(bytes(source.faces).buffer),1));geo.computeBoundingSphere();
-  geometry.set(source,geo);return geo;
+  if(!geometry.has(source))geometry.set(source,decodeArmoryGeometry(source));
+  return geometry.get(source);
 }
 
 // The game's straight visual shell replaces the curled lip in the generated surface.

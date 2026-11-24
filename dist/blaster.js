@@ -6,9 +6,39 @@ import { Parts } from './arena-parts.js';
 import { redDotMount } from './red-dot.js';
 import { makeRevolver } from './revolver.js';
 import {scatterModel} from './scatter-model.js';
+import {cachedArmoryAsset,copyArmoryPart,loadArmoryAsset} from './armory-asset.js';
 export { gunFit } from './gun-fit.js';
 
 const cache=new Map();
+const retained=new Set(['magazine','bolt','reflex-sight','scope-housing','ocular-glass','cylinder-hinge','hammer','iron-sights']);
+function setGunAppearance(model,parts){
+  if(!parts?.body||model.userData.armoryImported)return false;
+  for(const child of [...model.children])if(!retained.has(child.name))model.remove(child);
+  const exterior=copyArmoryPart(parts.body);exterior.name='tripo-exterior';model.add(exterior);
+  model.userData.armoryImported=true;return true;
+}
+export function loadGunAppearance(model){
+  if(model.name==='shotgun')return Promise.resolve(false);
+  if(!model.userData.armoryReady){
+    model.userData.armoryReady=loadArmoryAsset(model.name).then(parts=>setGunAppearance(model,parts));
+  }
+  return model.userData.armoryReady;
+}
+
+function gunInstance(kind){
+  const model=cache.get(kind).clone(),parts=cachedArmoryAsset(kind);
+  if(parts)setGunAppearance(model,parts);
+  else if(typeof document!=='undefined'){
+    // Every player owns a complete hidden inventory. Request a model when its
+    // original body first appears on screen, including on a remote player's rig.
+    const first=model.children.find(child=>child.isMesh);
+    first.onBeforeRender=function(){
+      this.onBeforeRender=T.Object3D.prototype.onBeforeRender;
+      loadGunAppearance(model);
+    };
+  }
+  return model;
+}
 // Surface contacts in the sniper's authored local frame, with the bolt at rest.
 export const sniperContacts={support:[-.036,-.052,-.400],grip:[.024,-.070,.004],bolt:[.097,.095,-.084]};
 const bytes=str=>Uint8Array.from(atob(str),char=>char.charCodeAt(0));
@@ -444,7 +474,7 @@ export function blasterMesh(kind='rifle'){
  if(kind==='shotgun')return scatterModel();
  if(kind==='revolver'){
   if(!cache.has(kind))cache.set(kind,makeRevolver());
-  return cache.get(kind).clone();
+  return gunInstance(kind);
  }
  if(!guns[kind]&&!arcadeBodies[kind])kind='rifle';
  if(!cache.has(kind)){
@@ -474,5 +504,5 @@ export function blasterMesh(kind='rifle'){
   if(optic)model.add(optic);
   cache.set(kind,model);
  }
- return cache.get(kind).clone();
+ return gunInstance(kind);
 }

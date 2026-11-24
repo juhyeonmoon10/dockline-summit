@@ -6,8 +6,9 @@ import {decodeLiteOperator,liteOperator} from '../dist/lite-operator.js';
 import {fieldViews} from '../dist/assets/field-frames.js';
 import {ImpactParticlePool} from '../dist/surface-fx.js';
 import {singleShotSpan} from '../dist/shot-path.js';
+import {loadCarriedArmory} from '../dist/armory-data.js';
 
-test('every carried gun emits at the centre of a face on its posed barrel',()=>{
+test('every carried gun emits at the centre of its posed barrel before and after art arrives',async()=>{
   const team=liteOperator(0),previous=team.model;
   const bytes=readFileSync(new URL('../dist/assets/customs-guard.lite.bin',import.meta.url));
   team.model=decodeLiteOperator(bytes.buffer.slice(bytes.byteOffset,bytes.byteOffset+bytes.byteLength));
@@ -15,7 +16,9 @@ test('every carried gun emits at the centre of a face on its posed barrel',()=>{
     const scene=Object.assign(Object.create(LiteRenderer.prototype),{
       operatorStates:new Map(),meleeSwings:new Map(),remoteMuzzles:new Map(),
     });
-    for(const active of Object.keys(fieldViews))for(const pitch of [-.6,.5]){
+    for(const ready of [false,true]){
+     if(ready)await Promise.all(Object.keys(fieldViews).filter(id=>id!=='shotgun').map(loadCarriedArmory));
+     for(const active of Object.keys(fieldViews))for(const pitch of [-.6,.5]){
       const player={id:'remote',team:0,x:2,y:.3,z:4,yaw:.86,pitch,slide:pitch>0?.3:0,active,grounded:true};
       const faces=[];
       // A shooter behind the camera can still fire a visible shot into the view.
@@ -28,6 +31,7 @@ test('every carried gun emits at the centre of a face on its posed barrel',()=>{
       const behind=faces.flatMap(({vertices})=>vertices).map(([x,y,z])=>
         (x-tip.x)*tip.forward.x+(y-tip.y)*tip.forward.y+(z-tip.z)*tip.forward.z);
       assert.ok(Math.abs(Math.max(...behind))<1e-7,active+' points out of its opening');
+     }
     }
   }finally{team.model=previous;}
 });

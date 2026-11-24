@@ -1,7 +1,8 @@
 import {karambitAttackPose,karambitGripRotation,knifeAttackDuration,knifeDrawPose,knifePose,knifeWristPose} from './knife-motion.js';
 import {inspectionPose,ringFlourish} from './view-inspect.js';
-import {karambitBladeSections,karambitGripSections,karambitRingRadii,knifeAngles} from './knife-art.js';
+import {karambitBladeSections,karambitGripSections,karambitRingRadii,knifeAngles,knifeParts} from './knife-art.js';
 import {KARAMBIT_RING} from './knife-types.js';
+import {cachedCarriedArmory,loadCarriedArmory} from './armory-data.js';
 
 // A flat, hinged silhouette for the first equip while the articulated meshes load.
 function rotation(rx,ry,rz){
@@ -63,6 +64,41 @@ export function drawCarriedKarambit(swing,addFace){
   for(const {points,color} of carriedFaces){
     addFace(points.map(([x,y,z])=>wrist(x-.018,y-.055,z)),color);
   }
+}
+
+const carriedModels=new Map();
+export function drawCarriedArmoryKnife(skin,swing,addFace){
+  if(!carriedModels.has(skin)){
+    carriedModels.set(skin,null);
+    loadCarriedArmory(skin);
+  }
+  let mesh=carriedModels.get(skin);
+  if(!mesh){
+    const source=cachedCarriedArmory(skin);
+    if(!source)return false;
+    const parts=knifeParts(skin),points=[],faces=[];
+    for(const part of parts){
+      const piece=source[part.name];
+      if(!piece)return false;
+      const {position,color,index}=piece,offset=points.length;
+      for(let i=0;i<position.length;i+=3){
+        const x=position[i]+part.pivot[0],y=position[i+1]+part.pivot[1],z=position[i+2]+part.pivot[2];
+        if(skin==='karambit'){
+          const [xx,yy,zz]=carriedRotation(x-KARAMBIT_RING[0],y-KARAMBIT_RING[1],z);
+          points.push([xx-.018,yy-.055,zz]);
+        }else points.push([x,y,z]);
+      }
+      for(let i=0;i<index.length;i+=3){
+        const a=index[i],b=index[i+1],c=index[i+2];
+        const channel=k=>Math.round((color[a*3+k]+color[b*3+k]+color[c*3+k])/3);
+        faces.push([a+offset,b+offset,c+offset,(channel(0)<<16)|(channel(1)<<8)|channel(2)]);
+      }
+    }
+    mesh={points,faces};carriedModels.set(skin,mesh);
+  }
+  const wrist=rotation(0,swing.ry,swing.rz+.2),points=mesh.points.map(p=>wrist(...p));
+  for(const [a,b,c,color] of mesh.faces)addFace([points[a],points[b],points[c]],color);
+  return true;
 }
 
 export function drawLiteKnife(ctx,player,now,drawAge,inspectAge,swing){

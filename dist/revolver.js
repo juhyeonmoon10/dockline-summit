@@ -44,7 +44,7 @@ function drumShell(){
 function disc(parts,x,y,z,diameter,depth,hue){parts.tube(x,y,z,diameter,depth,diameter,hue,angle);}
 export function makeRevolver(){
   const model=new T.Group();model.name='revolver';
-  const frame=new Parts(),grip=new Parts(),trim=new Parts();
+  const frame=new Parts(),grip=new Parts(),trim=new Parts(),sights=new Parts();
   panel(frame,[[-.153,.075],[-.149,.082],[-.012,.083],[.014,.066],[.028,.035],
     [.022,.004],[-.007,-.008],[-.015,.016],[-.007,.039],[-.007,.064],[-.149,.066]],.045,.0035,steel);
   panel(frame,[[-.164,.058],[-.145,.069],[-.135,.060],[-.136,-.022],[-.105,-.031],
@@ -72,15 +72,16 @@ export function makeRevolver(){
   }
   disc(trim,0,.053,-.375,.049,.012,slate);disc(trim,0,.053,-.381,.042,.002,edge);
   disc(trim,0,.053,-.3815,.030,.001,'#303b43');
-  panel(frame,[[-.366,.073],[-.348,.091],[-.338,.091],[-.338,.073]],.007,.0017,dark);
-  trim.cube(0,.088,-.3365,.0045,.006,.002,brass);
-  for(const side of [-1,1])frame.cube(side*.015,.087,-.002,.011,.013,.018,dark);
+  panel(sights,[[-.366,.073],[-.348,.091],[-.338,.091],[-.338,.073]],.007,.0017,dark);
+  sights.cube(0,.088,-.3365,.0045,.006,.002,brass);
+  for(const side of [-1,1])sights.cube(side*.015,.087,-.002,.011,.013,.018,dark);
   panel(frame,[[-.103,-.038],[-.096,-.064],[-.078,-.077],[-.051,-.082],[-.027,-.073],
     [-.010,-.052],[-.018,-.052],[-.033,-.068],[-.052,-.075],[-.077,-.071],[-.088,-.060],[-.094,-.038]],.012,.0021,slate);
   panel(trim,[[-.062,-.040],[-.058,-.047],[-.059,-.056],[-.068,-.062],[-.073,-.062],
     [-.065,-.054],[-.066,-.043]],.010,.0014,'#575651');
   panel(frame,[[-.014,.030],[.000,.034],[.003,.028],[-.005,.016],[-.018,.016]],.004,.0018,dark,-.028);
   put(model,frame,metal,'frame');put(model,grip,wood,'walnut-grip');put(model,trim,metal,'inlays-and-sights');
+  put(model,sights,metal,'iron-sights');
 
   const hinge=new T.Group(),rotor=new T.Group();
   hinge.name='cylinder-hinge';hinge.position.set(-.022,pivotY,0);model.add(hinge);

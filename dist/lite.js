@@ -5,6 +5,8 @@ import { loadLiteOperators, liteOperator, posedOperator, operatorGrip } from './
 import { approachAim, cameraAim, canAim, weaponFov, reloadPose, shotKickResponse, shoulderedKick, shotFlashDuration, LOCAL_IGNITION_LIFE, scopeAfterShot, sniperScopeVisible } from './weapon-view.js';
 import { fieldViews } from './assets/field-frames.js';
 import { opticFit,reflexEngaged } from './optic-fit.js';
+import {gunFit} from './gun-fit.js';
+import {cachedCarriedArmory,loadCarriedArmory} from './armory-data.js';
 import { drawFallbackSight,drawReflexDot } from './lite-reflex.js';
 import { revolverCylinderSwing } from './revolver-timing.js';
 import { weaponImageUrl } from './weapon-image-url.js';
@@ -14,7 +16,7 @@ import { classifyImpact, ImpactParticlePool, SURFACE_FX } from './surface-fx.js'
 import { buildSwitchyard, paintSwitchyardGround, paintSwitchyardPanel, switchyardPaints } from './switchyard-art.js';
 import { normalizeKnifeSkin } from './knife-types.js';
 import { knifePose,knifeAttackDuration,karambitVisualDuration,previousKarambitAge } from './knife-motion.js';
-import { drawLiteKnife,drawCarriedKarambit } from './lite-knife.js';
+import { drawLiteKnife,drawCarriedKarambit,drawCarriedArmoryKnife } from './lite-knife.js';
 
 // The old sniper sheet has its own barrel length and projected front caps.
 const sniperBackupMuzzles=[[.541,.5478,1.26752],[.5,.55298,1.24567]];
@@ -328,6 +330,42 @@ const carriedGuns={
   lmg:[.52,.24,.15],pistol:[.19,.035,.075],
 };
 
+const carriedSurfaces=new WeakMap();
+function drawCarriedGun(dst,part,transform,fit){
+  const {position,color,index}=part;
+  let detail=carriedSurfaces.get(part);
+  if(!detail){
+    const surfaces=new Uint32Array(index.length/3);
+    for(let i=0;i<index.length;i+=3){
+      const a=index[i]*3,b=index[i+1]*3,c=index[i+2]*3;
+      const r=Math.round((color[a]+color[b]+color[c])/3);
+      const g=Math.round((color[a+1]+color[b+1]+color[c+1])/3);
+      const blue=Math.round((color[a+2]+color[b+2]+color[c+2])/3);
+      surfaces[i/3]=(r<<16)|(g<<8)|blue;
+    }
+    let front=Infinity;
+    for(let i=2;i<position.length;i+=3)front=Math.min(front,position[i]);
+    // The tiny muzzle disc closes the low-detail silhouette and supplies the
+    // exact start of the spectator's trail, even after mesh decimation.
+    detail={surfaces,front};carriedSurfaces.set(part,detail);
+  }
+  const world=[];
+  for(let i=0;i<position.length;i+=3){
+    const point=transform(position[i]*.86,position[i+1]*.86,position[i+2]*.86);
+    point.push(0,0);world.push(point);
+  }
+  for(let i=0;i<index.length;i+=3)dst.push({material:detail.surfaces[i/3],shade:2,
+    vertices:[world[index[i]],world[index[i+1]],world[index[i+2]]]});
+  const noseX=(fit.muzzleX||0)*.86,noseY=fit.muzzleY*.86,noseZ=detail.front*.86;
+  const rim=[];
+  for(let i=0;i<8;i++){
+    const a=i*Math.PI/4,corner=transform(noseX+.006*Math.cos(a),noseY+.006*Math.sin(a),noseZ);
+    corner.push(0,0);rim.push(corner);
+  }
+  dst.push({material:0x252b2c,shade:1,vertices:rim});
+  return transform(noseX,noseY,noseZ);
+}
+
 function heldEquipment(dst,p,[x,y,z],age,side=1){
   const sy=Math.sin(p.yaw),cy=Math.cos(p.yaw);
   const knife=p.active==='knife',swing=knife?knifePose(age,side,p.knifeSkin):null;
@@ -346,6 +384,8 @@ function heldEquipment(dst,p,[x,y,z],age,side=1){
       quad(dst,[v[a],v[b],v[c],v[e]],col,shade);
   };
   if(knife){
+    const carried=(points,color)=>quad(dst,points.map(v=>transform(...v)),color);
+    if(drawCarriedArmoryKnife(normalizeKnifeSkin(p.knifeSkin),swing,carried))return;
     const face=(pts,z,col)=>quad(dst,pts.map(([x,y])=>transform(x,y,z)),col);
     if(p.knifeSkin==='balisong'){
       body(-.022,-.13,0,.034,.20,.037,0x394247);
@@ -354,28 +394,41 @@ function heldEquipment(dst,p,[x,y,z],age,side=1){
       face([[-.024,.072],[.031,.070],[.022,.237],[-.011,.319]],0,0xafb8ba);
       face([[.031,.070],[.041,.099],[.022,.237],[-.011,.319]],.004,0xd6dddd);
     }else{
-      drawCarriedKarambit(swing,(points,color)=>quad(dst,points.map(p=>transform(...p)),color));
+      drawCarriedKarambit(swing,carried);
     }
     return;
   }
+  const imported=cachedCarriedArmory(p.active)?.body;
+  if(!imported&&p.active!=='shotgun')loadCarriedArmory(p.active);
+  let importedTip;
+  if(imported){
+    importedTip=drawCarriedGun(dst,imported,transform,gunFit[p.active]);
+    if(p.active!=='revolver'){
+      const [mx,my,mz]=importedTip;
+      return {x:mx,y:my,z:mz,forward:{x:sy*co,y:si,z:-cy*co}};
+    }
+  }
   if(p.active==='revolver'){
     const front=-.27,barrelY=.068;
-    body(0,-.095,.012,.053,.104,.081,0x704936);
-    body(0,-.009,-.007,.065,.089,.103,0x747e82);
-    body(0,.070,-.073,.061,.019,.107,0x8a9698);
-    body(0,.009,-.185,.048,.043,.143,0x566269);
-    body(0,barrelY-.021,(front-.102)/2,.055,.042,-front-.102,0x77858a);
-    body(0,.087,-.244,.011,.013,.024,0xc2965a);
-    const t=p.reload>0&&p.reloadDuration>0?1-p.reload/p.reloadDuration:0;
-    const swing=revolverCylinderSwing(t),cx=.018*(Math.cos(swing)-1)-.050*Math.sin(swing);
-    const drumY=-.019+.018*Math.sin(swing)+.050*Math.cos(swing);
-    const ring=(i,d)=>transform(cx+.047*Math.cos(i*Math.PI/5),drumY+.047*Math.sin(i*Math.PI/5),d);
-    for(let i=0;i<10;i++){
-      quad(dst,[ring(i,-.124),ring(i+1,-.124),ring(i+1,-.025),ring(i,-.025)],i%2?0x59646a:0x465258);
-      quad(dst,[ring(i,-.025),ring(i+1,-.025),transform(cx,drumY,-.025)],0x505a5d);
-      quad(dst,[ring(i+1,-.124),ring(i,-.124),transform(cx,drumY,-.124)],0x3e484d);
+    if(!imported){
+      body(0,-.095,.012,.053,.104,.081,0x704936);
+      body(0,-.009,-.007,.065,.089,.103,0x747e82);
+      body(0,.070,-.073,.061,.019,.107,0x8a9698);
+      body(0,.009,-.185,.048,.043,.143,0x566269);
+      body(0,barrelY-.021,(front-.102)/2,.055,.042,-front-.102,0x77858a);
+      body(0,.087,-.244,.011,.013,.024,0xc2965a);
     }
-    const [mx,my,mz]=transform(0,barrelY,front);
+    const t=p.reload>0&&p.reloadDuration>0?1-p.reload/p.reloadDuration:0;
+    const swing=revolverCylinderSwing(t),cx=.022*(Math.cos(swing)-1)-.061*Math.sin(swing);
+    const drumY=-.042+.022*Math.sin(swing)+.061*Math.cos(swing);
+    const rotor=(dx,dy,d)=>transform((cx+dx)*.86,(drumY+dy)*.86,d*.86);
+    const ring=(i,d)=>rotor(.051*Math.cos(i*Math.PI/5),.051*Math.sin(i*Math.PI/5),d);
+    for(let i=0;i<10;i++){
+      quad(dst,[ring(i,-.146),ring(i+1,-.146),ring(i+1,-.020),ring(i,-.020)],i%2?0x59646a:0x465258);
+      quad(dst,[ring(i,-.020),ring(i+1,-.020),rotor(0,0,-.020)],0x505a5d);
+      quad(dst,[ring(i+1,-.146),ring(i,-.146),rotor(0,0,-.146)],0x3e484d);
+    }
+    const [mx,my,mz]=importedTip??transform(0,barrelY,front);
     return {x:mx,y:my,z:mz,forward:{x:sy*co,y:si,z:-cy*co}};
   }
   const [front,stock,width]=carriedGuns[p.active]||carriedGuns.rifle;
