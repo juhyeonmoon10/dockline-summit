@@ -1,4 +1,4 @@
-import {karambitGripRotation,knifeAttackDuration,knifeDrawPose,knifePose,knifeWristPose} from './knife-motion.js';
+import {karambitAttackPose,karambitGripRotation,knifeAttackDuration,knifeDrawPose,knifePose,knifeWristPose} from './knife-motion.js';
 import {inspectionPose,ringFlourish} from './view-inspect.js';
 import {karambitBladeSections,karambitGripSections,karambitRingRadii,knifeAngles} from './knife-art.js';
 import {KARAMBIT_RING} from './knife-types.js';
@@ -70,7 +70,8 @@ export function drawLiteKnife(ctx,player,now,drawAge,inspectAge,swing){
   const striking=age>=0&&age<knifeAttackDuration(skin);
   if(striking)inspectAge=Infinity;
   if(striking||Number.isFinite(inspectAge))drawAge=Infinity;
-  const draw=knifeDrawPose(skin,drawAge),slash=knifePose(age,swing?.side,skin);
+  const draw=knifeDrawPose(skin,drawAge);
+  const slash=flip?knifePose(age,swing?.side,skin):karambitAttackPose(age,swing?.side,swing?.previousAge);
   const wrist=knifeWristPose(skin,draw,slash,now*9,Math.min(1,(player.speed||0)/5.4));
   const inspect=inspectionPose(skin,inspectAge);
   if(inspect)for(const k of ['x','y','z','rx','ry','rz'])wrist[k]+=(inspect[k]-wrist[k])*inspect.weight;

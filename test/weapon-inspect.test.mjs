@@ -68,7 +68,7 @@ test('the karambit ring tracks its contact through the spin and cancellation res
   poseHeldKnife(holder,gun,'karambit',Infinity,Infinity,Infinity,1);
   const closed=body.quaternion.clone();
   for(const age of [0,.11,.25,.37,.50,.68,.85,1.01,2.1,Infinity]){
-    poseHeldKnife(holder,gun,'karambit',2,age,.55,1);
+    poseHeldKnife(holder,gun,'karambit',2,age,Infinity,1);
     const attachment=gun.userData.hand.userData.fingers[0].b.localToWorld(new Vector3(-.020,0,0));
     body.localToWorld(point.fromArray(KARAMBIT_RING));
     assert.ok(point.distanceTo(attachment)<1e-8);

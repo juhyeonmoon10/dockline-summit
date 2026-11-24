@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {Group,PerspectiveCamera,Vector3} from '../dist/assets/three.module.min.js';
 import {WEAPONS} from '../dist/balance.js';
 import {KARAMBIT_RING,KNIFE_TIMING} from '../dist/knife-types.js';
-import {knifePose,knifeAttackDuration,knifeDrawPose,knifeClipPhase} from '../dist/knife-motion.js';
+import {
+  knifePose,knifeAttackDuration,knifeDrawPose,knifeClipPhase,
+  karambitAttackPose,karambitVisualDuration,previousKarambitAge
+} from '../dist/knife-motion.js';
 import {gunModel,poseHeldKnife,poseHeldSleeves} from '../dist/render.js';
 import {createCanvasPreview} from '../dist/armory-canvas.js';
 import {applyInspection,inspectionPose,inspectDuration} from '../dist/view-inspect.js';
@@ -74,12 +77,44 @@ test('the grip stays physically attached through draws, flourishes, interruption
   }
 });
 
+test('a chained karambit cut continues from the previous wrist, then crosses the reticle at contact',()=>{
+  const skin='karambit',rig=new Group(),model=gunModel('knife',skin);
+  rig.scale.setScalar(.91);rig.add(model);
+  const blade=model.userData.body.getObjectByName('blade'),vertices=blade.geometry.attributes.position;
+  let tipIndex=0;
+  for(let i=1;i<vertices.count;i++)if(vertices.getX(i)<vertices.getX(tipIndex))tipIndex=i;
+  const tip=new Vector3().fromBufferAttribute(vertices,tipIndex);
+  for(const side of [-1,1]){
+    const last={skin,side:-side,eventAt:2};
+    for(const interval of [WEAPONS.knife.interval,.64,.73,karambitVisualDuration-.0001]){
+      const gap=previousKarambitAge(last,skin,side,last.eventAt+interval);
+      const outgoing=karambitAttackPose(gap,-side);
+      assert.deepEqual(karambitAttackPose(0,side,gap),outgoing);
+      const tipAt=t=>{
+        poseHeldKnife(rig,model,skin,Infinity,Infinity,t,side,0,0,0,gap);
+        return blade.localToWorld(tip.clone()).project(camera);
+      };
+      if(interval===WEAPONS.knife.interval){
+        const start=tipAt(0),end=tipAt(.18);
+        assert.ok(start.x*side>.5&&end.x*side<-.5,'the return crosses from the preceding exit side');
+      }
+      const hit=tipAt(contact);
+      assert.ok(Math.hypot(hit.x,hit.y)<.006);
+      assert.ok((tipAt(contact-.016).x-tipAt(contact+.016).x)*side>.1);
+    }
+    assert.equal(previousKarambitAge(last,skin,side,3),Infinity);
+    assert.equal(previousKarambitAge(last,skin,-side,2.55),Infinity);
+    assert.equal(previousKarambitAge(last,'balisong',side,2.55),Infinity);
+    assert.deepEqual(karambitAttackPose(karambitVisualDuration,side),knifePose(Infinity,side,skin));
+  }
+});
+
 test('actual blade meshes fit the narrow 4:3 weapon camera at every contact and showcase beat',()=>{
   for(const skin of skins){
     const rig=new Group(),model=gunModel('knife',skin),pt=new Vector3();
     rig.scale.setScalar(.91);rig.add(model);
     const actions=[
-      {length:knifeAttackDuration(skin),side:1},{length:knifeAttackDuration(skin),side:-1},
+      ...[1,-1].map(side=>({length:skin==='karambit'?karambitVisualDuration:knifeAttackDuration(skin),side})),
       {length:inspectDuration(skin),inspect:true}
     ];
     if(skin==='karambit')actions.push({length:KNIFE_TIMING.karambit.draw,draw:true});

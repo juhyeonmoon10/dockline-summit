@@ -96,3 +96,47 @@ export function knifePose(age,side=1,skin='karambit'){
   const pair=skin==='balisong'?butterflies:hooks;
   return sampleKnifeGesture(pair[side<0?1:0],age);
 }
+export const karambitVisualDuration=.8;
+// First person follows the blade through contact, keeps the wrist on the
+// exit side for the next input, then relaxes if no second cut arrives.
+const karambitCuts=[
+  [start,[.033,.0882,-.0185,-.040,-.31,.11,.07],
+    [.068,.1258,-.0379,-.093,-.29,-.05,.30],
+    [.100,.0726,-.1055,-.128,-.16,-.39,.69],
+    [.176,-.259,-.1306,-.133,-.26,-.57,1.57],
+    [.246,-.280,-.1245,-.112,-.32,-.54,1.75],
+    [.363,-.1827,-.0757,-.090,-.39,-.40,1.68],
+    [.484,-.1313,-.0938,-.079,-.39,-.34,1.48],
+    [.567,-.125,-.0953,-.082,-.38,-.34,1.44],
+    [.665,.0128,-.1939,-.084,-.34,-.22,1.05],
+    [.731,.1029,-.1408,-.050,-.16,-.06,.51],
+    [karambitVisualDuration,0,0,0,0,0,0]],
+  [start,[.034,-.0945,-.2031,-.085,-.54,.16,.76],
+    [.053,-.2135,-.2418,-.123,-.64,.12,.78],
+    [.100,-.389,-.0722,-.132,-.58,.55,-.79],
+    [.173,-.1758,.1691,-.122,-.48,.68,-1.57],
+    [.238,-.1621,.2183,-.101,-.46,.61,-1.65],
+    [.375,-.1862,.1616,-.080,-.35,.47,-1.29],
+    [.500,-.1661,.0717,-.052,-.29,.31,-.87],
+    [.571,-.1581,.0636,-.049,-.28,.28,-.82],
+    [.685,-.1078,.0077,-.034,-.21,.18,-.52],
+    [karambitVisualDuration,0,0,0,0,0,0]]
+].map(createKnifeGesture);
+
+export function previousKarambitAge(previous,skin,side,eventAt){
+  if(skin!=='karambit'||previous?.skin!==skin||previous.side!==-side)return Infinity;
+  const gap=eventAt-previous.eventAt;
+  return gap>0&&gap<karambitVisualDuration?gap:Infinity;
+}
+
+export function karambitAttackPose(age,side,previousAge=Infinity){
+  const index=side<0?1:0,pose=sampleKnifeGesture(karambitCuts[index],age);
+  // Keep position and velocity from the outgoing wrist at the interrupt.
+  // The transition ends before contact, including on a late or isolated input.
+  const blendTime=Math.min(.086,karambitVisualDuration-previousAge);
+  if(!(age>=0&&age<blendTime))return pose;
+  const previous=sampleKnifeGesture(karambitCuts[1-index],previousAge+age);
+  const weight=1-ease(age/blendTime);
+  for(const axis of ['x','y','z','rx','ry','rz'])pose[axis]+=(previous[axis]-pose[axis])*weight;
+  return pose;
+}

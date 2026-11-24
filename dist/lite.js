@@ -13,7 +13,7 @@ import { pelletTrails, pelletSpan, clipBarrelOrigin, visibleTraceEnd, exitsForwa
 import { classifyImpact, ImpactParticlePool, SURFACE_FX } from './surface-fx.js';
 import { buildSwitchyard, paintSwitchyardGround, paintSwitchyardPanel, switchyardPaints } from './switchyard-art.js';
 import { normalizeKnifeSkin } from './knife-types.js';
-import { knifePose,knifeAttackDuration } from './knife-motion.js';
+import { knifePose,knifeAttackDuration,karambitVisualDuration,previousKarambitAge } from './knife-motion.js';
 import { drawLiteKnife,drawCarriedKarambit } from './lite-knife.js';
 
 // The old sniper sheet has its own barrel length and projected front caps.
@@ -467,9 +467,14 @@ export class LiteRenderer {
     for(const event of game.events||[]){
       if(event.seq<=this.lastMeleeSeq)continue;this.lastMeleeSeq=event.seq;
       if(event.type==='round'){this.meleeSwings.clear();this.meleeImpacts=[];}
+      if(event.type==='kill')this.meleeSwings.delete(event.target);
       if(event.type==='melee'){
-        const age=Number.isFinite(event.at)?Math.max(0,Math.min(.55,game.elapsed-event.at)):0;
-        this.meleeSwings.set(event.actor,{at:now-age,side:event.side??(event.seq%2?1:-1)});
+        const actor=game.players.find(player=>player.id===event.actor);
+        if(!actor?.alive||actor.active!=='knife')continue;
+        const eventAt=Number.isFinite(event.at)?event.at:game.elapsed,side=event.side??(event.seq%2?1:-1);
+        const at=now-Math.max(0,game.elapsed-eventAt),skin=normalizeKnifeSkin(event.knifeSkin??actor.knifeSkin);
+        const previousAge=previousKarambitAge(this.meleeSwings.get(event.actor),skin,side,eventAt);
+        this.meleeSwings.set(event.actor,{at,side,previousAge,eventAt,skin});
       }
       if(event.type==='meleeImpact'&&[event.ex,event.ey,event.ez].every(Number.isFinite)){
         this.meleeImpacts.push({event,until:now+.10});
@@ -478,7 +483,8 @@ export class LiteRenderer {
     }
     for(const [id,swing] of this.meleeSwings){
       const actor=game.players.find(v=>v.id===id);
-      if(!actor?.alive||actor.active!=='knife'||now-swing.at>=knifeAttackDuration(actor.knifeSkin))this.meleeSwings.delete(id);
+      if(!actor?.alive||actor.active!=='knife'||swing.skin!==normalizeKnifeSkin(actor.knifeSkin)||
+        now-swing.at>=(swing.skin==='balisong'?knifeAttackDuration('balisong'):karambitVisualDuration))this.meleeSwings.delete(id);
     }
     this.meleeImpacts=this.meleeImpacts.filter(impact=>impact.until>now);
     const skin=normalizeKnifeSkin(p.knifeSkin);
@@ -653,7 +659,8 @@ export class LiteRenderer {
     }
   }
   remoteOperator(gear,player,cam,clock,firing){
-    const team=liteOperator(player.team),swing=this.meleeSwings.get(player.id);
+    const team=liteOperator(player.team),history=this.meleeSwings.get(player.id);
+    const swing=history&&clock-history.at<knifeAttackDuration(player.knifeSkin)?history:null;
     if(!team.model){
       const tip=fallbackOperator(gear,player,clock,swing);
       if(tip)this.remoteMuzzles.set(player.id,{tip,player});
@@ -822,13 +829,17 @@ export class LiteRenderer {
   }
   weapon(p,t,pose,flash,inspectAge) {
     if(p.active==='knife'||Number.isFinite(inspectAge)){
+      let swing=this.meleeSwings.get(p.id);
+      if(swing&&swing.skin==='karambit'&&Number.isFinite(inspectAge)&&t-swing.at>=knifeAttackDuration('karambit')){
+        this.meleeSwings.delete(p.id);swing=null;
+      }
       if(!this.heldViewLoading&&t>=(this.heldRetryAt||0)){
         this.heldViewLoading=import('./lite-held.js').then(({LiteHeldView})=>{this.heldView=new LiteHeldView();})
           .catch(()=>{this.heldViewLoading=null;this.heldRetryAt=performance.now()/1000+3;});
       }
-      if(this.heldView?.draw(this.ctx,p,t,t-this.knifeEquippedAt,inspectAge,this.meleeSwings.get(p.id)))return;
+      if(this.heldView?.draw(this.ctx,p,t,t-this.knifeEquippedAt,inspectAge,swing))return;
       if(p.active==='knife'){
-        drawLiteKnife(this.ctx,p,t,t-this.knifeEquippedAt,inspectAge,this.meleeSwings.get(p.id));return;
+        drawLiteKnife(this.ctx,p,t,t-this.knifeEquippedAt,inspectAge,swing);return;
       }
     }
     if(!pose)return; // The shared HUD draws the magnified scope.

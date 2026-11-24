@@ -15,7 +15,8 @@ import { clipBarrelOrigin,visibleTraceEnd,exitsForward,muzzleDeparture,flightSli
 import { WorldImpacts } from './world-impacts.js';
 import { knifeMesh,knifeFit,knifePose,animateKnife,animateCarriedKnife } from './knife.js';
 import { normalizeKnifeSkin,KARAMBIT_RING } from './knife-types.js';
-import { knifeDrawPose,knifeAttackDuration,knifeWristPose,karambitGripRotation } from './knife-motion.js';
+import { knifeDrawPose,knifeAttackDuration,knifeWristPose,karambitGripRotation,
+  karambitAttackPose,karambitVisualDuration,previousKarambitAge } from './knife-motion.js';
 import { inspectionPose,applyInspection,ringFlourish } from './view-inspect.js';
 import { studioReflection } from './weapon-light.js';
 import { EjectedCases } from './ejected-cases.js';
@@ -219,11 +220,12 @@ export function poseHeldSleeves(weapon,key,weight=0,freeHand=0) {
   }
 }
 
-export function poseHeldKnife(rig,weapon,skin,drawAge,inspectAge,cut,side,step=0,walk=0,swayX=0) {
+export function poseHeldKnife(rig,weapon,skin,drawAge,inspectAge,cut,side,step=0,walk=0,swayX=0,previousAge=Infinity) {
   const butterfly=skin==='balisong',striking=cut>=0&&cut<knifeAttackDuration(skin);
   if(striking)inspectAge=Infinity;
   if(striking||Number.isFinite(inspectAge))drawAge=Infinity;
-  const slash=knifePose(cut,side,skin),draw=knifeDrawPose(skin,drawAge);
+  const slash=butterfly?knifePose(cut,side,skin):karambitAttackPose(Number.isFinite(inspectAge)?Infinity:cut,side,previousAge);
+  const draw=knifeDrawPose(skin,drawAge);
   const wrist=knifeWristPose(skin,draw,slash,step,walk,swayX);
   rig.position.set(wrist.x,wrist.y,wrist.z);
   rig.rotation.set(wrist.rx,wrist.ry,wrist.rz);
@@ -501,7 +503,7 @@ export class ArenaRenderer {
     this.shadowMat=shadowStamp();this.shadowGeo=new T.PlaneGeometry(1.12,1.05);
     this.models=new Map();this.lastSeq=0;this.lastElapsed=-1;this.lastShotFrame=null;
     this.resetShot();
-    this.meleeAge=.55;this.meleeSide=1;this.meleeSwings=new Map();
+    this.meleeAge=Infinity;this.meleeSwings=new Map();
     this.plates=new Map();
     this.aim=0;this.bob=0;this.eye=1.55;this.roll=0;this.lastFocus=null;
     this.lookSwayX=0;this.lookSwayY=0;this.lastYaw=null;this.lastPitch=null;this.equip=0;this.active=null;
@@ -641,11 +643,9 @@ export class ArenaRenderer {
 
   effects(game,focus,dt,shotDt) {
     this.shotsThisFrame.length=0;this.stepRemoteFlashes(shotDt,focus.id);
-    this.meleeAge=Math.min(.55,this.meleeAge+shotDt);
-    if(!focus?.alive||focus.active!=='knife')this.meleeAge=.55;
     for(const [id,swing] of this.meleeSwings){
       const actor=game.players.find(player=>player.id===id);swing.age+=shotDt;
-      if(!actor?.alive||actor.active!=='knife'||swing.age>=.55)this.meleeSwings.delete(id);
+      if(!actor?.alive||actor.active!=='knife'||normalizeKnifeSkin(actor.knifeSkin)!==swing.skin)this.meleeSwings.delete(id);
     }
     this.shotTrails.step(shotDt);this.impacts.step(shotDt);
     this.shotAge+=shotDt;this.recoil=shotKickResponse(this.shotAge,this.shotWeapon);
@@ -653,21 +653,25 @@ export class ArenaRenderer {
     if(this.flashTime>0 && this.shotWeapon){
       this.flash.scale.setScalar(.91*gunFit[this.shotWeapon].flash*this.flashTime/LOCAL_IGNITION_LIFE);
     }
-    if(game.seq<this.lastSeq || game.elapsed<this.lastElapsed){this.lastSeq=0;this.clearShotEffects();this.meleeAge=.55;this.meleeSwings.clear();this.resetShot();}
+    if(game.seq<this.lastSeq || game.elapsed<this.lastElapsed){this.lastSeq=0;this.clearShotEffects();this.meleeSwings.clear();this.resetShot();}
     this.lastElapsed=game.elapsed;
     const events=game.events||[];
     for(let i=0;i<events.length;i++){
       const e=events[i];
       if(e.seq<=this.lastSeq)continue;
       this.lastSeq=e.seq;
-      if(e.type==='round'){this.clearShotEffects();this.meleeAge=.55;this.meleeSwings.clear();this.resetShot();}
+      if(e.type==='round'){this.clearShotEffects();this.meleeSwings.clear();this.resetShot();}
+      if(e.type==='kill')this.meleeSwings.delete(e.target);
       if(e.type==='melee'){
         const actor=game.players.find(player=>player.id===e.actor);
-        if(actor?.alive&&actor.active==='knife'){
+        const skin=normalizeKnifeSkin(e.knifeSkin??actor?.knifeSkin);
+        if(actor?.alive&&actor.active==='knife'&&skin===normalizeKnifeSkin(actor.knifeSkin)){
           const side=e.side??(e.seq%2?1:-1);
-          const age=Number.isFinite(e.at)?clamp(game.elapsed-e.at,0,.55):0;
-          this.meleeSwings.set(e.actor,{age,side});
-          if(e.actor===focus?.id){this.meleeAge=age;this.meleeSide=side;this.flashTime=0;}
+          const eventAt=Number.isFinite(e.at)?e.at:game.elapsed;
+          const age=Math.max(0,game.elapsed-eventAt);
+          const previousAge=previousKarambitAge(this.meleeSwings.get(e.actor),skin,side,eventAt);
+          this.meleeSwings.set(e.actor,{age,side,skin,eventAt,previousAge});
+          if(e.actor===focus?.id)this.flashTime=0;
         }
       }
       if(e.type==='meleeImpact'&&Number.isFinite(e.ex)){
@@ -692,6 +696,10 @@ export class ArenaRenderer {
       }
       const hit=events[i+1]?.type==='hit'&&events[i+1].actor===e.actor?events[i+1]:null;
       this.shotsThisFrame.push({event:e,mine,hit});
+    }
+    for(const [id,swing] of this.meleeSwings){
+      const duration=swing.skin==='karambit'?karambitVisualDuration:knifeAttackDuration(swing.skin);
+      if(swing.age>=duration)this.meleeSwings.delete(id);
     }
     for(const tracer of this.tracers)if(tracer.ttl>0) {
       tracer.ttl=Math.max(0,tracer.ttl-shotDt);
@@ -811,7 +819,7 @@ export class ArenaRenderer {
           a.revolver=p.active==='revolver'?revolverAction(held):null;
         }
         a.loadout.rotation.x=clamp(p.pitch,-.78,.78);
-        const slash=p.active==='knife'?this.meleeSwings.get(p.id):null,cut=knifePose(slash?.age??.55,slash?.side||1,knifeSkin);
+        const slash=p.active==='knife'?this.meleeSwings.get(p.id):null,cut=knifePose(slash?.age??Infinity,slash?.side||1,knifeSkin);
         a.loadout.position.set(.127,p.active==='knife'?1.11:1.166,-.277);
         a.loadout.rotation.y=p.active==='knife'?-.3+cut.ry:0;
         a.loadout.rotation.z=p.active==='knife'?.4+cut.rz:0;
@@ -842,7 +850,7 @@ export class ArenaRenderer {
   }
   lobby(t) {
     this.reflexActive=false;this.reflexDot.visible=false;
-    this.meleeAge=.55;this.meleeSwings.clear();
+    this.meleeAge=Infinity;this.meleeSwings.clear();
     this.clearShotEffects();
     for(const plate of this.plates.values())plate.visible=false;
     for(const a of this.models.values()){a.group.visible=false;a.shadow.visible=false;a.wasAlive=false;}
@@ -892,9 +900,14 @@ export class ArenaRenderer {
     // Effects scheduled on the audio clock keep time even when a render frame stalls.
     const shotDt=this.lastShotFrame!==null && t>this.lastShotFrame ? t-this.lastShotFrame : dt;
     this.lastShotFrame=t;
-    this.effects(game,focus,dt,shotDt);this.updateModels(game.players,focus.id,dt);
+    this.effects(game,focus,dt,shotDt);
+    let swing=this.meleeSwings.get(focus.id);
+    if(swing?.skin==='karambit'&&Number.isFinite(view.inspectAge)&&swing.age>=knifeAttackDuration('karambit')){
+      this.meleeSwings.delete(focus.id);swing=null;
+    }
+    this.meleeAge=swing?.age??Infinity;
+    this.updateModels(game.players,focus.id,dt);
     if(focus.reload>0 && this.shotWeapon)this.resetShot();
-    if(first){const swing=this.meleeSwings.get(focus.id);this.meleeAge=swing?.age??.55;this.meleeSide=swing?.side||1;}
     this.lastFocus=focus.id;
     const held=canAim(focus,playerView?view.ads??focus.ads:focus.ads);
     const age=this.shotWeapon===focus.active ? this.shotAge : Infinity;
@@ -923,7 +936,7 @@ export class ArenaRenderer {
     if(key==='knife'&&(first||key!==this.active||knifeSkin!==this.lastKnifeSkin)){
       this.knifeEquippedAt=t;this.lastKnifeSkin=knifeSkin;
     }
-    if(key!==this.active){this.equip=this.active ? .85 : 0;this.active=key;if(key!=='knife'||!this.meleeSwings.has(focus.id))this.meleeAge=.55;}
+    if(key!==this.active){this.equip=this.active ? .85 : 0;this.active=key;}
     this.equip=damp(this.equip,0,14,dt);
     for(const [id,gun] of Object.entries(this.guns))gun.visible=id===key;
     for(const [skin,model] of Object.entries(this.knifeViews))model.visible=key==='knife'&&knifeSkin===skin;
@@ -976,7 +989,7 @@ export class ArenaRenderer {
     const inspectAge=key==='knife'&&this.meleeAge<knifeAttackDuration(knifeSkin)?Infinity:view.inspectAge;
     if(key==='knife'){
       poseHeldKnife(this.gunRig,weapon,knifeSkin,t-this.knifeEquippedAt,inspectAge,
-        this.meleeAge,this.meleeSide,this.bob,sway,this.lookSwayX);
+        this.meleeAge,swing?.side??1,this.bob,sway,this.lookSwayX,swing?.previousAge);
     }
     const inspection=inspectionPose(key==='knife'?knifeSkin:key,inspectAge);
     applyInspection(this.gunRig,inspection);
