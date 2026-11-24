@@ -41,6 +41,7 @@ export class SnapshotEvents {
   frame(now) {
     const resumed = this.lastFrame !== null && now - this.lastFrame > MAX_EFFECT_AGE;
     this.lastFrame = now;
+    if (!this.pending.length) return [];
     const age = resumed ? RESUME_EFFECT_AGE : MAX_EFFECT_AGE;
     this.pending = this.pending.filter(({event, receivedAt, elapsed}) =>
       event.type === 'round' || (now - receivedAt <= age && (this.elapsed - elapsed) * 1000 <= age));
@@ -49,6 +50,7 @@ export class SnapshotEvents {
 
   acknowledge(feedbackSeq, rendererSeq) {
     const through = Math.min(feedbackSeq, rendererSeq);
+    if (!this.pending.length || this.pending[0].event.seq > through) return;
     this.pending = this.pending.filter(item => item.event.seq > through);
   }
 }
