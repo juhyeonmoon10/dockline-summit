@@ -93,7 +93,7 @@ export function createGame({ size = 2, players = [], warmup = 15, mapId } = {}) 
 }
 
 function emit(g, type, actor, fields = {}) {
-  g.events.push({ seq: ++g.seq, type, actor, ...fields });
+  g.events.push({ seq: ++g.seq, type, actor, at:g.elapsed, ...fields });
   if (g.events.length > 40) g.events.splice(0, g.events.length - 40);
 }
 
@@ -308,7 +308,7 @@ function shoot(g, p, map) {
     total.set(hit.target, old);
   }
   const {x,y,z,ex,ey,ez} = central;
-  emit(g,'shot',p.id,{weapon:p.active,x,y,z,ex,ey,ez,...(blocked?{blocked:true}:{}),...(pellets?{pellets,at:g.elapsed}:{})});
+  emit(g,'shot',p.id,{weapon:p.active,x,y,z,ex,ey,ez,...(blocked?{blocked:true}:{}),...(pellets?{pellets}:{})});
   if (g.phase==='range') {
     g.range.shots++;
     if (total.size) g.range.hits++;
@@ -338,7 +338,7 @@ function beginMelee(g,p) {
   const w=WEAPONS[p.active],m=memory(p);
   m.cooldown=w.interval+Math.min(0,m.cooldown);
   m.melee={at:g.elapsed+w.windup};
-  emit(g,'melee',p.id,{weapon:p.active,knifeSkin:p.knifeSkin,x:p.x,y:p.y+eyeHeight(p),z:p.z,at:g.elapsed,side:m.nextSwingSide});
+  emit(g,'melee',p.id,{weapon:p.active,knifeSkin:p.knifeSkin,x:p.x,y:p.y+eyeHeight(p),z:p.z,side:m.nextSwingSide});
   m.nextSwingSide=-m.nextSwingSide;
   if(g.phase==='range')g.range.shots++;
 }
@@ -373,7 +373,7 @@ function resolveMelee(g,p,map) {
   m.melee=null;
   const contact=meleeContact(g,p,map);if(!contact)return;
   const {x,y,z,ex,ey,ez,target}=contact;
-  emit(g,'meleeImpact',p.id,{weapon:'knife',knifeSkin:p.knifeSkin,x,y,z,ex,ey,ez,target:target?.id||null,at:g.elapsed});
+  emit(g,'meleeImpact',p.id,{weapon:'knife',knifeSkin:p.knifeSkin,x,y,z,ex,ey,ez,target:target?.id||null});
   if(target){
     if(g.phase==='range')g.range.hits++;
     applyHit(g,p,target,WEAPONS.knife.damage,false);

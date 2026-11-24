@@ -460,10 +460,10 @@ export class LiteRenderer {
     this.surfaceParticles.clear();this.surfaceMarks.forEach(mark=>{mark.until=0;});this.dummyHits.clear();
   }
   clearMelee(){this.meleeSwings.clear();this.meleeImpacts=[];this.lastMeleeSeq=0;this.knifeFocus=null;this.lastWeapon=null;}
-  meleeEvents(game,p,now){
+  meleeEvents(game,p,now,resetSeq=game.seq){
     const rewind=game.elapsed<this.lastElapsed&&game.seq>=this.lastMeleeSeq;
     if(game.seq<this.lastMeleeSeq||game.elapsed<this.lastElapsed||game.round!==this.lastRound)this.clearMelee();
-    if(rewind)this.lastMeleeSeq=game.seq;
+    if(rewind)this.lastMeleeSeq=resetSeq;
     for(const event of game.events||[]){
       if(event.seq<=this.lastMeleeSeq)continue;this.lastMeleeSeq=event.seq;
       if(event.type==='round'){this.meleeSwings.clear();this.meleeImpacts=[];}
@@ -916,6 +916,9 @@ export class LiteRenderer {
     const pitch=mode?(view.pitch??p.pitch):previewPitch;
     const cam={x:mode?p.x:(preview?.x??13),y:mode?p.y+eyeHeight(p):(preview?.y??7.1),z:mode?p.z:(preview?.z??20),sy:Math.sin(yaw),cy:Math.cos(yaw),sp:Math.sin(pitch),cp:Math.cos(pitch)};
     const resync=mode&&(this.lastRound!==game.round||game.elapsed<this.lastElapsed||game.seq<this.lastSeq);
+    // Online frames carry only events received for this round and still owed
+    // to the consumers. A first draw after a round change can already contain a shot.
+    const resetSeq=view.receivedEvents&&game?.events?.length?game.events[0].seq-1:game?.seq;
     const exchanging=mode&&this.activeGun&&this.activeGun!==p.active;
     const interrupted=!mode||!p.alive||this.aimFocus!==p.id||exchanging||resync;
     if(interrupted){this.shotAge=Infinity;this.shotWeapon=null;this.recoil=0;}
@@ -930,7 +933,7 @@ export class LiteRenderer {
           const image=new Image();image.src=weaponImageUrl((special?p.active+'-motion':'field-reloads')+'.webp');this.motionAtlas[key]=image;
         }
       }
-      const previous=resync||!p.alive?game.seq:this.lastSeq;
+      const previous=!p.alive?game.seq:resync?resetSeq:this.lastSeq;
       for(const e of game.events||[]){
         if(e.seq>previous&&e.type==='shot'&&e.actor===p.id&&e.weapon===p.active){
           this.shotAge=0;this.shotWeapon=e.weapon;
@@ -950,8 +953,8 @@ export class LiteRenderer {
     this.viewFov=mode?weaponFov(p.active,this.lensAim,p.slide>0):58;
     this.focal=(h/2)/Math.tan(this.viewFov*Math.PI/360);this.depth.fill(0);
     if(mode){
-      this.meleeEvents(game,p,now);
-      if(resync){this.clearShots();this.lastSeq=game.seq;}
+      this.meleeEvents(game,p,now,resetSeq);
+      if(resync){this.clearShots();this.lastSeq=resetSeq;}
       this.surfaceParticles.step(frameTime);this.releaseImpacts(now);
     }
     for(let y=0;y<h;y++){const sky=Math.max(0,Math.min(1,.45-(y-h*.5)/(h*.8)+pitch*1.1));const c=rgb(219-sky*103,234-sky*57,240-sky*18);this.pixels.fill(c,y*w,(y+1)*w);}
@@ -1039,5 +1042,6 @@ export class LiteRenderer {
     }
     this.weapon(p,now,pose,flash,view.inspectAge);
     if(this.reflexActive)drawReflexDot(this.ctx,pose,sizeY);
+    return this.lastSeq;
   }
 }

@@ -1008,5 +1008,6 @@ export class ArenaRenderer {
     this.gl.clearDepth();
     // High magnification is a clear center view; the DOM crosshair remains visible.
     if(!this.scopeActive)this.gl.render(this.gunScene,this.gunCamera);
+    return this.lastSeq;
   }
 }

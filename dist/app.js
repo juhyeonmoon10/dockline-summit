@@ -3,6 +3,7 @@ import { ARENAS, getArena } from './arena-map.js';
 import { MAX_HP, WEAPONS, PRIMARY_WEAPONS as primary, isSecondaryWeapon, secondaryWeapon } from './balance.js';
 import { LiteRenderer } from './lite.js';
 import { RoomClient, supportsLAN } from './net.js';
+import { SnapshotEvents } from './snapshot-events.js';
 import { ArenaSound } from './match-audio.js';
 import { CombatFeedback } from './combat-feedback.js';
 import { canAim } from './weapon-view.js';
@@ -44,6 +45,7 @@ let yaw=0,pitch=0,slot=1,firstFrame=true,lastEvent=0,pointerMode=false,dragX=nul
 let roundKey='',eventFeed=[],pendingFire=false,heldFire=false,ads=false,paused=false;
 let lastResult='',spectatorIndex=0,frameTime=performance.now(),hudStamp=0,roundFlash=0,clockStamp=0;
 let prevNet=null,netAt=0,lastNotice='',noticeTimer;
+const networkEvents=new SnapshotEvents();
 let joining=false,joinAttempt=0;
 let inspectStart=null, inspectRequestedAt=null, inspectedItem=null, knifeSwingEnd=0, controlsUnderstood=false;
 const keys=new Set(), pressed=new Set();
@@ -191,7 +193,13 @@ function roomError(error){const node=$('netError');if(node)node.textContent=erro
 function spin(btn,job){const old=btn.disabled;btn.disabled=true;Promise.resolve().then(job).catch(roomError).finally(()=>{if(btn.isConnected)btn.disabled=old;});}
 function newClient(Client=RoomClient){
   const c=new Client({onRoom(r){if(c!==client)return;room=r;if(r.phase==='lobby'){displayArena(getArena(r.mapId));game=null;screen='home';release();$('hud').hidden=true;document.body.dataset.scene='lobby';if(modal!=='leave')showRoom(r);}},
-    onGame(next){if(c!==client)return;if(screen!=='game'||!game){prevNet=null;enterGame(next,c.id);}else{prevNet=game;game=next;}netAt=performance.now();},
+    onGame(next){
+      if(c!==client)return;
+      netAt=performance.now();
+      if(screen!=='game'||!game){prevNet=null;networkEvents.reset();enterGame(next,c.id);}
+      else{prevNet=game;game=next;}
+      if(networkEvents.receive(next,netAt)){lastEvent=0;prevNet=null;}
+    },
     onError:m=>roomError(m),onClose:m=>{if(c!==client)return;goHome();notify(m);}});
   return c;
 }
@@ -291,9 +299,9 @@ function results(){
   showPanel('result',title,'<div class="result-score"><b>'+game.score[0]+'</b><span>–</span><b>'+game.score[1]+'</b></div><table class="results"><thead><tr><th>플레이어</th><th>팀</th><th>처치</th><th>탈락</th></tr></thead><tbody>'+rows+'</tbody></table><div class="row">'+(host?'<button id="again" class="primary">같은 방에서 다시 준비</button>':'')+'<button class="secondary" id="finish">나가기</button></div>'+(!host?'<p class="note">방장이 다시 준비하면 대기실로 이동합니다.</p>':''));
   release();audio.chime(w===me?.team);if(host)$('again').onclick=e=>spin(e.currentTarget,()=>client.lobby());$('finish').onclick=goHome;
 }
-function receiveEvents(now){
+function receiveEvents(now,events){
   const me=game.players.find(p=>p.id===selfId), watch=watchPlayer();
-  for(const ev of game.events){if(ev.seq<=lastEvent)continue;lastEvent=ev.seq;audio.event(ev,game,watch);
+  for(const ev of events){if(ev.seq<=lastEvent)continue;lastEvent=ev.seq;audio.event(ev,game,watch);
     if(ev.actor===selfId&&['shot','melee','reload'].includes(ev.type)){
       if(ev.type==='melee'){
         const started=Number.isFinite(ev.at)?now-Math.max(0,game.elapsed-ev.at):now;
@@ -439,12 +447,15 @@ document.addEventListener('keydown',e=>{
 });
 document.addEventListener('keyup',e=>keys.delete(e.code));
 window.addEventListener('blur',()=>{clearInput();if(screen==='game'&&!modal&&game?.phase!=='end')showPause();});
-function visualState(now){
-  if(!client||!prevNet||!game||prevNet.round!==game.round||prevNet.phase!==game.phase)return game;
+function visualState(now,events){
+  if(!client)return game;
+  const visual={...game,events};
+  if(!prevNet||prevNet.round!==game.round||prevNet.phase!==game.phase)return visual;
   const mix=clamp((now-netAt)/50,0,1);
-  return {...game,players:game.players.map(p=>{const prev=prevNet.players.find(v=>v.id===p.id);if(!prev||prev.alive!==p.alive)return p;
+  visual.players=game.players.map(p=>{const prev=prevNet.players.find(v=>v.id===p.id);if(!prev||prev.alive!==p.alive)return p;
     const delta=Math.atan2(Math.sin(p.yaw-prev.yaw),Math.cos(p.yaw-prev.yaw));
-    return {...p,x:prev.x+(p.x-prev.x)*mix,y:prev.y+(p.y-prev.y)*mix,z:prev.z+(p.z-prev.z)*mix,yaw:prev.yaw+delta*mix};})};
+    return {...p,x:prev.x+(p.x-prev.x)*mix,y:prev.y+(p.y-prev.y)*mix,z:prev.z+(p.z-prev.z)*mix,yaw:prev.yaw+delta*mix};});
+  return visual;
 }
 function switchToLite(map=renderer?.map||chosenArena){
   const fresh=canvas.cloneNode(false);canvas.replaceWith(fresh);canvas=fresh;renderer=new LiteRenderer(canvas,map);bindCanvas();
@@ -486,12 +497,16 @@ function frame(ms){
     lobbyFrameKey='';
     const input=currentInput();
     if(!client){if(!paused)stepGame(game,{[selfId]:input},dt);}else client.input(input);
-    pendingFire=false;pressed.clear();receiveEvents(t);audio.reconcile(game);const p=watchPlayer();if(!paused)audio.steps(game,p,t);
-    const visual=visualState(ms),watch=p?.id!==selfId;
+    const events=client?networkEvents.frame(ms):game.events;
+    pendingFire=false;pressed.clear();receiveEvents(t,events);audio.reconcile(game);const p=watchPlayer();if(!paused)audio.steps(game,p,t);
+    const visual=visualState(ms,events),watch=p?.id!==selfId;
     const inspectAge=inspectionAge(p,t);
     if(!paused&&!modal)audio.handling(p,inspectAge,t);
     $('weaponHud').toggleAttribute('data-inspecting',Number.isFinite(inspectAge));
-    try{renderer.draw(visual,selfId,{lobby:false,ads:watch?!!p?.ads:aiming(),quality,yaw:watch?p?.yaw:yaw,pitch:watch?p?.pitch:pitch,spectatorId:watch?p?.id:undefined,inspectAge,t,dt});}
+    try{
+      const drawnThrough=renderer.draw(visual,selfId,{lobby:false,ads:watch?!!p?.ads:aiming(),quality,yaw:watch?p?.yaw:yaw,pitch:watch?p?.pitch:pitch,spectatorId:watch?p?.id:undefined,inspectAge,t,dt,receivedEvents:!!client});
+      if(client&&Number.isFinite(drawnThrough))networkEvents.acknowledge(lastEvent,drawnThrough);
+    }
     catch(err){console.error(err);if(!(renderer instanceof LiteRenderer))switchToLite();else throw err;}
     const adsHeld=canAim(p,watch?p?.ads:ads&&slot!==3);
     const ironAligned=adsHeld&&renderer.aim>.96&&(p.active==='shotgun'||p.active==='revolver');
