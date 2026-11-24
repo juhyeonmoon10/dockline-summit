@@ -18,6 +18,20 @@ test('the karambit has a through-ring and the balisong has open scale windows on
   }
 });
 
+test('the karambit blade stays compact relative to its grip and turns back only near the tip',()=>{
+  const mesh=knifeMesh('karambit');
+  const blade=mesh.getObjectByName('blade'),steel=new T.Box3().setFromObject(blade,true);
+  const palm=new T.Box3().setFromObject(mesh.getObjectByName('grip'),true)
+    .union(new T.Box3().setFromObject(mesh.getObjectByName('fittings'),true));
+  const reach=steel.max.x-steel.min.x,gripLength=palm.max.y-palm.min.y;
+  assert.ok(reach<gripLength*.8,'blade should fit comfortably inside the handle-and-ring length');
+  const vertices=blade.geometry.attributes.position;
+  let tip=0;
+  for(let i=1;i<vertices.count;i++)if(vertices.getX(i)<vertices.getX(tip))tip=i;
+  const hook=(steel.max.y-vertices.getY(tip))/reach;
+  assert.ok(hook>.18&&hook<.35,'the short claw ends just below the crown of the blade');
+});
+
 test('steel, cast metal, rubber and both curved inserts keep their own finishes after cloning',()=>{
   const karambit=knifeMesh('karambit'),balisong=knifeMesh('balisong');
   const steel=karambit.getObjectByName('blade').material,rubber=karambit.getObjectByName('grip').material;

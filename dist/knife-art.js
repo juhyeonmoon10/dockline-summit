@@ -1,3 +1,5 @@
+import {KARAMBIT_RING} from './knife-types.js';
+
 // The same authored surfaces feed the full renderer, the software renderer and the armory.
 // Coordinates here are viewmodel space. The grip origin stays fixed during a change of pose.
 const cache=new Map(),tau=Math.PI*2;
@@ -117,9 +119,9 @@ function groundBlade(m,stations,palette){
   }
   sections.push(stations.at(-1));
   function profile(s,sign,t){
-    const [ax,ay,bx,by,h]=s;
-    const swedge=.035+.24*Math.pow(Math.max(0,(t-.25)/.75),.75);
-    const ridge=.62-.24*t+.035*Math.sin(t*Math.PI*2);
+    const [ax,ay,bx,by,h,
+      swedge=.035+.24*Math.pow(Math.max(0,(t-.25)/.75),.75),
+      ridge=.62-.24*t+.035*Math.sin(t*Math.PI*2)]=s;
     const coords=[[0,.31],[swedge,.77],[ridge,1],[.825,.48],[.944,.10],[1,0]];
     return coords.map(([f,z])=>[mix(ax,bx,f),mix(ay,by,f),h*z*sign]);
   }
@@ -138,34 +140,39 @@ function groundBlade(m,stations,palette){
       [next[0],next[1],next[4]*.31],[s[0],s[1],s[4]*.31],palette[0][1]);
   }
 }
-const gripSections=[
-  [-.181,.007,.032],[-.175,-.003,.040],[-.161,-.010,.046],[-.147,-.012,.049],
-  [-.139,-.009,.049],[-.131,-.003,.048],[-.122,-.003,.047],[-.115,-.013,.046],
-  [-.110,-.020,.045],[-.103,-.022,.045],[-.096,-.020,.045],[-.085,-.010,.045],
-  [-.077,-.008,.045],[-.068,-.017,.045],[-.060,-.028,.045],[-.055,-.030,.046],
-  [-.047,-.029,.046],[-.038,-.020,.045],[-.031,-.020,.044],[-.022,-.031,.043],
-  [-.016,-.039,.043],[-.009,-.043,.044],[.001,-.045,.045],[.009,-.055,.045],
-  [.018,-.067,.045],[.025,-.069,.045],[.032,-.060,.043],[.039,-.036,.039],[.044,-.020,.031],[.045,.001,.023]
+// Section pairs are shared with the small silhouettes shown by the lite renderer.
+// The last two columns mark the spine facet and grind line across each section.
+// They converge into the point and cut diagonally across the shoulder.
+export const karambitBladeSections=[
+  [.014,.019,-.058,.019,.010,.045,.77], [.022,.049,-.059,.042,.0125,.043,.76],
+  [.024,.078,-.054,.056,.0135,.037,.71], [.019,.108,-.058,.075,.0135,.033,.44],
+  [.006,.136,-.068,.093,.013,.029,.37], [-.017,.161,-.084,.108,.012,.025,.35],
+  [-.045,.178,-.103,.120,.0108,.024,.37], [-.075,.187,-.125,.129,.009,.041,.44],
+  [-.106,.188,-.145,.133,.007,.11,.54], [-.136,.178,-.160,.135,.005,.23,.64],
+  [-.161,.158,-.173,.134,.0027,.36,.72], [-.183,.133,-.183,.133,0,.44,.77]
+];
+export const karambitGripSections=[
+  [-.181,.007,.033],[-.173,.003,.041],[-.161,-.004,.049],[-.149,-.006,.055],
+  [-.138,.001,.059],[-.129,.004,.061],[-.123,.001,.061],[-.116,-.009,.061],
+  [-.108,-.015,.061],[-.100,-.016,.060],[-.088,-.010,.058],[-.081,-.006,.056],
+  [-.075,-.008,.055],[-.067,-.021,.053],[-.060,-.025,.051],[-.052,-.024,.048],
+  [-.042,-.018,.045],[-.035,-.019,.043],[-.029,-.030,.041],[-.024,-.039,.039],
+  [-.015,-.044,.036],[-.006,-.045,.034],[.003,-.044,.030],[.010,-.054,.028],
+  [.017,-.067,.026],[.023,-.071,.024],[.030,-.065,.022],[.035,-.054,.021],
+  [.041,-.033,.018],[.044,-.012,.013],[.0445,-.002,.009]
 ];
 function gripWidth(y){
-  let i=1;while(i<gripSections.length-1&&y>gripSections[i][0])i++;
-  const [a,l,r]=gripSections[i-1],[b,L,R]=gripSections[i],t=Math.max(0,Math.min(1,(y-a)/(b-a)));
+  let i=1;while(i<karambitGripSections.length-1&&y>karambitGripSections[i][0])i++;
+  const [a,l,r]=karambitGripSections[i-1],[b,L,R]=karambitGripSections[i],t=Math.max(0,Math.min(1,(y-a)/(b-a)));
   return [mix(l,L,t),mix(r,R,t)];
 }
 function karambit(){
   const blade=part('blade','steel'),grip=part('grip','grip'),metal=part('fittings','hardware');
-  groundBlade(blade,[
-    [.035,.024,-.042,.027,.0105],[.040,.056,-.043,.058,.012],
-    [.040,.085,-.032,.080,.012],[.025,.129,-.043,.110,.012],
-    [.006,.165,-.061,.132,.012],[-.022,.196,-.084,.152,.012],
-    [-.052,.219,-.111,.168,.0115],[-.088,.235,-.143,.181,.0105],
-    [-.128,.244,-.175,.190,.0095],[-.166,.244,-.202,.189,.008],
-    [-.199,.235,-.228,.180,.0066],[-.230,.220,-.248,.166,.005],
-    [-.250,.199,-.265,.148,.0034],[-.265,.174,-.276,.129,.0018],
-    [-.283,.106,-.283,.106,0]
-  ],[[0xa6b9c2,0xc8d6de],[0x415665,0x677b88],[0x8598a1,0xa2b3bc],
-     [0xc1ced0,0xe1e9e8],[0xe1e8e4,0xf2f3ed]]);
-  const tang=gripSections.map(([y,l])=>[l-.0015,y]).concat(gripSections.slice().reverse().map(([y,,r])=>[r+.0015,y]));
+  groundBlade(blade,karambitBladeSections,[
+    [0xa9c1c8,0x9aaeb5],[0x4c636d,0x829397],[0x899da3,0xb5c4c6],
+    [0xbccacb,0xdce3e2],[0xe4ebe4,0xf6f6ea]
+  ]);
+  const tang=karambitGripSections.map(([y,l])=>[l-.0015,y]).concat(karambitGripSections.slice().reverse().map(([y,,r])=>[r+.0015,y]));
   plate(metal,tang,0,.014,.0018,0x424d55,0x91a1a7);
   // A continuous crown gives the rubber scales a convex surface and the open
   // grooves a shadow that moves as the player rolls the hand.
@@ -175,38 +182,39 @@ function karambit(){
     let j=1;while(j<widths.length-1&&f>widths[j])j++;
     return [mix(l+.002,r-.002,f),y,sign*(mix(heights[j-1],heights[j],(f-widths[j-1])/(widths[j]-widths[j-1]))+lift)];
   };
-  const shades=[0x242a30,0x2b3238,0x343c42,0x343d43,0x30393f,0x292f35,0x21272d];
+  const shades=[0x202c30,0x283538,0x334346,0x38494a,0x304042,0x293539,0x222c31];
   for(const side of [-1,1]){
     function patch(a,b,c,d,ink){if(side===1)quad(grip,a,b,c,d,ink);else quad(grip,d,c,b,a,ink);}
-    for(let i=1;i<gripSections.length;i++){
-      const y=gripSections[i-1][0],Y=gripSections[i][0];
+    for(let i=1;i<karambitGripSections.length;i++){
+      const y=karambitGripSections[i-1][0],Y=karambitGripSections[i][0];
       for(let j=1;j<widths.length;j++){
         const l=widths[j-1],r=widths[j];
         patch(shell(y,l,side),shell(y,r,side),shell(Y,r,side),shell(Y,l,side),shades[j-1]);
       }
     }
-    // Discrete raised diagonal chevrons span the crown and reveal a graphite rim.
-    for(let row=0;row<7;row++){
-      const y=-.145+row*.022;
-      for(let j=2;j<6;j++){
-        const x=widths[j-1],X=widths[j],d=f=>(1-f)*.016+.0006*Math.sin(f*6);
-        const strip=(f,py,h)=>shell(y+d(f)+py,f,side,h);
-        patch(strip(x,0,0),strip(X,0,0),strip(X,.003,.0021),strip(x,.003,.0021),0x54616a);
-        patch(strip(x,.003,.0021),strip(X,.003,.0021),strip(X,.009,0),strip(x,.009,0),0x262c31);
+    // Interrupted ribs follow the palm. Each rib has a lit shoulder and a shadow line.
+    for(let row=0;row<5;row++){
+      const y=-.141+row*.027;
+      for(const [a,b,c,d] of [[.16,.44,.002,.013],[.44,.67,.013,.020],[.67,.84,.020,.018]]){
+        const p=shell(y+c,a,side,.0006),q=shell(y+d,b,side,.0006);
+        const r=shell(y+d+.003,b,side,.002),s=shell(y+c+.003,a,side,.002);
+        patch(p,q,r,s,0x5e7373);
+        patch(s,r,shell(y+d+.008,b,side,.0006),shell(y+c+.008,a,side,.0006),0x202c30);
       }
     }
-    // The top collar is intentionally smooth so the two finish families read at distance.
-    for(let i=0;i<18;i++){
-      const a=.07+.85*i/18,b=.07+.85*(i+1)/18;
-      const collar=(f,d)=>shell(.017+.015*Math.sin(Math.PI*f)+d,f,side,.00055);
-      const p=collar(a,0),q=collar(b,0),s=collar(a,.0023),r=collar(b,.0023);
-      if(side>0)quad(metal,p,q,r,s,0x67706d);
-      else quad(metal,s,r,q,p,0x67706d);
+    // An angled metal collar marks the join at the blade shoulder.
+    for(let j=1;j<widths.length;j++){
+      const a=widths[j-1],b=widths[j];
+      const collar=(f,d)=>shell(.008+.016*f+d,f,side,.001);
+      const p=collar(a,0),q=collar(b,0),s=collar(a,.012),r=collar(b,.012);
+      const u=collar(a,.0025),v=collar(b,.0025);
+      if(side>0){quad(metal,u,v,r,s,0x627b7b);quad(metal,p,q,v,u,0xb0d7ce);}
+      else{quad(metal,s,r,v,u,0x627b7b);quad(metal,u,v,q,p,0xb0d7ce);}
     }
-    pivotDisc(metal,.018,-.151,side*.0236,.0062);
-    pivotDisc(metal,-.013,.019,side*.0238,.0065);
+    pivotDisc(metal,.023,-.153,side*.0238,.0065);
+    pivotDisc(metal,-.010,.025,side*.0250,.006);
   }
-  ring(metal,.018,-.210,0,.0475,.036,.0137,0x56616a,0x323c43,0xb4c6c8,48);
+  ring(metal,...KARAMBIT_RING,.049,.0345,.0137,0x56666a,0x38474a,0xbacccc,48);
   return [blade,grip,metal];
 }
 // Shape the two cast frames with different shoulders while keeping a continuous

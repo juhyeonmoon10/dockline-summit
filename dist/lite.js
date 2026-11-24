@@ -14,7 +14,7 @@ import { classifyImpact, ImpactParticlePool, SURFACE_FX } from './surface-fx.js'
 import { buildSwitchyard, paintSwitchyardGround, paintSwitchyardPanel, switchyardPaints } from './switchyard-art.js';
 import { normalizeKnifeSkin } from './knife-types.js';
 import { knifePose,knifeAttackDuration } from './knife-motion.js';
-import { drawLiteKnife } from './lite-knife.js';
+import { drawLiteKnife,drawCarriedKarambit } from './lite-knife.js';
 
 // The old sniper sheet has its own barrel length and projected front caps.
 const sniperBackupMuzzles=[[.541,.5478,1.26752],[.5,.55298,1.24567]];
@@ -332,7 +332,9 @@ function heldEquipment(dst,p,[x,y,z],age,side=1){
   const sy=Math.sin(p.yaw),cy=Math.cos(p.yaw);
   const knife=p.active==='knife',swing=knife?knifePose(age,side,p.knifeSkin):null;
   const angle=Math.max(-.78,Math.min(.78,p.pitch||0));
-  const tilt=angle+(knife?-.2+swing.rx-.40*Math.abs(swing.rz):0),co=Math.cos(tilt),si=Math.sin(tilt);
+  let tilt=angle;
+  if(knife)tilt+=p.knifeSkin==='balisong'?-.2+swing.rx-.40*Math.abs(swing.rz):swing.rx-.18;
+  const co=Math.cos(tilt),si=Math.sin(tilt);
   const transform=(lx,ly,lz)=>{
     const yy=ly*co-lz*si,zz=ly*si+lz*co;
     return [x+lx*cy-zz*sy,y+yy,z+lx*sy+zz*cy];
@@ -352,13 +354,7 @@ function heldEquipment(dst,p,[x,y,z],age,side=1){
       face([[-.024,.072],[.031,.070],[.022,.237],[-.011,.319]],0,0xafb8ba);
       face([[.031,.070],[.041,.099],[.022,.237],[-.011,.319]],.004,0xd6dddd);
     }else{
-      body(.012,-.085,0,.057,.16,.040,0x394641);
-      face([[-.032,.068],[.027,.066],[.038,.165],[.002,.208]],0,0x929ea2);
-      face([[.002,.208],[.038,.165],[.024,.229],[-.054,.249]],0,0xd7dfdd);
-      for(let i=0;i<10;i++){
-        const ring=(k,r)=>[.012+r*Math.cos(k*Math.PI/5),-.116+r*Math.sin(k*Math.PI/5)];
-        face([ring(i,.042),ring(i+1,.042),ring(i+1,.026),ring(i,.026)],.002,i<3?0x93e0d1:0x687c81);
-      }
+      drawCarriedKarambit(swing,(points,color)=>quad(dst,points.map(p=>transform(...p)),color));
     }
     return;
   }

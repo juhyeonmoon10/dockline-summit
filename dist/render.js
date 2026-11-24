@@ -14,8 +14,8 @@ import { PelletRenderer } from './pellet-render.js';
 import { clipBarrelOrigin,visibleTraceEnd,exitsForward,muzzleDeparture,flightSlices,singleShotSpan,pelletSpan,SHOT_TRAIL_LIFE } from './shot-path.js';
 import { WorldImpacts } from './world-impacts.js';
 import { knifeMesh,knifeFit,knifePose,animateKnife,animateCarriedKnife } from './knife.js';
-import { normalizeKnifeSkin,KNIFE_TIMING,KARAMBIT_RING } from './knife-types.js';
-import { knifeDrawPose,knifeAttackDuration,knifeWristPose } from './knife-motion.js';
+import { normalizeKnifeSkin,KARAMBIT_RING } from './knife-types.js';
+import { knifeDrawPose,knifeAttackDuration,knifeWristPose,karambitGripRotation } from './knife-motion.js';
 import { inspectionPose,applyInspection,ringFlourish } from './view-inspect.js';
 import { studioReflection } from './weapon-light.js';
 import { EjectedCases } from './ejected-cases.js';
@@ -248,8 +248,8 @@ export function poseHeldKnife(rig,weapon,skin,drawAge,inspectAge,cut,side,step=0
     // Keep the centre of the actual metal ring on the index segment, including
     // during draw, wrist roll, and the loosen/regrip around the single spin.
     weapon.worldToLocal(index.localToWorld(gripTarget.set(-.020,0,0)));
-    const reveal=Number.isFinite(inspectAge)?clamp(Math.min(inspectAge/.15,(KNIFE_TIMING.karambit.inspect-inspectAge)/.20),0,1):0;
-    body.rotation.set(.86-reveal*.79,.19,-2.10+(flourish?.turn??draw.turn));
+    const grip=karambitGripRotation(flourish?.turn??draw.turn,loose);
+    body.rotation.set(grip.rx,grip.ry,grip.rz);
     wristAxis.fromArray(KARAMBIT_RING).multiply(body.scale).applyQuaternion(body.quaternion);
     body.position.copy(gripTarget).sub(wristAxis);
   }
@@ -448,6 +448,14 @@ export class ArenaRenderer {
     this.setMap(map);
     this.guns=Object.fromEntries(weaponNames.map(type=>[type,gunModel(type)]));
     this.knifeViews={karambit:this.guns.knife,balisong:gunModel('knife','balisong')};
+    // The short claw faces away from the main panel in its reverse-grip rest pose.
+    // The room's reflection and a satin finish keep its bevel legible as it turns.
+    const claw=this.knifeViews.karambit.getObjectByName('blade');
+    claw.material=claw.material.clone();
+    claw.material.envMap=this.gunScene.environment;
+    claw.material.envMapIntensity=3.5;
+    claw.material.metalness=.34;claw.material.roughness=.51;
+    claw.material.color.setScalar(1.75);
     this.gunRig=new T.Group();this.gunRig.scale.setScalar(.91);
     Object.values(this.guns).forEach(g=>this.gunRig.add(g));
     this.gunRig.add(this.knifeViews.balisong);this.knifeViews.balisong.visible=false;

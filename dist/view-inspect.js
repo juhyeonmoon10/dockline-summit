@@ -24,11 +24,11 @@ const blend=(a,b,t)=>a+(b-a)*t;
 // Camera-space wrist keys: seconds, x/y/z, and pitch/yaw/roll. The
 // blade, hinge, and the individual fingers are driven separately.
 const hook=createKnifeGesture([
-  [0,.014,-.080,-.453,-.06,.24,-.12],[.090,.056,-.103,-.519,-.22,-.24,-.45],
+  [0,.140,-.100,-.453,.30,-.40,.60],[.090,.056,-.103,-.519,-.22,-.24,-.45],
   [.225,-.051,-.022,-.561,.13,.17,.13],[.305,-.193,.018,-.688,.20,.29,.31],
   [.400,-.102,.027,-.725,.16,.31,.32],[.556,-.007,-.023,-.604,.12,.02,.41],
   [KNIFE_TIMING.karambit.inspectCatch,.103,.003,-.572,.13,-.25,.46],
-  [.839,.118,.017,-.569,.05,-.34,.38],[KNIFE_TIMING.karambit.inspect,.014,-.080,-.453,-.06,.24,-.12]
+  [.839,.118,.017,-.569,.05,-.34,.38],[KNIFE_TIMING.karambit.inspect,.140,-.100,-.453,.30,-.40,.60]
 ]);
 const butterfly=createKnifeGesture([
   [0,.123,-.095,-.435,-.06,-.23,.72],[.088,.144,-.046,-.470,-.14,-.33,.85],

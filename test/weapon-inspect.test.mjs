@@ -4,7 +4,7 @@ import {Group,PerspectiveCamera,Vector3} from '../dist/assets/three.module.min.j
 import {PRIMARY_WEAPONS,SECONDARY_WEAPONS} from '../dist/balance.js';
 import {gunModel,poseHeldKnife,poseHeldSleeves} from '../dist/render.js';
 import {inspectDuration,inspectionPose,applyInspection,ringFlourish} from '../dist/view-inspect.js';
-import {KNIFE_TIMING} from '../dist/knife-types.js';
+import {KARAMBIT_RING,KNIFE_TIMING} from '../dist/knife-types.js';
 
 const camera=new PerspectiveCamera(63,4/3,.012,4);
 const point=new Vector3();
@@ -65,16 +65,21 @@ test('every firearm shows the receiver and top with the full weapon framed durin
 test('the karambit ring tracks its contact through the spin and cancellation restores the grip',()=>{
   const holder=new Group(),gun=gunModel('knife','karambit'),body=gun.userData.body;
   holder.add(gun);
+  poseHeldKnife(holder,gun,'karambit',Infinity,Infinity,Infinity,1);
+  const closed=body.quaternion.clone();
   for(const age of [0,.11,.25,.37,.50,.68,.85,1.01,2.1,Infinity]){
     poseHeldKnife(holder,gun,'karambit',2,age,.55,1);
     const attachment=gun.userData.hand.userData.fingers[0].b.localToWorld(new Vector3(-.020,0,0));
-    body.localToWorld(point.set(.018,-.210,0));
+    body.localToWorld(point.fromArray(KARAMBIT_RING));
     assert.ok(point.distanceTo(attachment)<1e-8);
   }
-  assert.ok(Math.abs(body.rotation.z+2.10)<1e-8);
+  assert.ok(body.quaternion.angleTo(closed)<1e-7);
   assert.ok(Math.abs(ringFlourish(.85).turn+Math.PI*2)<.001);
-  const tip=body.localToWorld(new Vector3(-.283,.106,0)).project(camera);
-  const ring=body.localToWorld(new Vector3(.018,-.21,0)).project(camera);
+  const blade=body.getObjectByName('blade'),vertices=blade.geometry.attributes.position;
+  let tipIndex=0;
+  for(let i=1;i<vertices.count;i++)if(vertices.getX(i)<vertices.getX(tipIndex))tipIndex=i;
+  const tip=blade.localToWorld(new Vector3().fromBufferAttribute(vertices,tipIndex)).project(camera);
+  const ring=body.localToWorld(new Vector3(...KARAMBIT_RING)).project(camera);
   assert.ok(tip.x>ring.x+.20&&tip.y>ring.y+.13,'reverse-grip claw exits to the right and curls upwards');
 });
 

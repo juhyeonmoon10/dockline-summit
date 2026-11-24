@@ -4,7 +4,8 @@ import {Group,PerspectiveCamera,Vector3} from '../dist/assets/three.module.min.j
 import {WEAPONS} from '../dist/balance.js';
 import {KARAMBIT_RING,KNIFE_TIMING} from '../dist/knife-types.js';
 import {knifePose,knifeAttackDuration,knifeDrawPose,knifeClipPhase} from '../dist/knife-motion.js';
-import {gunModel,poseHeldKnife} from '../dist/render.js';
+import {gunModel,poseHeldKnife,poseHeldSleeves} from '../dist/render.js';
+import {createCanvasPreview} from '../dist/armory-canvas.js';
 import {applyInspection,inspectionPose,inspectDuration} from '../dist/view-inspect.js';
 
 const skins=Object.keys(KNIFE_TIMING),contact=WEAPONS.knife.windup;
@@ -90,5 +91,33 @@ test('actual blade meshes fit the narrow 4:3 weapon camera at every contact and 
         }
       }
     }
+  }
+});
+
+test('the glove leaves the compact claw visible at ready, inspection catch and both hits',()=>{
+  const rig=new Group(),model=gunModel('knife','karambit');
+  rig.scale.setScalar(.91);rig.add(model);
+  const blade=model.userData.body.getObjectByName('blade'),isolated=blade.clone();
+  isolated.matrixAutoUpdate=false;
+  let pixels;
+  const ctx={
+    createImageData:(w,h)=>({data:new Uint8ClampedArray(w*h*4)}),
+    putImageData:img=>{pixels=new Uint32Array(img.data.buffer);}
+  };
+  const preview=createCanvasPreview({width:192,height:144,getContext:()=>ctx});
+  for(const [inspect,cut,side] of [[Infinity,Infinity,1],[KNIFE_TIMING.karambit.inspectCatch,Infinity,1],
+    [Infinity,contact,1],[Infinity,contact,-1]]){
+    poseHeldKnife(rig,model,'karambit',Infinity,inspect,cut,side);
+    applyInspection(rig,inspectionPose('karambit',inspect));poseHeldSleeves(model,'knife');
+    preview.render(rig,1,63);
+    const handAndKnife=pixels.slice();
+    isolated.matrix.copy(blade.matrixWorld);preview.render(isolated,1,63);
+    let silhouette=0,visible=0;
+    for(let i=0;i<pixels.length;i++)if(pixels[i]){
+      silhouette++;
+      if(pixels[i]===handAndKnife[i])visible++;
+    }
+    assert.ok(visible>pixels.length*.006,'the blade presents a readable face to the camera');
+    assert.ok(visible>silhouette*.78,'the glove must reveal the heel and curve of the claw');
   }
 });
